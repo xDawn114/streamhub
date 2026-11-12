@@ -1,0 +1,21 @@
+# Deployment template only. Fill in the actual host, reviewed site directory,
+# and public HTTPS certificate. No development-machine configuration is changed.
+server {
+    listen 443 ssl;
+    server_name REPLACE_WITH_ACTUAL_UPDATE_HOST;
+    ssl_certificate REPLACE_WITH_TLS_CERTIFICATE_PATH;
+    ssl_certificate_key REPLACE_WITH_TLS_PRIVATE_KEY_PATH;
+    root REPLACE_WITH_REVIEWED_SITE_DIRECTORY;
+    autoindex off;
+
+    location /packages/ {
+        limit_except GET HEAD { deny all; }
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+    location / {
+        limit_except GET HEAD { deny all; }
+        add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
+        try_files $uri =404;
+    }
+}

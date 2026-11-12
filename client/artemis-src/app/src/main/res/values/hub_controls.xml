@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="HubControlDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/hub_dialog_surface</item>
+        <item name="android:colorBackground">#1B2432</item>
+        <item name="android:colorBackgroundFloating">#1B2432</item>
+        <item name="android:textColorPrimary">#EEF3FA</item>
+        <item name="android:textColorSecondary">#B5C2D4</item>
+        <item name="android:textColorHint">#B5C2D4</item>
+        <item name="android:colorAccent">#9AC1FF</item>
+        <item name="android:colorControlActivated">#9AC1FF</item>
+        <item name="android:colorButtonNormal">#263244</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/HubControlDialogButton</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/HubControlDialogButton</item>
+        <item name="android:buttonBarNeutralButtonStyle">@style/HubControlDialogButton</item>
+        <item name="android:backgroundDimAmount">0.32</item>
+        <item name="android:windowMinWidthMajor">70%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
+    </style>
+    <style name="HubControlDialogButton" parent="android:style/Widget.Material.Button.Borderless">
+        <item name="android:textColor">#9AC1FF</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+    <style name="HubControlDialogLight" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/hub_dialog_surface_light</item>
+        <item name="android:colorBackground">@color/hub_surface_light</item>
+        <item name="android:colorBackgroundFloating">@color/hub_surface_light</item>
+        <item name="android:textColorPrimary">@color/hub_text_light</item>
+        <item name="android:textColorSecondary">@color/hub_muted_light</item>
+        <item name="android:textColorHint">@color/hub_muted_light</item>
+        <item name="android:colorAccent">@color/hub_accent_light</item>
+        <item name="android:colorControlActivated">@color/hub_accent_light</item>
+        <item name="android:colorButtonNormal">@color/hub_field_light</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/HubControlDialogLightButton</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/HubControlDialogLightButton</item>
+        <item name="android:buttonBarNeutralButtonStyle">@style/HubControlDialogLightButton</item>
+        <item name="android:backgroundDimAmount">0.32</item>
+        <item name="android:windowMinWidthMajor">70%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
+    </style>
+    <style name="HubControlDialogLightButton" parent="android:style/Widget.Material.Button.Borderless">
+        <item name="android:textColor">@color/hub_accent_light</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+    <style name="HubSettingsTheme" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="android:windowBackground">@color/hub_background</item>
+        <item name="android:colorBackground">@color/hub_surface</item>
+        <item name="android:textColorPrimary">@color/hub_text</item>
+        <item name="android:textColorSecondary">@color/hub_muted</item>
+        <item name="android:statusBarColor">@color/hub_background</item>
+        <item name="android:navigationBarColor">@color/hub_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="colorSurface">@color/hub_surface</item>
+        <item name="colorOnSurface">@color/hub_text</item>
+        <item name="colorPrimary">@color/hub_primary</item>
+        <item name="colorSecondary">@color/hub_accent</item>
+        <item name="colorAccent">@color/hub_accent</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.MaterialComponents.MaterialAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/HubControlDialog</item>
+    </style>
+    <style name="HubSettingsThemeLight" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="android:windowBackground">@color/hub_background_light</item>
+        <item name="android:colorBackground">@color/hub_surface_light</item>
+        <item name="android:textColorPrimary">@color/hub_text_light</item>
+        <item name="android:textColorSecondary">@color/hub_muted_light</item>
+        <item name="android:statusBarColor">@color/hub_background_light</item>
+        <item name="android:navigationBarColor">@color/hub_background_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="colorSurface">@color/hub_surface_light</item>
+        <item name="colorOnSurface">@color/hub_text_light</item>
+        <item name="colorPrimary">@color/hub_primary_light</item>
+        <item name="colorSecondary">@color/hub_accent_light</item>
+        <item name="colorAccent">@color/hub_accent_light</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.MaterialComponents.MaterialAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/HubControlDialogLight</item>
+    </style>
+    <style name="HubSettingsThemeDark" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="android:windowBackground">@color/hub_background_dark</item>
+        <item name="android:colorBackground">@color/hub_surface_dark</item>
+        <item name="android:textColorPrimary">@color/hub_text_dark</item>
+        <item name="android:textColorSecondary">@color/hub_muted_dark</item>
+        <item name="android:statusBarColor">@color/hub_background_dark</item>
+        <item name="android:navigationBarColor">@color/hub_background_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="colorSurface">@color/hub_surface_dark</item>
+        <item name="colorOnSurface">@color/hub_text_dark</item>
+        <item name="colorPrimary">@color/hub_primary_dark</item>
+        <item name="colorSecondary">@color/hub_accent_dark</item>
+        <item name="colorAccent">@color/hub_accent_dark</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.MaterialComponents.MaterialAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/HubControlDialog</item>
+    </style>
+</resources>

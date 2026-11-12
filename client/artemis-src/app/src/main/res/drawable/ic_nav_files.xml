@@ -1,0 +1,6 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- Desktop files reference: document/attachment, Segoe MDL2 E8B7. -->
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M5,3H18V20.75H5ZM18,13.5C16.9,13.5 16.25,14.6 16.25,16V20.75H19.75V16C19.75,14.6 19.1,13.5 18,13.5Z"/>
+</vector>

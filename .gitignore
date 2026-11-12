@@ -1,0 +1,19 @@
+# Local build, device evidence and secrets never belong in the public repository.
+**/bin/
+**/obj/
+**/build/
+**/.gradle/
+**/.cxx/
+local.properties
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.dpapi
+*.apk
+*.log
+reports/
+release/
+build/
+.env
+.env.*

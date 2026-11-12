@@ -1,0 +1,11 @@
+StreamHub / 我控制
+Copyright (C) 2026 Dawn
+
+Except for separately identified third-party files, the original StreamHub code
+and StreamHub modifications are licensed under the GNU General Public License,
+version 3 or (at your option) any later version (SPDX: GPL-3.0-or-later).
+See LICENSE for the full terms. This software is provided without warranty.
+
+Third-party software retains its own copyright, license and attribution.
+The root license does not relicense dependencies or override their conditions.
+See THIRD_PARTY_NOTICES.md and licenses within the corresponding source trees.

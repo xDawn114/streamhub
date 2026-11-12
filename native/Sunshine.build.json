@@ -1,0 +1,165 @@
+{
+  "upstreamCommit": "63d35f702ee9e362e43263742981836ec0710384",
+  "version": "2026.914.233613+streamhub.2",
+  "binarySha256": "0C79C16B0D5CDB64BFE899EDFCA4A2E4D7B76C74B8B92CE21B4B6A504534C6C8",
+  "sourceArchive": "Sunshine-streamhub-source.tar.gz",
+  "sourceArchiveSha256": "CFFD0E1D28AD65BB5353456B934FE312FB3EBE3469BB2467FFBDD7B101C8DDD9",
+  "sourceFileCount": 1499,
+  "patchSha256": "1EBEE2C9607EBFACAFA234268B39049D07022F637DEB19CF7D2F42E19BDCE3E1",
+  "compiler": "GCC 16.2.0 UCRT64",
+  "cmake": "4.4.5",
+  "configuration": "Release; assets relative; no native tray; no CUDA; static libraries",
+  "modifiedSources": [
+    {
+      "path": "CMakeLists.txt",
+      "sha256": "210723CD507A34A5F4B7EC3C304A7D848C35A36E9E6D68E0E73C7DC6934C65DE"
+    },
+    {
+      "path": "src/main.cpp",
+      "sha256": "5D2B7A72DAA7658DD35241FA095C095F75AD3843B198BD3234AE1E533B6401BD"
+    },
+    {
+      "path": "src/video.cpp",
+      "sha256": "5C63386DEE287C4AA728FE400B80F5891A78A3DC2BDFD8E3667A422B45A8B9DB"
+    },
+    {
+      "path": "src/nvhttp.cpp",
+      "sha256": "FBA0AD5C79062F1B0202BB0FECA67D6DCE350A6CB6F3C4F13ABEAD3FAD803982"
+    },
+    {
+      "path": "src/platform/virtualhid_input.cpp",
+      "sha256": "F101A5A02CE2AF73A6F0A27880CD7E68F19D2F7399851412D9B42B7243635392"
+    },
+    {
+      "path": "src/platform/windows/input.cpp",
+      "sha256": "1D381D802453F3F929D5FB52ED7B0E2D8C0A10AA4C533AB22706E7279080BC37"
+    },
+    {
+      "path": "third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp",
+      "sha256": "9945BAD29BA1705595A37B154FE248A4778735C546026D5FA5A2597D74CEB813"
+    },
+    {
+      "path": "src/streamhub_timing.h",
+      "sha256": "BDBD113A2480C38F160A7452EEBF379E8957086D624BFEE02A43BE5946A7ABA1"
+    },
+    {
+      "path": "src/platform/common.h",
+      "sha256": "EC6048EB9D03A5D54D928A824D73F9288685AE9F0C29D8B9E420070BF68A4F46"
+    },
+    {
+      "path": "src/platform/windows/display_base.cpp",
+      "sha256": "14BF0E81C14AABA5432AF20E364D3E1A283379C616FD1BA5B3F2838E68B3E683"
+    },
+    {
+      "path": "src/streamhub_probe_cache.h",
+      "sha256": "18A9B28DEE1DD90B09AD0D1CB90A1AB546FEC9A7FB69207E8F45FF7ACD0654F7"
+    }
+  ],
+  "submodules": [
+    {
+      "path": "packaging/linux/flatpak/deps/flatpak-builder-tools",
+      "sha": "de2225a6dee4818c1339b3cdbf29f90c471fcb7e"
+    },
+    {
+      "path": "third-party/Simple-Web-Server",
+      "sha": "546895a93a29062bb178367b46c7afb72da9881e"
+    },
+    {
+      "path": "third-party/TPCircularBuffer",
+      "sha": "cc520397504bb72bc6df79ff03eb72988a6dc50d"
+    },
+    {
+      "path": "third-party/ViGEmClient",
+      "sha": "8d71f6740ffff4671cdadbca255ce528e3cd3fef"
+    },
+    {
+      "path": "third-party/build-deps",
+      "sha": "a1fe2841cbc0d8c4501a1006d2d1cb88f219cc8c"
+    },
+    {
+      "path": "third-party/doxyconfig",
+      "sha": "419127bad87f49b2d45fa957ea7302abbb49c01f"
+    },
+    {
+      "path": "third-party/glad",
+      "sha": "73db193f853e2ee079bf3ca8a64aa2eaf6459043"
+    },
+    {
+      "path": "third-party/libdisplaydevice",
+      "sha": "6e9722f89103320c948dc1199066c9e17a69e88a"
+    },
+    {
+      "path": "third-party/libvirtualhid",
+      "sha": "53e1a949fc0784af716b782ddfa6c647cafd1f05"
+    },
+    {
+      "path": "third-party/lizardbyte-common",
+      "sha": "f9d91e1d29b7473f58e43acde4579da4e56c4abe"
+    },
+    {
+      "path": "third-party/moonlight-common-c",
+      "sha": "62e066388f1a1b133e0bee947b9a374311a3354b"
+    },
+    {
+      "path": "third-party/nvapi",
+      "sha": "cd6918f60b3c9a0476fdfe7e89bb32330602049d"
+    },
+    {
+      "path": "third-party/plasma-wayland-protocols",
+      "sha": "382dfabda886d3f2f5c067b22e5a22376685ba78"
+    },
+    {
+      "path": "third-party/tray",
+      "sha": "c329d9fd0d39dfb47f0f2fb5467e1db2e8a1d623"
+    },
+    {
+      "path": "third-party/wayland-protocols",
+      "sha": "ee78491a237eaff9389a0ccf8680521d074407d3"
+    },
+    {
+      "path": "third-party/wlr-protocols",
+      "sha": "bf4fc79abc359eea5a0edec0ac6d4a2b2955f82a"
+    }
+  ],
+  "nestedSubmodules": [
+    {
+      "path": "third-party/libvirtualhid/third-party/lizardbyte-common",
+      "sha": "f9d91e1d29b7473f58e43acde4579da4e56c4abe"
+    },
+    {
+      "path": "third-party/moonlight-common-c/enet",
+      "sha": "aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1"
+    },
+    {
+      "path": "third-party/moonlight-common-c/nanors",
+      "sha": "b1e3c22ca0cdc0bb83e3cd6ed1a2fc77869ed99a"
+    }
+  ],
+  "externalArchives": [
+    {
+      "file": "boost-1.89.0-cmake.tar.xz",
+      "url": "https://github.com/boostorg/boost/releases/download/boost-1.89.0/boost-1.89.0-cmake.tar.xz",
+      "sha256": "67ACEC02D0D118B5DE9EB441F5FB707B3A1CDD884BE00CA24B9A73C995511F74"
+    },
+    {
+      "file": "ffmpeg-pinned.tar.gz",
+      "url": "https://github.com/LizardByte/build-deps/releases/download/v2026.910.121303/Windows-AMD64-ffmpeg.tar.gz",
+      "sha256": "EE79A7A295E8FBD24305A3F4EC94A06F550E0B52F49CB1C4535F649E2DD8B234"
+    },
+    {
+      "file": "nv_codec_headers_11.tar.gz",
+      "url": "https://codeload.github.com/FFmpeg/nv-codec-headers/tar.gz/refs/tags/n11.0.10.3",
+      "sha256": "FB40E98A61038E8A6DB0E43A79BE552C7CB3DB627B4F6825C639034598707D83"
+    },
+    {
+      "file": "nv_codec_headers_12.tar.gz",
+      "url": "https://codeload.github.com/FFmpeg/nv-codec-headers/tar.gz/refs/tags/n12.0.16.2",
+      "sha256": "13B4D5D1F8781980629518977F15546C007D7331727B0C62E6BE3B77F0E92297"
+    },
+    {
+      "file": "nv_codec_headers_13.tar.gz",
+      "url": "https://codeload.github.com/FFmpeg/nv-codec-headers/tar.gz/refs/tags/n13.0.19.1",
+      "sha256": "C293161BD92DAC53F2F8FAB08ABCD4F96773C3644A57B23C2260B4BE2311AB2F"
+    }
+  ]
+}

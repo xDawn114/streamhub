@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="HubSettingsTheme" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="android:windowBackground">@color/hub_background</item>
+        <item name="android:colorBackground">@color/hub_surface</item>
+        <item name="android:textColorPrimary">@color/hub_text</item>
+        <item name="android:textColorSecondary">@color/hub_muted</item>
+        <item name="android:statusBarColor">@color/hub_background</item>
+        <item name="android:navigationBarColor">@color/hub_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="colorSurface">@color/hub_surface</item>
+        <item name="colorOnSurface">@color/hub_text</item>
+        <item name="colorPrimary">@color/hub_primary</item>
+        <item name="colorSecondary">@color/hub_accent</item>
+        <item name="colorAccent">@color/hub_accent</item>
+    </style>
+</resources>

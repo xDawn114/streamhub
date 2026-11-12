@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Desktop settings reference: gear, Segoe MDL2 E713. -->
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M9.75,3.25H14.25L14.75,5.75L16.25,6.6L18.7,5.8L20.95,9.7L19,11.4V13.1L20.95,14.8L18.7,18.7L16.25,17.9L14.75,18.75L14.25,21.25H9.75L9.25,18.75L7.75,17.9L5.3,18.7L3.05,14.8L5,13.1V11.4L3.05,9.7L5.3,5.8L7.75,6.6L9.25,5.75ZM15.25,12.25A3.25,3.25 0,1 1,8.75 12.25A3.25,3.25 0,1 1,15.25 12.25Z" />
+</vector>

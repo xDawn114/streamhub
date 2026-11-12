@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>串流中心安装</AssemblyName>
+    <RootNamespace>StreamHub.Installer</RootNamespace>
+    <Product>我控制</Product>
+    <Company>我控制</Company>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PayloadMode Condition="'$(PayloadMode)' == ''">Uninstaller</PayloadMode>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PayloadMode)' == 'Installer' and '$(PayloadArchive)' != ''">
+    <EmbeddedResource Include="$(PayloadArchive)" LogicalName="StreamHub.Payload.zip" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../native/Sunshine.build.json" LogicalName="StreamHub.Sunshine.build.json" />
+    <Compile Include="../native/EngineIntegrity.cs" Link="Packaging/EngineIntegrity.cs" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+    <Compile Include="../host/Networking/NetworkHandover.cs" Link="Networking/NetworkHandover.cs" />
+    <Compile Include="../host/Runtime/RuntimeClient.cs" Link="Runtime/RuntimeClient.cs" />
+    <Compile Include="../host/Runtime/Contracts.cs" Link="Runtime/Contracts.cs" />
+    <Compile Include="../host/Runtime/ClipboardPolicy.cs" Link="Runtime/ClipboardPolicy.cs" />
+  </ItemGroup>
+  <Target Name="ValidatePayloadMode" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(PayloadMode)' != 'Installer' and '$(PayloadMode)' != 'Uninstaller'" Text="PayloadMode 必须为 Installer 或 Uninstaller。" />
+    <Error Condition="'$(PayloadMode)' == 'Installer' and !Exists('$(PayloadArchive)')" Text="安装器缺少 PayloadArchive。" />
+  </Target>
+</Project>

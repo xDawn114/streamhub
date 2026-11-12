@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App"/><Compile Include="RuntimeChecks.cs"/><Reference Include="StreamHub.Service"><HintPath>$(RuntimeAssembly)</HintPath></Reference></ItemGroup>
+</Project>

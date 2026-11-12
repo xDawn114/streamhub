@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <StreamHubVersionSource>$(MSBuildThisFileDirectory)client/artemis-src/version.properties</StreamHubVersionSource>
+    <StreamHubVersionText>$([System.IO.File]::ReadAllText('$(StreamHubVersionSource)'))</StreamHubVersionText>
+    <Version>$([System.Text.RegularExpressions.Regex]::Match('$(StreamHubVersionText)', '(?m)^streamhubVersionName=[0-9.]+').Value.Replace('streamhubVersionName=', ''))</Version>
+    <StreamHubVersionCode>$([System.Text.RegularExpressions.Regex]::Match('$(StreamHubVersionText)', '(?m)^streamhubVersionCode=[0-9]+').Value.Replace('streamhubVersionCode=', ''))</StreamHubVersionCode>
+    <StreamHubReleaseChannel>$([System.Text.RegularExpressions.Regex]::Match('$(StreamHubVersionText)', '(?m)^streamhubReleaseChannel=[a-z]+').Value.Replace('streamhubReleaseChannel=', ''))</StreamHubReleaseChannel>
+    <AssemblyVersion>$(Version).0</AssemblyVersion>
+    <FileVersion>$(Version).$(StreamHubVersionCode)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="StreamHubVersionCode" Value="$(StreamHubVersionCode)" />
+    <AssemblyMetadata Include="StreamHubReleaseChannel" Value="$(StreamHubReleaseChannel)" />
+    <Compile Include="$(MSBuildThisFileDirectory)common/ProductVersion.cs" Link="Common/ProductVersion.cs" />
+  </ItemGroup>
+  <Target Name="ValidateProductVersion" BeforeTargets="PrepareForBuild">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^\d+\.\d+\.\d+$'))" Text="产品版本源无效。" />
+    <Error Condition="'$(StreamHubVersionCode)' == ''" Text="产品构建序号缺失。" />
+    <Error Condition="'$(StreamHubReleaseChannel)' != 'internal' And '$(StreamHubReleaseChannel)' != 'stable'" Text="产品发布渠道无效。" />
+  </Target>
+</Project>

@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Desktop account/connection reference: contact, Segoe MDL2 E77B. -->
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M16,7.25A4,4 0,1 1,8 7.25A4,4 0,1 1,16 7.25ZM4.5,20.25V18.5C4.5,15.75 7.5,13.75 12,13.75C16.5,13.75 19.5,15.75 19.5,18.5V20.25" />
+</vector>

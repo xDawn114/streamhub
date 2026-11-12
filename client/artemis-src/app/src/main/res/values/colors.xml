@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="hub_background">#F5F7FA</color>
+    <color name="hub_surface">#FFFFFF</color>
+    <color name="hub_field">#EEF2F7</color>
+    <color name="hub_border">#D5DCE6</color>
+    <color name="hub_text">#111827</color>
+    <color name="hub_muted">#556172</color>
+    <color name="hub_primary">#2563EB</color>
+    <color name="hub_accent">#2563EB</color>
+    <color name="hub_selected">#DBE7FF</color>
+    <color name="hub_success">#15803D</color>
+    <color name="hub_warning">#B45309</color>
+    <color name="hub_danger">#C62828</color>
+    <color name="hub_on_accent">#FFFFFF</color>
+    <color name="hub_ripple">#332563EB</color>
+
+    <color name="hub_background_light">#F5F7FA</color>
+    <color name="hub_surface_light">#FFFFFF</color>
+    <color name="hub_field_light">#EEF2F7</color>
+    <color name="hub_border_light">#D5DCE6</color>
+    <color name="hub_text_light">#111827</color>
+    <color name="hub_muted_light">#556172</color>
+    <color name="hub_primary_light">#2563EB</color>
+    <color name="hub_accent_light">#2563EB</color>
+    <color name="hub_selected_light">#DBE7FF</color>
+    <color name="hub_success_light">#15803D</color>
+    <color name="hub_warning_light">#B45309</color>
+    <color name="hub_danger_light">#C62828</color>
+    <color name="hub_on_accent_light">#FFFFFF</color>
+    <color name="hub_ripple_light">#332563EB</color>
+
+    <color name="hub_background_dark">#0F141B</color>
+    <color name="hub_surface_dark">#171E28</color>
+    <color name="hub_field_dark">#212A37</color>
+    <color name="hub_border_dark">#2E3A4A</color>
+    <color name="hub_text_dark">#E8EDF4</color>
+    <color name="hub_muted_dark">#A3B0C2</color>
+    <color name="hub_primary_dark">#3468D4</color>
+    <color name="hub_accent_dark">#9CC0FF</color>
+    <color name="hub_selected_dark">#1E3A66</color>
+    <color name="hub_success_dark">#6EE7A8</color>
+    <color name="hub_warning_dark">#FBBF24</color>
+    <color name="hub_danger_dark">#FF8A8A</color>
+    <color name="hub_on_accent_dark">#FFFFFF</color>
+    <color name="hub_ripple_dark">#339CC0FF</color>
+
+    <string name="hub_theme_system">跟随系统</string>
+    <string name="hub_theme_light">浅色</string>
+    <string name="hub_theme_dark">深色</string>
+</resources>

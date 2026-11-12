@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>我控制</AssemblyName>
+    <Product>我控制</Product>
+    <Title>我控制</Title>
+    <Description>我控制</Description>
+    <ApplicationIcon>Assets\我控制.ico</ApplicationIcon>
+    <Company>我控制</Company>
+    <RootNamespace>StreamHub.Host</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../common/Updates/*.cs" Link="Updates/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../common/Updates/update-trust.json" LogicalName="StreamHub.UpdateTrust.json" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+  </ItemGroup>
+</Project>

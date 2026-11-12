@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="streamhub_transport_current">当前通道：%1$s</string>
+    <string name="streamhub_transport_choice">%1$s\n%2$s</string>
+    <string name="streamhub_stream_load_msg">本机解码或渲染负载较高\n建议下次连接降低分辨率或帧率</string>
+    <string name="streamhub_network_load_msg">网络持续拥塞\n建议下次连接使用 %1$d Mbps 码率</string>
+    <string name="streamhub_network_congested_msg">网络持续拥塞\n当前码率已接近建议下限，请检查网络质量</string>
+</resources>

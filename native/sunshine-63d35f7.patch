@@ -1,0 +1,553 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -88,5 +88,13 @@
+ # target definitions
+ include(${CMAKE_MODULE_PATH}/targets/common.cmake)
+ 
++# NVENC objects include logging.h directly. Propagate Boost headers when
++# Boost is built with FetchContent rather than installed in a global prefix.
++foreach(sdk IN ITEMS 1100 1200 1300 1301)
++    if(TARGET nvenc_sdk_${sdk})
++        target_link_libraries(nvenc_sdk_${sdk} PRIVATE Boost::log Boost::format Boost::process Boost::property_tree)
++    endif()
++endforeach()
++
+ # packaging
+ include(${CMAKE_MODULE_PATH}/packaging/common.cmake)
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -1,3 +1,4 @@
++#include "src/streamhub_timing.h"
+ /**
+  * @file src/main.cpp
+  * @brief Definitions for the main entry point for Sunshine.
+@@ -288,26 +289,26 @@
+   }
+ 
+ #ifdef _WIN32
+-  config::select_all_gamepad_drivers_if_licensed(lvh::get_license_status().license.licensed());
++  streamhub::measured("license-and-input-selection", [&] { return config::select_all_gamepad_drivers_if_licensed(lvh::get_license_status().license.licensed()); });
+ #endif
+ 
+   // Adding guard here first as it also performs recovery after crash,
+   // otherwise people could theoretically end up without display output.
+   // It also should be destroyed before forced shutdown to expedite the cleanup.
+-  auto display_device_deinit_guard = display_device::init(platf::appdata() / "display_device.state", config::video);
++  auto display_device_deinit_guard = streamhub::measured("display-device-init", [&] { return display_device::init(platf::appdata() / "display_device.state", config::video); });
+   if (!display_device_deinit_guard) {
+     BOOST_LOG(error) << "Display device session failed to initialize"sv;
+   }
+ 
+ #ifdef _WIN32
+   // Modify relevant NVIDIA control panel settings if the system has corresponding gpu
+-  if (nvprefs_instance.load()) {
++  if (streamhub::measured("nvprefs-load", [&] { return nvprefs_instance.load(); })) {
+     // Restore global settings to the undo file left by improper termination of sunshine.exe
+-    nvprefs_instance.restore_from_and_delete_undo_file_if_exists();
++    streamhub::measured("nvprefs-recovery", [&] { return nvprefs_instance.restore_from_and_delete_undo_file_if_exists(); });
+     // Modify application settings for sunshine.exe
+-    nvprefs_instance.modify_application_profile();
++    streamhub::measured("nvprefs-application", [&] { return nvprefs_instance.modify_application_profile(); });
+     // Modify global settings, undo file is produced in the process to restore after improper termination
+-    nvprefs_instance.modify_global_profile();
++    streamhub::measured("nvprefs-global", [&] { return nvprefs_instance.modify_global_profile(); });
+     // Unload dynamic library to survive driver re-installation
+     nvprefs_instance.unload();
+   }
+@@ -436,33 +437,33 @@
+   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+ #endif
+ 
+-  proc::refresh(config::stream.file_apps);
++  streamhub::measured("apps-refresh", [&] { return proc::refresh(config::stream.file_apps); });
+ 
+   // If any of the following fail, we log an error and continue event though sunshine will not function correctly.
+   // This allows access to the UI to fix configuration problems or view the logs.
+ 
+-  auto platf_deinit_guard = platf::init();
++  auto platf_deinit_guard = streamhub::measured("platform-init", [&] { return platf::init(); });
+   if (!platf_deinit_guard) {
+     BOOST_LOG(error) << "Platform failed to initialize"sv;
+   }
+ 
+-  auto proc_deinit_guard = proc::init();
++  auto proc_deinit_guard = streamhub::measured("process-init", [&] { return proc::init(); });
+   if (!proc_deinit_guard) {
+     BOOST_LOG(error) << "Proc failed to initialize"sv;
+   }
+ 
+   reed_solomon_init();
+-  auto input_deinit_guard = input::init();
+-
+-  if (config::input.controller && input::probe_gamepads()) {
++  auto input_deinit_guard = streamhub::measured("input-init", [&] { return input::init(); });
++
++  if (config::input.controller && streamhub::measured("gamepad-probe", [&] { return input::probe_gamepads(); })) {
+     BOOST_LOG(warning) << "No gamepad input is available"sv;
+   }
+ 
+-  if (video::probe_encoders()) {
++  if (streamhub::measured("startup-encoder-probe", [&] { return video::probe_encoders(); })) {
+     BOOST_LOG(error) << "Video failed to find working encoder"sv;
+   }
+ 
+-  if (http::init()) {
++  if (streamhub::measured("http-init", [&] { return http::init(); })) {
+     BOOST_LOG(fatal) << "HTTP interface failed to initialize"sv;
+ 
+ #ifdef _WIN32
+--- a/src/video.cpp
++++ b/src/video.cpp
+@@ -1,3 +1,5 @@
++#include "src/streamhub_timing.h"
++#include "src/streamhub_probe_cache.h"
+ /**
+  * @file src/video.cpp
+  * @brief Definitions for video.
+@@ -1470,6 +1472,8 @@
+   static encoder_t *chosen_encoder;
+   int active_hevc_mode;  ///< HEVC mode selected by the most recent encoder probe.
+   int active_av1_mode;  ///< AV1 mode selected by the most recent encoder probe.
++  static streamhub::probe_cache_gate streamhub_probe_cache;
++  static std::atomic_bool streamhub_encode_failed {false};
+   bool last_encoder_probe_supported_ref_frames_invalidation = false;  ///< Whether the last probe found reference-frame invalidation support.
+   std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec = {};  ///< YUV444 support discovered for each probed codec.
+ 
+@@ -2410,6 +2414,7 @@
+   ) {
+     auto session = make_encode_session(disp.get(), encoder, config, disp->width, disp->height, std::move(encode_device));
+     if (!session) {
++      streamhub_encode_failed = true;
+       return;
+     }
+ 
+@@ -2640,6 +2645,7 @@
+ 
+     auto encode_device = make_encode_device(*disp, encoder, ctx.config);
+     if (!encode_device) {
++      streamhub_encode_failed = true;
+       return std::nullopt;
+     }
+ 
+@@ -2659,6 +2665,7 @@
+ 
+     auto session = make_encode_session(disp, encoder, ctx.config, img.width, img.height, std::move(encode_device));
+     if (!session) {
++      streamhub_encode_failed = true;
+       return std::nullopt;
+     }
+ 
+@@ -2925,6 +2932,7 @@
+ 
+       auto encode_device = make_encode_device(*display, encoder, config);
+       if (!encode_device) {
++        streamhub_encode_failed = true;
+         return;
+       }
+ 
+@@ -3068,6 +3076,17 @@
+   bool validate_encoder(encoder_t &encoder, bool expect_failure) {
+     const auto output_name {display_device::map_output_name(config::video.output_name)};
+     std::shared_ptr<platf::display_t> disp;
++    int probe_dynamic_range = -1;
++    auto probe_display = [&](const config_t &config) {
++#ifdef _WIN32
++      // DXGI capture initialization depends on SDR/HDR and frame rate, not the
++      // codec/chroma selected later by make_encode_device(). Every probe here
++      // uses 1920x1080/60. Reuse its capture device within each color group.
++      if (disp && probe_dynamic_range == config.dynamicRange) return;
++#endif
++      reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++      probe_dynamic_range = disp ? config.dynamicRange : -1;
++    };
+ 
+     BOOST_LOG(info) << "Trying encoder ["sv << encoder.name << ']';
+     auto fg = util::fail_guard([&]() {
+@@ -3086,7 +3105,7 @@
+     config_t config_autoselect {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
+ 
+     // If the encoder isn't supported at all (not even H.264), bail early
+-    reset_display(disp, encoder.platform_formats->dev_type, output_name, config_autoselect);
++    probe_display(config_autoselect);
+     if (!disp) {
+       return false;
+     }
+@@ -3178,8 +3197,11 @@
+     {
+       auto test_yuv444 = [&](auto &flag_map, auto video_format) {
+         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 1, video_format, 0, 1, 0};
+-
+-        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++        if (!flag_map[encoder_t::PASSED] || !(encoder.flags & YUV444_SUPPORT)) {
++          flag_map[encoder_t::YUV444] = false;
++          return;
++        }
++        probe_display(config);
+         if (!disp) {
+           return;
+         }
+@@ -3198,8 +3220,8 @@
+ 
+       auto test_yuv420_hdr = [&](auto &flag_map, auto video_format) {
+         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 0, 0};
+-
+-        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++        if (!flag_map[encoder_t::PASSED]) return;
++        probe_display(config);
+         if (!disp) {
+           return;
+         }
+@@ -3218,8 +3240,11 @@
+ 
+       auto test_yuv444_hdr = [&](auto &flag_map, auto video_format) {
+         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 1, 0};
+-
+-        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++        if (!flag_map[encoder_t::PASSED] || !(encoder.flags & YUV444_SUPPORT)) {
++          flag_map[encoder_t::DYNAMIC_RANGE_YUV444] = false;
++          return;
++        }
++        probe_display(config);
+         if (!disp) {
+           return;
+         }
+@@ -3242,9 +3267,9 @@
+       encoder.h264[encoder_t::DYNAMIC_RANGE_YUV444] = false;
+ 
+       test_yuv444(encoder.hevc, 1);
++      test_yuv444(encoder.av1, 2);
+       test_yuv420_hdr(encoder.hevc, 1);
+       test_yuv444_hdr(encoder.hevc, 1);
+-      test_yuv444(encoder.av1, 2);
+       test_yuv420_hdr(encoder.av1, 2);
+       test_yuv444_hdr(encoder.av1, 2);
+     }
+@@ -3264,6 +3289,7 @@
+   }
+ 
+   int probe_encoders() {
++    streamhub::timer duration("probe-encoders");
+     if (!allow_encoder_probing()) {
+       // Error already logged
+       return -1;
+@@ -3271,10 +3297,45 @@
+ 
+     auto encoder_list = encoders;
+ 
+-    // If we already have a good encoder, check to see if another probe is required
+-    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platf::needs_encoder_reenumeration()) {
++    // Snapshot DXGI at startup too: the old short circuit delayed the first
++    // factory until launch and forced duplicate validation on an unchanged GPU.
++    const auto platform_changed = streamhub::measured("encoder-enumeration-check", [] { return platf::needs_encoder_reenumeration(); });
++    const auto output_name = display_device::map_output_name(config::video.output_name);
++    std::string environment;
++#ifdef _WIN32
++    environment = platf::streamhub_encoder_environment(output_name);
++    if (!environment.empty()) environment += ":" + config::video.output_name + ":" + config::video.adapter_name + ":" + config::video.encoder +
++      ":" + std::to_string(config::video.hevc_mode) + ":" + std::to_string(config::video.av1_mode) + ":" +
++      std::to_string(config::sunshine.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE]);
++#endif
++#ifdef _WIN32
++    const bool environment_unchanged = streamhub_probe_cache.matches(environment);
++#else
++    const bool environment_unchanged = true;
++#endif
++    const bool encode_failed = streamhub_encode_failed.exchange(false);
++    if (encode_failed) streamhub_probe_cache.invalidate();
++    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platform_changed && !encode_failed &&
++        environment_unchanged) {
++      BOOST_LOG(info) << "[StreamHub] encoder-probe=reused encoder=" << chosen_encoder->name;
+       return 0;
+     }
++    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && streamhub_probe_cache.matches(environment)) {
++      // A VDD detach/reattach invalidates the DXGI factory even when the target
++      // GPU, driver, mode and codec configuration are identical. Recreate the
++      // capture device, but retain the capability flags that were actually tested.
++      const config_t check {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
++      std::shared_ptr<platf::display_t> display;
++      reset_display(display, chosen_encoder->platform_formats->dev_type, output_name, check);
++      if (display && display->is_codec_supported(chosen_encoder->h264.name, check) &&
++          validate_config(display, *chosen_encoder, check) >= 0) {
++        BOOST_LOG(info) << "[StreamHub] encoder-probe=target-cache-revalidated encoder=" << chosen_encoder->name;
++        return 0;
++      }
++      streamhub_probe_cache.invalidate();
++    }
++    BOOST_LOG(info) << "[StreamHub] encoder-probe=validate reason=" <<
++      (!chosen_encoder ? "no-valid-result" : platform_changed ? "display-or-driver-changed" : "fallback-encoder");
+ 
+     // Restart encoder selection
+     auto previous_encoder = chosen_encoder;
+@@ -3502,6 +3563,7 @@
+       BOOST_LOG(debug) << "ENCODER STATUS ACTIVE_AV1_MODE: "sv << active_av1_mode;
+     }
+ 
++    streamhub_probe_cache.remember(environment);
+     return 0;
+   }
+ 
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -1,3 +1,4 @@
++#include "src/streamhub_timing.h"
+ /**
+  * @file src/nvhttp.cpp
+  * @brief Definitions for the nvhttp (GameStream) server.
+@@ -1390,7 +1391,7 @@
+       // encoder matches the active GPU (which could have changed
+       // due to hotplugging, driver crash, primary monitor change,
+       // or any number of other factors).
+-      if (video::probe_encoders()) {
++      if (streamhub::measured("launch-encoder-probe", [] { return video::probe_encoders(); })) {
+         tree.put("root.<xmlattr>.status_code", 503);
+         tree.put("root.<xmlattr>.status_message", "Failed to initialize video capture/encoding. Is a display connected and turned on?");
+         tree.put("root.gamesession", 0);
+@@ -1502,7 +1503,7 @@
+       // encoder matches the active GPU (which could have changed
+       // due to hotplugging, driver crash, primary monitor change,
+       // or any number of other factors).
+-      if (video::probe_encoders()) {
++      if (streamhub::measured("launch-encoder-probe", [] { return video::probe_encoders(); })) {
+         tree.put("root.resume", 0);
+         tree.put("root.<xmlattr>.status_code", 503);
+         tree.put("root.<xmlattr>.status_message", "Failed to initialize video capture/encoding. Is a display connected and turned on?");
+--- a/src/platform/virtualhid_input.cpp
++++ b/src/platform/virtualhid_input.cpp
+@@ -1,3 +1,4 @@
++#include "src/streamhub_timing.h"
+ /**
+  * @file src/platform/virtualhid_input.cpp
+  * @brief Definitions for libvirtualhid-backed input helpers.
+@@ -447,14 +448,14 @@
+       input_context_t {lvh::BackendKind::platform_default} {}
+ 
+   input_context_t::input_context_t(lvh::BackendKind backend):
+-      runtime {create_runtime(backend)} {
++      runtime {streamhub::measured("virtualhid-runtime-create", [&] { return create_runtime(backend); })} {
+     if (!runtime) {
+       BOOST_LOG(warning) << "Unable to create libvirtualhid runtime"sv;
+       return;
+     }
+ 
+-    refresh_keyboard();
+-    refresh_mouse();
++    streamhub::measured("virtualhid-keyboard-init", [&] { refresh_keyboard(); });
++    streamhub::measured("virtualhid-mouse-init", [&] { refresh_mouse(); });
+   }
+ 
+   void input_context_t::refresh_keyboard() {
+--- a/src/platform/windows/input.cpp
++++ b/src/platform/windows/input.cpp
+@@ -1,3 +1,4 @@
++#include "src/streamhub_timing.h"
+ /**
+  * @file src/platform/windows/input.cpp
+  * @brief Definitions for input handling on Windows.
+@@ -559,6 +560,7 @@
+   }
+ 
+   input_t input() {
++    streamhub::timer duration("windows-input-init");
+     input_t result {new input_raw_t {}};
+ 
+     if (auto &raw = *result; config::input.controller && !should_use_virtualhid_gamepads(raw) && virtualhid::should_try_vigembus_fallback(config::input.gamepad, false, config::input.gamepad_driver)) {
+--- a/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
++++ b/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
+@@ -84,12 +84,28 @@
+ 
+     static UniqueHandle connect_to_broker_pipe() {
+       DWORD last_error = ERROR_FILE_NOT_FOUND;
+-      for (auto attempt = 0U; attempt < pipe_wait_timeout / pipe_retry_interval; ++attempt) {
++      const auto deadline = ::GetTickCount64() + pipe_wait_timeout;
++      for (auto attempt = 0U; ::GetTickCount64() < deadline; ++attempt) {
+         if (HANDLE pipe = open_broker_pipe(); pipe != INVALID_HANDLE_VALUE) {
+           return make_unique_handle(pipe);
+         }
+ 
+         last_error = ::GetLastError();
++        // A missing pipe and an explicitly absent installed service cannot
++        // become ready by sleeping. Preserve every broker identity/license
++        // check for an existing service; unknown SCM errors keep normal retry.
++        if (attempt == 0 && last_error == ERROR_FILE_NOT_FOUND) {
++          if (auto manager = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT)) {
++            auto service = ::OpenServiceW(manager, broker_service_name, SERVICE_QUERY_STATUS);
++            const auto error = ::GetLastError();
++            if (service) ::CloseServiceHandle(service);
++            ::CloseServiceHandle(manager);
++            if (!service && error == ERROR_SERVICE_DOES_NOT_EXIST) {
++              ::SetLastError(last_error);
++              return make_unique_handle(INVALID_HANDLE_VALUE);
++            }
++          }
++        }
+         if (!wait_to_retry_broker_pipe(last_error)) {
+           ::SetLastError(last_error);
+           return make_unique_handle(INVALID_HANDLE_VALUE);
+--- /dev/null
++++ b/src/streamhub_timing.h
+@@ -0,0 +1,42 @@
++/**
++ * @file src/streamhub_timing.h
++ * @brief Monotonic timing of StreamHub engine startup and launch stages.
++ */
++#pragma once
++
++#include <chrono>
++#include <utility>
++
++#include "logging.h"
++
++namespace streamhub {
++  /** @brief Log one complete stage, including early returns and failures. */
++  class timer {
++    const char *name;
++    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
++
++  public:
++    /** @brief Begin a stage whose name has static storage duration. */
++    explicit timer(const char *name): name(name) {
++      BOOST_LOG(info) << "[StreamHub] begin stage=" << name;
++    }
++
++    /** @brief Finish the stage using elapsed monotonic milliseconds. */
++    ~timer() {
++      BOOST_LOG(info) << "[StreamHub] end stage=" << name << " elapsed_ms=" <<
++        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
++    }
++  };
++
++  /**
++   * @brief Measure a call without changing its return value or ownership.
++   * @param name Stage name with static storage duration.
++   * @param call Operation to execute once.
++   * @return The operation's original result.
++   */
++  template<class F>
++  decltype(auto) measured(const char *name, F &&call) {
++    timer duration(name);
++    return std::forward<F>(call)();
++  }
++}
+--- a/src/platform/common.h
++++ b/src/platform/common.h
+@@ -926,6 +926,10 @@
+    * @return Display names accepted by the selected capture backend.
+    */
+   std::vector<std::string> display_names(mem_type_e hwdevice_type);
++#ifdef _WIN32
++  // Empty means the target, adapter driver or display mode could not be verified.
++  std::string streamhub_encoder_environment(const std::string &output_name);
++#endif
+ 
+   /**
+    * @brief Check if GPUs/drivers have changed since the last call to this function.
+--- a/src/platform/windows/display_base.cpp
++++ b/src/platform/windows/display_base.cpp
+@@ -5,6 +5,7 @@
+ // standard includes
+ #include <cmath>
+ #include <thread>
++#include <sstream>
+ 
+ // platform includes
+ #include <initguid.h>
+@@ -43,6 +44,7 @@
+ #include "src/display_device.h"
+ #include "src/logging.h"
+ #include "src/platform/common.h"
++#include <dxgi1_6.h>
+ #include "src/video.h"
+ 
+ namespace platf {
+@@ -1122,6 +1124,65 @@
+    *
+    * @return `true` if a change has occurred or if it is unknown whether a change occurred.
+    */
++  std::string streamhub_encoder_environment(const std::string &output_name) {
++    dxgi::factory1_t factory;
++    if (FAILED(CreateDXGIFactory1(IID_IDXGIFactory1, (void **) &factory))) return {};
++    const auto requested_adapter = utf_utils::from_utf8(config::video.adapter_name);
++    std::string result;
++    dxgi::adapter_t::pointer adapter_p {};
++    for (UINT i = 0; factory->EnumAdapters1(i, &adapter_p) != DXGI_ERROR_NOT_FOUND; ++i) {
++      dxgi::adapter_t adapter {adapter_p};
++      DXGI_ADAPTER_DESC1 gpu {};
++      if (FAILED(adapter->GetDesc1(&gpu))) return {};
++      if (!requested_adapter.empty() && requested_adapter != gpu.Description) continue;
++      LARGE_INTEGER driver {};
++      if (FAILED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &driver))) return {};
++      dxgi::output_t::pointer output_p {};
++      for (UINT j = 0; adapter->EnumOutputs(j, &output_p) != DXGI_ERROR_NOT_FOUND; ++j) {
++        dxgi::output_t output {output_p};
++        DXGI_OUTPUT_DESC screen {};
++        if (FAILED(output->GetDesc(&screen))) return {};
++        if (!screen.AttachedToDesktop || (!output_name.empty() && utf_utils::to_utf8(screen.DeviceName) != output_name)) continue;
++        // Auto output on multiple monitors is ambiguous: retain full probing.
++        if (!result.empty()) return {};
++        DEVMODEW mode {}; mode.dmSize = sizeof(mode);
++        if (!EnumDisplaySettingsExW(screen.DeviceName, ENUM_CURRENT_SETTINGS, &mode, 0)) return {};
++        UINT path_count = 0, mode_count = 0;
++        if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &path_count, &mode_count) != ERROR_SUCCESS || path_count > 64 || mode_count > 256) return {};
++        std::vector<DISPLAYCONFIG_PATH_INFO> paths(path_count);
++        std::vector<DISPLAYCONFIG_MODE_INFO> modes(mode_count);
++        if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &path_count, paths.data(), &mode_count, modes.data(), nullptr) != ERROR_SUCCESS) return {};
++        std::string ccd;
++        for (UINT path_index = 0; path_index < path_count; ++path_index) {
++          const auto &path = paths[path_index];
++          DISPLAYCONFIG_SOURCE_DEVICE_NAME source {};
++          source.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
++          source.header.size = sizeof(source); source.header.adapterId = path.sourceInfo.adapterId; source.header.id = path.sourceInfo.id;
++          if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS || std::wstring(source.viewGdiDeviceName) != screen.DeviceName) continue;
++          if (!ccd.empty()) return {}; // Cloned outputs cannot share one unambiguous cache entry.
++          std::ostringstream exact_mode;
++          exact_mode << path.targetInfo.adapterId.HighPart << ':' << path.targetInfo.adapterId.LowPart << ':' << path.targetInfo.id
++                     << ':' << path.targetInfo.refreshRate.Numerator << '/' << path.targetInfo.refreshRate.Denominator
++                     << ':' << path.targetInfo.rotation << ':' << path.targetInfo.scaling << ':' << path.targetInfo.scanLineOrdering;
++          ccd = exact_mode.str();
++        }
++        if (ccd.empty()) return {};
++        IDXGIOutput6 *modern = nullptr;
++        if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput6), (void **) &modern))) return {};
++        DXGI_OUTPUT_DESC1 color {};
++        const auto color_status = modern->GetDesc1(&color); modern->Release();
++        if (FAILED(color_status)) return {};
++        std::ostringstream key;
++        key << gpu.AdapterLuid.HighPart << ':' << gpu.AdapterLuid.LowPart << ':' << gpu.VendorId << ':' << gpu.DeviceId
++            << ':' << gpu.SubSysId << ':' << gpu.Revision << ':' << driver.QuadPart << ':' << utf_utils::to_utf8(screen.DeviceName)
++            << ':' << mode.dmPelsWidth << ':' << mode.dmPelsHeight << ':' << mode.dmDisplayFrequency << ':' << mode.dmBitsPerPel
++            << ':' << mode.dmDisplayOrientation << ':' << screen.Rotation << ':' << color.ColorSpace << ':' << color.BitsPerColor << ':' << ccd;
++        result = key.str();
++      }
++    }
++    return result;
++  }
++
+   bool needs_encoder_reenumeration() {
+     // Serialize access to the static DXGI factory
+     static std::mutex reenumeration_state_lock;
+--- /dev/null
++++ b/src/streamhub_probe_cache.h
+@@ -0,0 +1,23 @@
++#pragma once
++#include <chrono>
++#include <string>
++#include <utility>
++
++namespace streamhub {
++  // Process-local only. Unknown identities, timeout, failures and mode changes
++  // cannot reuse capability flags. No GPU capability is invented or persisted.
++  class probe_cache_gate {
++  public:
++    using clock = std::chrono::steady_clock;
++    bool matches(const std::string &identity, clock::time_point now = clock::now()) const {
++      return !identity.empty() && identity == validated && now >= created && now - created < std::chrono::minutes(15);
++    }
++    void remember(std::string identity, clock::time_point now = clock::now()) {
++      validated = std::move(identity); created = now;
++    }
++    void invalidate() { validated.clear(); }
++  private:
++    std::string validated;
++    clock::time_point created {};
++  };
++}

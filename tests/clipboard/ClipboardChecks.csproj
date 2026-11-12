@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+ <ItemGroup>
+  <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  <Compile Include="../../host/Runtime/Contracts.cs" Link="Contracts.cs" />
+  <Compile Include="../../host/Runtime/ClipboardPolicy.cs" Link="ClipboardPolicy.cs" />
+  <Compile Include="../../host/Runtime/ClipboardApi.cs" Link="ClipboardApi.cs" />
+  <Compile Include="../../service/ClipboardBroker.cs" Link="ClipboardBroker.cs" />
+  <Compile Include="../../host/Runtime/ClipboardAgent.cs" Link="ClipboardAgent.cs" />
+  <Compile Include="../../host/Runtime/RuntimeClient.cs" Link="RuntimeClient.cs" />
+ </ItemGroup>
+</Project>

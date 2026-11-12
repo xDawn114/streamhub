@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "windowsFeed": "",
+  "androidFeed": "",
+  "manifestPublicKeySpkiBase64": "",
+  "windowsPublisherCertificateSha256": [],
+  "windowsSigningMethod": "unconfigured",
+  "publicRepositoryUrl": "",
+  "projectWebsiteUrl": "",
+  "maintainerContact": "",
+  "licenseDecision": "",
+  "deploymentOwner": "",
+  "note": "非秘密资源收集模板；不保存私钥、口令、服务令牌或证书私钥。空值不表示已接入。"
+}

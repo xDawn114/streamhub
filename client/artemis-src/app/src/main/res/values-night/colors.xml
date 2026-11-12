@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="hub_background">#0F141B</color>
+    <color name="hub_surface">#171E28</color>
+    <color name="hub_field">#212A37</color>
+    <color name="hub_border">#2E3A4A</color>
+    <color name="hub_text">#E8EDF4</color>
+    <color name="hub_muted">#A3B0C2</color>
+    <color name="hub_primary">#3468D4</color>
+    <color name="hub_accent">#9CC0FF</color>
+    <color name="hub_selected">#1E3A66</color>
+    <color name="hub_success">#6EE7A8</color>
+    <color name="hub_warning">#FBBF24</color>
+    <color name="hub_danger">#FF8A8A</color>
+    <color name="hub_on_accent">#FFFFFF</color>
+    <color name="hub_ripple">#339CC0FF</color>
+</resources>

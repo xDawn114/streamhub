@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+ <ItemGroup>
+  <Compile Include="../../common/Updates/*.cs" Link="Updates/%(Filename)%(Extension)" />
+  <Compile Include="../../installer/RollbackCatalog.cs" Link="RollbackCatalog.cs" />
+  <Compile Include="../../installer/RollbackTransaction.cs" Link="RollbackTransaction.cs" />
+  <Compile Include="../../host/Runtime/MaintenanceWindow.cs" Link="MaintenanceWindow.cs" />
+ </ItemGroup>
+</Project>

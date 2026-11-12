@@ -1,0 +1,20 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <SolidColorBrush x:Key="Muted" Color="#556172"/>
+ <SolidColorBrush x:Key="Accent" Color="#2563EB"/>
+ <SolidColorBrush x:Key="SuccessText" Color="#15803D"/>
+ <SolidColorBrush x:Key="DangerText" Color="#C62828"/>
+ <SolidColorBrush x:Key="WarningText" Color="#B45309"/>
+ <SolidColorBrush x:Key="Canvas" Color="#F5F7FA"/>
+ <SolidColorBrush x:Key="TextPrimary" Color="#111827"/>
+ <SolidColorBrush x:Key="BorderDefault" Color="#D5DCE6"/>
+ <SolidColorBrush x:Key="Selection" Color="#DBE7FF"/>
+ <SolidColorBrush x:Key="AccentText" Color="#0B3A8C"/>
+ <SolidColorBrush x:Key="IconSurface" Color="#DBE7FF"/>
+ <SolidColorBrush x:Key="Divider" Color="#D5DCE6"/>
+ <SolidColorBrush x:Key="BorderSubtle" Color="#E5EBF3"/>
+ <SolidColorBrush x:Key="InsetSurface" Color="#EEF2F7"/>
+ <SolidColorBrush x:Key="FeedbackSurface" Color="#EEF2F7"/>
+ <SolidColorBrush x:Key="FeedbackTextBrush" Color="#34405B"/>
+ <SolidColorBrush x:Key="Surface" Color="#FFFFFF"/>
+ <SolidColorBrush x:Key="OnAccent" Color="#FFFFFF"/>
+</ResourceDictionary>

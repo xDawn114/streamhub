@@ -1,0 +1,43 @@
+name: Source checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-source:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Windows app, service and uninstaller (no installation)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($project in @('host/StreamHub.Host.csproj', 'service/StreamHub.Service.csproj', 'installer/StreamHub.Installer.csproj')) {
+            dotnet build $project -c Release -p:PayloadMode=Uninstaller
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+      - name: Check desktop input policy without accessing the desktop
+        shell: pwsh
+        run: |
+          dotnet run --project tests/desktop-input/DesktopInputChecks.csproj -c Release -- service/bin/Release/net8.0-windows/串流中心后台.dll
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop policy checks failed' }
+      - name: Archive unsigned app and service build evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-unsigned-source-checks
+          path: |
+            host/bin/Release/net8.0-windows/
+            service/bin/Release/net8.0-windows/
+          if-no-files-found: error
+          retention-days: 14
