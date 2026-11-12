@@ -45,6 +45,8 @@ cd client/artemis-src
 - 自动更新代码已有校验与拒绝机制，真实生产HTTPS更新源、发布者信任及签名清单仍待接入。
 - 不发布未验收或未签名的完整安装器作为正式版。
 
+Code signing policy：[代码签名范围、维护与批准角色、当前缺项](CODE_SIGNING.md)。
+
 ## 许可与来源
 
 原始StreamHub代码及修改由Dawn以 **GPL-3.0-or-later** 授权，全文见[LICENSE](LICENSE)。第三方保留原许可，见[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)和各源码目录。
