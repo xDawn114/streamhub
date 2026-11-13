@@ -18,6 +18,8 @@ public final class HubDesktopInput implements AutoCloseable {
     private volatile boolean closed,connected,filled,unsupported;
     private volatile HubControlClient client;
     private volatile Snapshot snapshot=Snapshot.UNKNOWN;
+    private String lastObservation="";
+    private int tracedGestures,observations;
     public HubDesktopInput(Activity activity,String host,String lease) {
         this.activity=activity;this.host=host;this.lease=lease;deviceId=new HubStore(activity).get("deviceId","");
         worker.scheduleWithFixedDelay(this::observe,0,1,TimeUnit.SECONDS);
@@ -41,8 +43,23 @@ public final class HubDesktopInput implements AutoCloseable {
             JSONObject result=client().request("session/desktop",body("status"));
             JSONObject state=result.optJSONObject("state"),desktop=state==null?null:state.optJSONObject("desktop");
             snapshot=Snapshot.parse(desktop,SystemClock.elapsedRealtime());
+            observation("known="+snapshot.known+" locked="+snapshot.isLocked+" regions="+snapshot.captions.length);
             if(snapshot.locked(SystemClock.elapsedRealtime()) && desktop!=null && desktop.optBoolean("passwordFocused"))fillPassword();
-        }catch(Exception ignored){snapshot=Snapshot.UNKNOWN;}
+        }catch(Exception error){snapshot=Snapshot.UNKNOWN;observation("query-failed="+error.getClass().getSimpleName());}
+    }
+    private void observation(String value) {
+        if(observations<32 && !value.equals(lastObservation)) {
+            observations++;
+            lastObservation=value;
+            android.util.Log.i("HubDesktopInput",value);
+        }
+    }
+    /** Bounded metadata only; no window titles, credentials or device/session identifiers. */
+    public void traceGesture(boolean login,boolean caption,boolean nativeTouch) {
+        if(tracedGestures++>=24)return;
+        Snapshot value=snapshot;long now=SystemClock.elapsedRealtime();
+        android.util.Log.i("HubDesktopInput","gesture fresh="+value.fresh(now)+" regions="+value.captions.length+
+                " login="+login+" caption="+caption+" route="+(nativeTouch?"touch":"mouse"));
     }
     public boolean locked(){return current() && snapshot.locked(SystemClock.elapsedRealtime());}
     public boolean captionButton(float x,float y){return current() && snapshot.captionButton(x,y,SystemClock.elapsedRealtime());}
@@ -82,7 +99,10 @@ public final class HubDesktopInput implements AutoCloseable {
         static Snapshot parse(JSONObject data,long now) {
             if(data==null || !data.optBoolean("known"))return UNKNOWN;
             JSONArray rects=data.optJSONArray("captionButtons");java.util.ArrayList<float[]> valid=new java.util.ArrayList<>();
-            for(int i=0;rects!=null && i<Math.min(4,rects.length());i++) {
+            // The host may report several visible windows. Keep enough fresh
+            // regions for custom-framed apps such as Codex while retaining a
+            // bounded response from the desktop helper.
+            for(int i=0;rects!=null && i<Math.min(32,rects.length());i++) {
                 JSONObject rect=rects.optJSONObject(i);if(rect==null)continue;
                 float l=(float)rect.optDouble("left",-1),t=(float)rect.optDouble("top",-1),r=(float)rect.optDouble("right",-1),b=(float)rect.optDouble("bottom",-1);
                 if(l>=0 && t>=0 && r<=1 && b<=1 && r>l && b>t && r-l<0.5f && b-t<0.2f)valid.add(new float[]{l,t,r,b});

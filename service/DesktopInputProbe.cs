@@ -61,14 +61,17 @@ internal static class DesktopInputProbe
         if (operation.Action is not ("status" or "fill")) throw new ArgumentException("桌面操作无效。");
         if (operation.Action == "fill") DesktopInputPolicy.ValidatePassword(operation.Password);
         Answer? answer = null;
-        // A fresh STA may attach to the current input desktop before UI Automation creates windows.
+        // .NET initializes COM before entering a new STA callback; its desktop
+        // association makes SetThreadDesktop fail with ERROR_BUSY, even when
+        // both desktop handles refer to Default. A dedicated MTA can attach
+        // first and is also supported by the UI Automation client.
         // Never call SwitchDesktop or change the user's foreground window.
         var thread = new Thread(() =>
         {
             try { answer = Inspect(ownerSid, operation); }
             catch { answer = new(new(), new("unavailable")); }
         }) { IsBackground = true };
-        thread.SetApartmentState(ApartmentState.STA); thread.Start();
+        thread.SetApartmentState(ApartmentState.MTA); thread.Start();
         if (!thread.Join(TimeSpan.FromSeconds(2))) throw new TimeoutException("读取登录界面超时。");
         await WriteAsync(pipe, answer ?? new(new(), new("unavailable")), timeout.Token);
     }
@@ -176,27 +179,97 @@ internal static class DesktopInputProbe
 
     private static DesktopHitRegion[] CaptionRegions()
     {
-        IntPtr window = GetForegroundWindow();
         int width = GetSystemMetrics(0), height = GetSystemMetrics(1);
         if(width<=0 || height<=0)return [];
-        // Ask the actual window first; never infer caption buttons from fixed offsets.
-        var bar=new TitleBarInfo {Size=(uint)Marshal.SizeOf<TitleBarInfo>(),States=new uint[6],Rects=new Rect[6]};
-        if(SendMessageTimeout(window,0x33F,IntPtr.Zero,ref bar,0x0002,40,out _)!=IntPtr.Zero) {
-            var regions=new List<DesktopHitRegion>();
-            foreach(int index in new[]{2,3,5}) {
-                var b=bar.Rects[index];
-                if((bar.States[index]&0x8001)==0 && b.Left>=0 && b.Top>=0 && b.Right<=width && b.Bottom<=height && b.Right>b.Left && b.Bottom>b.Top)
-                    regions.Add(new((double)b.Left/width,(double)b.Top/height,(double)b.Right/width,(double)b.Bottom/height));
-            }
-            if(regions.Count>0)return regions.ToArray();
+        // The foreground window is not necessarily the only window the
+        // receiver can touch. It can also be a custom-framed app that does
+        // not return TITLEBARINFOEX button rectangles, so inspect visible
+        // top-level windows in z-order and keep a narrow fallback band.
+        var candidates = new List<IntPtr>();
+        var foreground = GetForegroundWindow();
+        if (IsCaptionCandidate(foreground, width, height)) candidates.Add(foreground);
+        EnumWindows((window, _) => {
+            if (window != foreground && IsCaptionCandidate(window, width, height)) candidates.Add(window);
+            return candidates.Count < 16;
+        }, IntPtr.Zero);
+
+        var regions = new List<DesktopHitRegion>();
+        var budget = Stopwatch.StartNew();
+        foreach (var window in candidates)
+        {
+            AddMeasuredCaptionRegions(window, width, height, regions);
+            // Limit the fallback to the top-right caption-button band rather
+            // than the old whole-window fallback, which could turn arbitrary
+            // native touch input into a mouse click.
+            if (regions.Count < 32) AddCaptionButtonBand(window, width, height, regions);
+            if (regions.Count >= 32 || budget.ElapsedMilliseconds >= 600) break;
         }
-        if (!GetWindowRect(window, out var rect) ||
-            DwmGetWindowAttribute(window, 5, out var buttons, Marshal.SizeOf<Rect>()) != 0 ||
-            buttons.Right <= buttons.Left || buttons.Bottom <= buttons.Top) return [];
-        int left = rect.Left + buttons.Left, top = rect.Top + buttons.Top;
-        int right = rect.Left + buttons.Right, bottom = rect.Top + buttons.Bottom;
-        if (left < 0 || top < 0 || right > width || bottom > height || right <= left || bottom <= top) return [];
-        return [new((double)left / width, (double)top / height, (double)right / width, (double)bottom / height)];
+        return regions.Take(32).ToArray();
+    }
+
+    private static bool IsCaptionCandidate(IntPtr window, int screenWidth, int screenHeight)
+    {
+        if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window) || GetWindow(window, GW_OWNER) != IntPtr.Zero)
+            return false;
+        if (!GetWindowRect(window, out var rect) || rect.Right <= 0 || rect.Bottom <= 0 ||
+            rect.Left >= screenWidth || rect.Top >= screenHeight) return false;
+        return true;
+    }
+
+    private static void AddMeasuredCaptionRegions(IntPtr window, int screenWidth, int screenHeight,
+        List<DesktopHitRegion> regions)
+    {
+        var bar = new TitleBarInfo {
+            Size = (uint)Marshal.SizeOf<TitleBarInfo>(), States = new uint[6], Rects = new Rect[6]
+        };
+        if (SendMessageTimeout(window, 0x33F, IntPtr.Zero, ref bar, 0x0002, 40, out _) == IntPtr.Zero)
+            return;
+        // Win32 reserves indexes 0/1 in rgrect; 2/3/5 are minimize/maximize/close.
+        // Custom-framed apps may leave these rectangles empty or omit minimize.
+        foreach (int index in new[] { 2, 3, 5 })
+        {
+            if (bar.States is null || bar.Rects is null || index >= bar.States.Length || index >= bar.Rects.Length ||
+                (bar.States[index] & 0x18001) != 0) continue;
+            AddRegion(bar.Rects[index], screenWidth, screenHeight, regions);
+        }
+    }
+
+    private static void AddCaptionButtonBand(IntPtr window, int screenWidth, int screenHeight,
+        List<DesktopHitRegion> regions)
+    {
+        if (!GetWindowRect(window, out var rect)) return;
+        // Keep compositor-provided bounds too; custom Electron title bars can
+        // report a smaller system button group than the one they actually draw.
+        if (DwmGetWindowAttribute(window, 5, out Rect buttons, Marshal.SizeOf<Rect>()) == 0 &&
+            buttons.Right > buttons.Left && buttons.Bottom > buttons.Top)
+        {
+            AddRegion(new Rect { Left = rect.Left + buttons.Left, Top = rect.Top + buttons.Top,
+                Right = rect.Left + buttons.Right, Bottom = rect.Top + buttons.Bottom },
+                screenWidth, screenHeight, regions);
+        }
+        // SM_CXSIZE is the caption icon size, not the width of a caption button.
+        // Modern Windows/Electron buttons occupy 46 logical pixels each. Scale
+        // that minimum per window so the leftmost (minimize) button is covered.
+        uint dpi = GetDpiForWindow(window);
+        if (dpi == 0) dpi = 96;
+        int buttonWidth = Math.Max((int)Math.Ceiling(46d * dpi / 96), GetSystemMetricsForDpi(30, dpi));
+        int buttonHeight = Math.Max((int)Math.Ceiling(32d * dpi / 96), GetSystemMetricsForDpi(31, dpi));
+        int bandWidth = buttonWidth * 3;
+        int bandHeight = buttonHeight + Math.Max(4, GetSystemMetricsForDpi(33, dpi));
+        var band = new Rect {
+            Left = rect.Right - bandWidth, Top = rect.Top,
+            Right = rect.Right, Bottom = rect.Top + bandHeight
+        };
+        AddRegion(band, screenWidth, screenHeight, regions);
+    }
+
+    private static void AddRegion(Rect rect, int screenWidth, int screenHeight, List<DesktopHitRegion> regions)
+    {
+        int left = Math.Max(0, rect.Left), top = Math.Max(0, rect.Top);
+        int right = Math.Min(screenWidth, rect.Right), bottom = Math.Min(screenHeight, rect.Bottom);
+        if (right <= left || bottom <= top) return;
+        regions.Add(new((double)left / screenWidth, (double)top / screenHeight,
+            (double)right / screenWidth, (double)bottom / screenHeight));
     }
 
     private static async Task WriteAsync<T>(Stream stream, T value, CancellationToken token)
@@ -212,7 +285,8 @@ internal static class DesktopInputProbe
     private static async Task<T> ReadAsync<T>(Stream stream, CancellationToken token)
     {
         byte[] size = new byte[4]; await stream.ReadExactlyAsync(size, token);
-        int length = BitConverter.ToInt32(size); if (length is <= 0 or > 4096) throw new IOException("桌面助手数据无效。");
+        // 32 normalized regions can exceed 4 KiB when serialized as doubles.
+        int length = BitConverter.ToInt32(size); if (length is <= 0 or > 16384) throw new IOException("桌面助手数据无效。");
         byte[] body = new byte[length];
         try { await stream.ReadExactlyAsync(body, token); return JsonSerializer.Deserialize<T>(body, RuntimeProtocol.JsonOptions) ?? throw new IOException("桌面助手返回为空。"); }
         finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(body); }
@@ -261,15 +335,23 @@ internal static class DesktopInputProbe
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll")] private static extern bool CloseDesktop(IntPtr desktop);
-    [DllImport("user32.dll")] private static extern bool SetThreadDesktop(IntPtr desktop);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetThreadDesktop(IntPtr desktop);
     [DllImport("user32.dll")] private static extern IntPtr GetThreadDesktop(uint thread);
     [DllImport("user32.dll", EntryPoint = "GetUserObjectInformationW", CharSet = CharSet.Unicode)] private static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, int bytes, out int needed);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
     [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW")] private static extern IntPtr SendMessageTimeout(IntPtr window,uint message,IntPtr wParam,ref TitleBarInfo bar,uint flags,uint timeout,out UIntPtr result);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect rect, int bytes);
     [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
+    private const uint GW_OWNER = 4;
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr data);
 }

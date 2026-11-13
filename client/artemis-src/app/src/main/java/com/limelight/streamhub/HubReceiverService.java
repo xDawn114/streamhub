@@ -11,10 +11,15 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -35,6 +40,7 @@ public final class HubReceiverService extends Service {
     private HubControlClient control;
     private String selectedHost = "", suppressedId = "";
     private volatile boolean stopped;
+    private long nextDiscoveryAt;
     public static void listen(Listener value) {
         listener = value;
         if (value != null) new Handler(Looper.getMainLooper()).post(() -> { if (listener == value) value.requestChanged(currentRequest); });
@@ -63,6 +69,38 @@ public final class HubReceiverService extends Service {
         return START_STICKY;
     }
     private String transportRevision = "";
+    private HubControlClient connectCandidate(String host, String revision) throws Exception {
+        HubControlClient candidate = new HubControlClient(host, store.invitation());
+        try {
+            JSONObject info = candidate.probeInfo();
+            String expected = store.get("deviceId", "");
+            if (!expected.isEmpty() && !expected.equals(info.optString("deviceId"))) { candidate.cancel(); return null; }
+            if (!revision.equals(store.get("transportRevision", ""))) throw new java.util.concurrent.CancellationException("连接通道已改变。");
+            store.mergeAddresses(info.optJSONArray("addresses"), host);
+            return candidate;
+        } catch (Exception error) { candidate.cancel(); throw error; }
+    }
+    /** Recover a changed LAN/USB address without waiting for the user to reopen the binding page. */
+    private List<String> discoverLanHosts() {
+        long now = SystemClock.elapsedRealtime();
+        if (now < nextDiscoveryAt || stopped || "manual".equals(store.transport().provider)) return Collections.emptyList();
+        nextDiscoveryAt = now + 10000;
+        CountDownLatch found = new CountDownLatch(1);
+        Set<String> addresses = Collections.synchronizedSet(new LinkedHashSet<>());
+        HubLanDiscovery discovery = new HubLanDiscovery(this);
+        try {
+            main.post(() -> {
+                if (stopped || Thread.currentThread().isInterrupted()) return;
+                discovery.start((devices, message) -> {
+                    for (HubLanDiscovery.Device device : devices) if (device != null && HubRoutes.isUsableIpv4(device.address)) addresses.add(device.address);
+                    if (!addresses.isEmpty()) found.countDown();
+                });
+            });
+            found.await(2500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException error) { Thread.currentThread().interrupt(); }
+        finally { main.post(discovery::stop); }
+        synchronized (addresses) { return new ArrayList<>(addresses); }
+    }
     private HubControlClient connect() throws Exception {
         String revision = store.get("transportRevision", "");
         if (!revision.equals(transportRevision)) { if (control != null) control.cancel(); control = null; selectedHost = ""; transportRevision = revision; currentRequest = null; publish(null); }
@@ -72,14 +110,18 @@ public final class HubReceiverService extends Service {
         for (String host : candidates) {
             if (stopped) return null;
             try {
-                HubControlClient candidate = new HubControlClient(host, store.invitation());
-                JSONObject info = candidate.probeInfo();
-                String expected = store.get("deviceId", "");
-                if (!expected.isEmpty() && !expected.equals(info.optString("deviceId"))) { candidate.cancel(); continue; }
-                if (!revision.equals(store.get("transportRevision", ""))) { candidate.cancel(); throw new java.util.concurrent.CancellationException("连接通道已改变。"); }
-                store.mergeAddresses(info.optJSONArray("addresses"), host);
-                selectedHost = host; control = candidate; return control;
-            } catch (Exception e) { failure = e; }
+                HubControlClient candidate = connectCandidate(host, revision);
+                if (candidate != null) { selectedHost = host; control = candidate; return control; }
+            } catch (java.util.concurrent.CancellationException e) { throw e; }
+            catch (Exception e) { failure = e; }
+        }
+        for (String host : discoverLanHosts()) {
+            if (candidates.contains(host) || stopped) continue;
+            try {
+                HubControlClient candidate = connectCandidate(host, revision);
+                if (candidate != null) { selectedHost = host; control = candidate; return control; }
+            } catch (java.util.concurrent.CancellationException e) { throw e; }
+            catch (Exception e) { failure = e; }
         }
         if (failure != null) throw failure;
         throw new java.io.IOException("电脑尚未在线");
@@ -98,7 +140,7 @@ public final class HubReceiverService extends Service {
             String after = request == null ? "" : request.optString("id");
             currentRequest = request;
             if (!before.equals(after)) publish(request);
-        } catch (Exception ignored) { control = null; }
+        } catch (Exception ignored) { HubControlClient failed = control; control = null; if (failed != null) failed.cancel(); }
     }
     private void publish(JSONObject request) {
         ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(NOTIFICATION, notification(request));

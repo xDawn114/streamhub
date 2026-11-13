@@ -3,8 +3,8 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Desktop account/connection reference: contact, Segoe MDL2 E77B. -->
+    <!-- Classic chain mark; the navigation tint supplies the active/inactive color. -->
     <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M16,7.25A4,4 0,1 1,8 7.25A4,4 0,1 1,16 7.25ZM4.5,20.25V18.5C4.5,15.75 7.5,13.75 12,13.75C16.5,13.75 19.5,15.75 19.5,18.5V20.25" />
+        android:strokeWidth="2.25" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M9.5,7.75H7.75A4.25,4.25 0,0 0,7.75 16.25H9.5M14.5,7.75H16.25A4.25,4.25 0,0 1,16.25 16.25H14.5M8.25,12H15.75" />
 </vector>

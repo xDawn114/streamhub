@@ -18,9 +18,8 @@ import java.util.concurrent.*;
 public final class HubFilesActivity extends Activity {
     /** Top-level destinations switch in place, including this separate Activity. */
     public static void open(Activity source) {
-        source.startActivity(new Intent(source,HubFilesActivity.class).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION),
-                android.app.ActivityOptions.makeCustomAnimation(source,0,0).toBundle());
-        source.overridePendingTransition(0,0);
+        source.startActivity(new Intent(source,HubFilesActivity.class), HubNavigation.transition(source));
+        HubNavigation.holdSurface(source);
     }
     private static final int OPEN_FILE=861, OPEN_FOLDER=862;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -51,17 +50,15 @@ public final class HubFilesActivity extends Activity {
     private int background, surface, field, border, textColor, muted, accent, primary, onAccent, ripple;
     private final Runnable refresh = new Runnable() { @Override public void run() { if (foreground) { renderLocal(); if (!checking && SystemClock.elapsedRealtime() >= nextRemoteRefreshAt) loadRemote(); main.postDelayed(this, 1000); } } };
     @Override public void onCreate(Bundle saved) {
-        super.onCreate(saved); store=new HubStore(this); tasks=new HubFileTasks(this);
-        if(Build.VERSION.SDK_INT>=34) {
-            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN,0,0);
-            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE,0,0);
-        }
+        super.onCreate(saved); HubNavigation.prepareWindow(this); store=new HubStore(this); tasks=new HubFileTasks(this);
         if(saved!=null)try{String value=saved.getString("download", "");if(!value.isEmpty())chosenDownload=new JSONObject(value);}catch(Exception ignored){}
         if(saved!=null) { browsePath=saved.getString("browsePath", ""); browseOffset=saved.getInt("browseOffset", 0); browseRootId=saved.getString("browseRootId","");pendingRootId=saved.getString("pendingRootId","");pendingComputer=saved.getString("pendingComputer","");showingTasks=saved.getBoolean("showingTasks",false);
             browseSort=saved.getString("browseSort","name");
             try{JSONArray selected=new JSONArray(saved.getString("selectedFiles","[]"));for(int i=0;i<selected.length();i++){JSONObject entry=selected.getJSONObject(i);selectedFiles.put(entry.getString("path"),entry);}}catch(Exception ignored){}
             try{pendingBrowseDownloads=new JSONArray(saved.getString("pendingBrowseDownloads","[]"));}catch(Exception ignored){} }
         refreshPalette();
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(background));
+        getWindow().getDecorView().setBackgroundColor(background);
         ScrollView scroll=new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(background);
         FrameLayout centered=new FrameLayout(this); scroll.addView(centered);
         HubWindowLayout layout=HubWindowLayout.of(this);
@@ -69,8 +66,10 @@ public final class HubFilesActivity extends Activity {
         centered.addView(content,new FrameLayout.LayoutParams(dp(layout.contentWidthDp()),-2,android.view.Gravity.TOP|android.view.Gravity.CENTER_HORIZONTAL));
         HubNavigation navigation=new HubNavigation(this,scroll,3,index->{
             if(index==3)return;
-            startActivity(new Intent(this,HubActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_NO_ANIMATION).putExtra("HubPage",index),
-                    android.app.ActivityOptions.makeCustomAnimation(this,0,0).toBundle()); finish();
+            startActivity(new Intent(this,HubActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("HubPage",index), HubNavigation.transition(this));
+            // CLEAR_TOP closes this Activity after the hub is ready. Do not
+            // separately finish and discard its surface before that handoff.
+            HubNavigation.holdSurface(this);
         }); setContentView(navigation.view);
         LinearLayout toolbar=new LinearLayout(this); toolbar.setGravity(android.view.Gravity.CENTER_VERTICAL);
         Button back=new Button(this); back.setText("‹"); back.setTextSize(32); back.setTextColor(accent); back.setAllCaps(false); back.setContentDescription("返回设备");
@@ -108,7 +107,7 @@ public final class HubFilesActivity extends Activity {
         showFilePane(showingTasks);renderControls();
         loadRemote();
     }
-    @Override public void finish() { super.finish(); overridePendingTransition(0,0); }
+    @Override public void finish() { super.finish(); HubNavigation.holdSurface(this); }
     private int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
     private void refreshPalette() {
         background=HubTheme.background(this); surface=HubTheme.surface(this); field=HubTheme.field(this); border=HubTheme.border(this);

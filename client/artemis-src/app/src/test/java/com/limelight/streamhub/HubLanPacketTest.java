@@ -18,7 +18,7 @@ public class HubLanPacketTest {
     }
     @Test public void unrelatedSourceAndOverlayCannotAdvertiseAnotherAddress() {
         assertNull(HubLanPacket.parse(windowsPacket(),"10.1.2.4"));
-        assertNull(HubLanPacket.parse(windowsPacket(),"100.64.0.7"));
+        assertNull(HubLanPacket.parse(windowsPacket(),"100.89.106.49"));
         assertNull(HubLanPacket.parse(windowsPacket(),"8.8.8.8"));
     }
     @Test public void everyTruncatedWindowsResponseIsRejected() {

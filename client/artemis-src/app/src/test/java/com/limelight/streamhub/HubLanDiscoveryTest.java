@@ -13,7 +13,7 @@ import static org.junit.Assert.*;
 public class HubLanDiscoveryTest {
     @Test public void enrollmentScopeExcludesInternetAndOverlayAddresses() {
         for(String value:new String[]{"10.1.2.3","172.16.0.1","172.31.255.254","192.168.1.2"})assertTrue(value,HubLanDiscovery.localIpv4(value));
-        for(String value:new String[]{"169.254.2.1","100.64.0.7","8.8.8.8","127.0.0.1","172.32.0.1","::1","192.168.1.256","bad"})assertFalse(value,HubLanDiscovery.localIpv4(value));
+        for(String value:new String[]{"169.254.2.1","100.89.106.49","8.8.8.8","127.0.0.1","172.32.0.1","::1","192.168.1.256","bad"})assertFalse(value,HubLanDiscovery.localIpv4(value));
     }
     @Test public void android14StopIsIdempotentWithoutStartingNetworkDiscovery() {
         HubLanDiscovery discovery=new HubLanDiscovery(RuntimeEnvironment.getApplication());

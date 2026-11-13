@@ -126,11 +126,17 @@ public final class HubActivity extends Activity {
         int flags = HubTheme.isDark(this) ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !HubTheme.isDark(this)) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         getWindow().getDecorView().setSystemUiVisibility(flags); HubStreamUi.keepColors(getWindow().getDecorView());
+        applyWindowSurface();
+    }
+    /** Keep activity transitions on the same themed surface instead of the platform black window. */
+    private void applyWindowSurface() {
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BACKGROUND));
+        getWindow().getDecorView().setBackgroundColor(BACKGROUND);
     }
     private final Runnable poll = new Runnable() { @Override public void run() { if (foreground) { refreshNetwork(); refreshComputerPresence(); main.postDelayed(this, 3000); } } };
 
     @Override public void onCreate(Bundle state) {
-        super.onCreate(state); store = new HubStore(this); updates = HubUpdates.get(this); network = EmbeddedNetwork.get(this); refreshPalette();
+        super.onCreate(state); HubNavigation.prepareWindow(this); store = new HubStore(this); updates = HubUpdates.get(this); network = EmbeddedNetwork.get(this); refreshPalette();
         build();
         if (HubReceiverService.isEnabled(this) && store.bound()) HubReceiverService.enable(this, true);
         handleReceiverIntent(getIntent());

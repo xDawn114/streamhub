@@ -19,10 +19,12 @@
         <!-- All customizations that are NOT specific to a particular API-level can go here. -->
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
-        <item name="android:statusBarColor">#1A1A1A</item>
-        <item name="android:navigationBarColor">#1A1A1A</item>
-        <item name="android:colorBackground">#1A1A1A</item>
-        <item name="android:windowBackground">#1A1A1A</item>
+        <item name="android:windowDisablePreview">true</item>
+        <!-- Use the same surface as the hub before the first view is attached. -->
+        <item name="android:statusBarColor">@color/hub_background</item>
+        <item name="android:navigationBarColor">@color/hub_background</item>
+        <item name="android:colorBackground">@color/hub_background</item>
+        <item name="android:windowBackground">@color/hub_background</item>
     </style>
 
     <style name="StreamBaseTheme" parent="AppBaseTheme">

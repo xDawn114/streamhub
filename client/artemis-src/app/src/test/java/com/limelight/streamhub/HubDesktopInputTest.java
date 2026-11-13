@@ -36,6 +36,12 @@ public class HubDesktopInputTest {
         HubDesktopInput.Snapshot state=HubDesktopInput.Snapshot.parse(new JSONObject("{\"known\":true,\"captionButtons\":[{\"left\":0,\"top\":0,\"right\":1,\"bottom\":1},{\"left\":-1,\"top\":0,\"right\":0.2,\"bottom\":0.02}]}"),100);
         assertFalse(state.captionButton(0.1f,0.01f,200));assertFalse(HubDesktopInput.Snapshot.parse(null,100).locked(101));
     }
+    @Test public void keepsCaptionRegionsForMultipleVisibleWindows()throws Exception {
+        StringBuilder json=new StringBuilder("{\"known\":true,\"captionButtons\":[");
+        for(int i=0;i<8;i++){if(i>0)json.append(',');float left=0.02f*i;json.append("{\"left\":").append(left).append(",\"top\":0.01,\"right\":").append(left+0.03f).append(",\"bottom\":0.05}");}
+        HubDesktopInput.Snapshot state=HubDesktopInput.Snapshot.parse(new JSONObject(json.append("]}").toString()),100);
+        assertTrue(state.captionButton(0.14f,0.02f,200));
+    }
     private Activity activity(){Activity a=Robolectric.buildActivity(Activity.class).setup().get();
         KeyguardManager keyguard=(KeyguardManager)a.getSystemService(Context.KEYGUARD_SERVICE);
         shadowOf(keyguard).setIsDeviceSecure(true);shadowOf(keyguard).setIsDeviceLocked(false);return a;}

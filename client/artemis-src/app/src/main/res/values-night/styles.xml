@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match the dark hub surface during the Android starting window too. -->
+    <style name="AppTheme" parent="AppBaseTheme">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:statusBarColor">@color/hub_background</item>
+        <item name="android:navigationBarColor">@color/hub_background</item>
+        <item name="android:colorBackground">@color/hub_background</item>
+        <item name="android:windowBackground">@color/hub_background</item>
+    </style>
+</resources>

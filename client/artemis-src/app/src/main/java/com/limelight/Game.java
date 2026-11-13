@@ -3653,6 +3653,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                             hubGestureNative=!prefConfig.touchscreenTrackpad && (login ||
                                     prefConfig.enableMultiTouchScreen && !caption &&
                                     !getSharedPreferences("streamhub_controls",MODE_PRIVATE).getBoolean("touch_compatibility",true));
+                            if(hubDesktopInput!=null)hubDesktopInput.traceGesture(login,caption,hubGestureNative);
                         }
                         boolean nativeGesture=hubGestureActive && hubGestureNative;
                         if(event.getActionMasked()==MotionEvent.ACTION_UP || event.getActionMasked()==MotionEvent.ACTION_CANCEL)hubGestureActive=false;
