@@ -1,6 +1,6 @@
 # Code signing policy
 
-Status: **application preparation; no SignPath approval or signed StreamHub release yet** (2026-11-12).
+Status: **application submitted on 2026-11-12; awaiting review, with no SignPath approval or signed StreamHub release yet** (status recorded 2026-11-13).
 
 The project is applying for free open source code signing through [SignPath.io](https://signpath.io) and the [SignPath Foundation](https://signpath.org). The attribution “Free code signing provided by SignPath.io, certificate by SignPath Foundation” will apply only after acceptance and actual signing; it is not a claim about the current unsigned internal candidates.
 
