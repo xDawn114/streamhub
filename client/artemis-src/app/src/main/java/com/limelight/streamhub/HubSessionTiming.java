@@ -32,5 +32,10 @@ public final class HubSessionTiming {
     }
     public synchronized boolean mediaConnected() { return mediaConnected; }
     public synchronized boolean connectionReported() { return connectionReported; }
-    public synchronized void markConnectionReported() { connectionReported = true; }
+    public synchronized long pendingReportGeneration() {
+        return mediaConnected && !connectionReported ? connectionStarted : -1;
+    }
+    public synchronized void markConnectionReported(long generation) {
+        if (generation == connectionStarted && mediaConnected) connectionReported = true;
+    }
 }

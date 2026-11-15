@@ -130,7 +130,8 @@ public final class HubSessionLease {
     }
     public long connectionElapsedMs() { return timing.elapsed(SystemClock.elapsedRealtime()); }
     private void reportConnected() {
-        if (closed.get() || requestId.isEmpty() || !timing.mediaConnected() || timing.connectionReported()) return;
+        long generation = timing.pendingReportGeneration();
+        if (closed.get() || requestId.isEmpty() || generation < 0) return;
         try {
             JSONObject answer = client().requestLease("requests/" + requestId + "/respond", new JSONObject().put("clientId", store.clientId()).put("action", "connected").put("message", "视频连接已建立"));
             JSONObject request = answer.optJSONObject("request");
@@ -138,7 +139,7 @@ public final class HubSessionLease {
             // The server returns terminal requests unchanged. Stop reporting
             // those too: retries may confirm a connection, never revive it.
             if ("connected".equals(state) || "cancelled".equals(state) || "expired".equals(state)
-                    || "failed".equals(state) || "rejected".equals(state)) timing.markConnectionReported();
+                    || "failed".equals(state) || "rejected".equals(state)) timing.markConnectionReported(generation);
         } catch (Exception ignored) { }
     }
     /** Called after native streaming and authenticated Sunshine quit have both returned. */

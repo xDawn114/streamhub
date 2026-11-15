@@ -66,7 +66,10 @@ public class SeekBarPreference extends Preference
         stepSize = attrs.getAttributeIntValue(SEEKBAR_SCHEMA_URL, "step", 1);
         divisor = attrs.getAttributeIntValue(SEEKBAR_SCHEMA_URL, "divisor", 1);
         keyStepSize = attrs.getAttributeIntValue(SEEKBAR_SCHEMA_URL, "keyStep", 0);
-        seekbarMax = maxValue - minValue;
+        // Resource bounds and persisted values must not wrap into negative progress.
+        seekbarMax = Math.subtractExact(maxValue, minValue);
+        if (seekbarMax < 0 || stepSize <= 0 || divisor <= 0 || keyStepSize < 0)
+            throw new IllegalArgumentException("Invalid seek bar bounds or step");
     }
 
     protected AlertDialog getDialog() {
@@ -100,13 +103,13 @@ public class SeekBarPreference extends Preference
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int value, boolean b) {
-                value += minValue;
-                if (value < minValue) {
+                if (value < 0 || value > seekbarMax) {
                     seekBar.setProgress(0);
                     return;
                 }
-
-                int roundedValue = Math.round((float)value / stepSize) * stepSize;
+                value = Math.addExact(value, minValue);
+                long rounded = Math.round(value / (double)stepSize) * (long)stepSize;
+                int roundedValue = (int)Math.max(minValue, Math.min((long)maxValue, rounded));
                 if (roundedValue != value) {
                     seekBar.setProgress(roundedValue - minValue);
                     return;
@@ -135,6 +138,8 @@ public class SeekBarPreference extends Preference
         if (shouldPersist()) {
             currentValue = getPersistedInt(defaultValue);
         }
+
+        currentValue = Math.max(minValue, Math.min(maxValue, currentValue));
 
         seekBar.setMax(seekbarMax);
         if (keyStepSize != 0) {

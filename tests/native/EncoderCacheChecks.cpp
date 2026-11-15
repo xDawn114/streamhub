@@ -20,7 +20,14 @@ int main() {
   check(!cache.matches("", now), "unknown target cannot use a cache");
   check(!cache.matches(target, now - std::chrono::seconds(1)), "clock anomaly cannot extend cache life");
   check(!cache.matches(target, now + std::chrono::minutes(15)), "bounded cache expires at fifteen minutes");
+  check(cache.same_target(target, now + std::chrono::hours(2)), "expired exact target remains eligible for a real sample, not direct reuse");
+  check(!cache.same_target(target + "new-driver", now + std::chrono::hours(2)), "expired entry never revalidates a different target");
+  check(!cache.same_target("", now), "unknown identity is ineligible for sample revalidation");
+  check(!cache.same_target(target, now - std::chrono::seconds(1)), "clock anomaly cannot revalidate an old identity");
+  cache.remember(target, now + std::chrono::hours(2));
+  check(cache.matches(target, now + std::chrono::hours(2) + std::chrono::minutes(1)), "successful real sample refreshes bounded cache");
   cache.invalidate();
-  check(!cache.matches(target, now), "capture or encoder failure requires full validation");
+  check(!cache.matches(target, now + std::chrono::hours(2)), "capture or encoder failure requires full validation");
+  check(!cache.same_target(target, now + std::chrono::hours(2)), "failed target cannot enter sample-only revalidation");
   std::cout << checks << " encoder cache policy checks passed.\n";
 }

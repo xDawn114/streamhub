@@ -230,7 +230,7 @@
      if (!allow_encoder_probing()) {
        // Error already logged
        return -1;
-@@ -3271,10 +3297,45 @@
+@@ -3271,10 +3297,50 @@
  
      auto encoder_list = encoders;
  
@@ -259,26 +259,31 @@
 +      BOOST_LOG(info) << "[StreamHub] encoder-probe=reused encoder=" << chosen_encoder->name;
        return 0;
      }
-+    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && streamhub_probe_cache.matches(environment)) {
++    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && streamhub_probe_cache.same_target(environment)) {
 +      // A VDD detach/reattach invalidates the DXGI factory even when the target
 +      // GPU, driver, mode and codec configuration are identical. Recreate the
 +      // capture device, but retain the capability flags that were actually tested.
++      // An expired identity uses the same real sample instead of fully probing
++      // every codec after a long idle. Failure always falls through to full probe.
 +      const config_t check {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
 +      std::shared_ptr<platf::display_t> display;
 +      reset_display(display, chosen_encoder->platform_formats->dev_type, output_name, check);
 +      if (display && display->is_codec_supported(chosen_encoder->h264.name, check) &&
 +          validate_config(display, *chosen_encoder, check) >= 0) {
++        streamhub_probe_cache.remember(environment);
 +        BOOST_LOG(info) << "[StreamHub] encoder-probe=target-cache-revalidated encoder=" << chosen_encoder->name;
 +        return 0;
 +      }
 +      streamhub_probe_cache.invalidate();
 +    }
 +    BOOST_LOG(info) << "[StreamHub] encoder-probe=validate reason=" <<
-+      (!chosen_encoder ? "no-valid-result" : platform_changed ? "display-or-driver-changed" : "fallback-encoder");
++      (!chosen_encoder ? "no-valid-result" : encode_failed ? "encode-failed" :
++       (chosen_encoder->flags & ALWAYS_REPROBE) ? "fallback-encoder" :
++       platform_changed ? "display-or-driver-changed" : "target-unknown-changed-or-revalidation-failed");
  
      // Restart encoder selection
      auto previous_encoder = chosen_encoder;
-@@ -3502,6 +3563,7 @@
+@@ -3502,6 +3568,7 @@
        BOOST_LOG(debug) << "ENCODER STATUS ACTIVE_AV1_MODE: "sv << active_av1_mode;
      }
  
@@ -527,20 +532,35 @@
      static std::mutex reenumeration_state_lock;
 --- /dev/null
 +++ b/src/streamhub_probe_cache.h
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,38 @@
 +#pragma once
 +#include <chrono>
 +#include <string>
 +#include <utility>
 +
 +namespace streamhub {
-+  // Process-local only. Unknown identities, timeout, failures and mode changes
-+  // cannot reuse capability flags. No GPU capability is invented or persisted.
++  // Process-local only. Expiry requires a fresh real encoder sample; unknown or
++  // changed identities still need complete probing. Nothing is persisted.
 +  class probe_cache_gate {
 +  public:
 +    using clock = std::chrono::steady_clock;
++    /**
++     * @brief Check whether a real encoder sample may revalidate this target.
++     * @param identity Complete GPU, driver, display and codec identity.
++     * @param now Monotonic observation time; a backwards clock rejects reuse.
++     * @return True only for the same nonempty, previously validated identity.
++     */
++    bool same_target(const std::string &identity, clock::time_point now = clock::now()) const {
++      return !identity.empty() && identity == validated && now >= created;
++    }
++    /**
++     * @brief Check whether the last validation is still within its direct-reuse lifetime.
++     * @param identity Complete target identity.
++     * @param now Monotonic observation time.
++     * @return True only while a matching result is less than fifteen minutes old.
++     */
 +    bool matches(const std::string &identity, clock::time_point now = clock::now()) const {
-+      return !identity.empty() && identity == validated && now >= created && now - created < std::chrono::minutes(15);
++      return same_target(identity, now) && now - created < std::chrono::minutes(15);
 +    }
 +    void remember(std::string identity, clock::time_point now = clock::now()) {
 +      validated = std::move(identity); created = now;

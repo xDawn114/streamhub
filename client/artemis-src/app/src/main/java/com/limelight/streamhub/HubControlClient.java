@@ -45,6 +45,7 @@ public final class HubControlClient {
         };
         SSLContext ssl = SSLContext.getInstance("TLS"); ssl.init(null, new TrustManager[]{trust}, new SecureRandom());
         client = new OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).sslSocketFactory(ssl.getSocketFactory(), trust)
+                .followRedirects(false).followSslRedirects(false)
                 .hostnameVerifier((hostname, session) -> hostname.equals(this.host))
                 .connectTimeout(4, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.SECONDS)
                 .callTimeout(18, TimeUnit.SECONDS).build();

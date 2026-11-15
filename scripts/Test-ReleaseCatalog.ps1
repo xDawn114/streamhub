@@ -9,9 +9,23 @@ $root=[IO.Path]::GetFullPath($ReleaseRoot).TrimEnd('\')
 if($Candidate -notmatch '^candidate-[A-Za-z0-9.-]+$'){throw '候选目录名无效。'}
 $selected=Join-Path $root $Candidate
 $revision=Get-Content -LiteralPath (Join-Path $selected 'source-revision.json') -Raw | ConvertFrom-Json
+$modern=$revision.PSObject.Properties.Name -contains 'versionName'
+function Metadata-Value([string]$Current,[string]$Legacy) {
+    $currentValue=$revision.$Current;$legacyValue=$revision.$Legacy
+    if($null -ne $currentValue -and $null -ne $legacyValue -and $currentValue -cne $legacyValue){throw "源码元数据字段冲突：$Current / $Legacy"}
+    if($null -ne $currentValue){return $currentValue}
+    return $legacyValue
+}
+$version=Metadata-Value 'versionName' 'version'
+$channel=Metadata-Value 'releaseChannel' 'channel'
+$sourceRevision=Metadata-Value 'sourceRevision' 'productRevision'
+if($version -notmatch '^\d+\.\d+\.\d+$' -or $revision.versionCode -notmatch '^[1-9]\d*$' -or
+    $channel -cnotin @('internal','stable')){throw '源码版本、构建序号或渠道无效。'}
+if(($modern -or $sourceRevision) -and $sourceRevision -notmatch '^[a-fA-F0-9]{40}$'){throw '源码提交标识无效。'}
 $hashes=@(Get-Content -LiteralPath (Join-Path $selected 'SHA256.json') -Raw | ConvertFrom-Json)
 $required=@('windows/我控制-电脑端安装.exe','windows/我控制-电脑端源码.zip','android/我控制-安卓端.apk','android/我控制-安卓端源码.zip')
-if($hashes.Count -ne $required.Count -or @($hashes.file | Sort-Object -Unique).Count -ne $required.Count){throw '候选哈希清单必须逐项覆盖双端安装包和源码。'}
+if($modern -or @($hashes | Where-Object file -CEQ 'source-review/product-source.zip').Count){$required+='source-review/product-source.zip'}
+if($hashes.Count -ne $required.Count -or @($hashes.file | Sort-Object -Unique).Count -ne $required.Count){throw '候选哈希清单必须逐项覆盖双端安装包、源码及声明的完整产品源码。'}
 $verified=@(foreach($relative in $required){
     $entry=@($hashes | Where-Object file -CEQ $relative)
     if($entry.Count -ne 1 -or $entry[0].sha256 -notmatch '^[A-Fa-f0-9]{64}$'){throw "哈希缺项：$relative"}
@@ -22,18 +36,18 @@ $verified=@(foreach($relative in $required){
 })
 $pc=Get-Content -LiteralPath (Join-Path $selected 'windows/构建结果.json') -Raw | ConvertFrom-Json
 $android=Get-Content -LiteralPath (Join-Path $selected 'android/安卓构建结果.json') -Raw | ConvertFrom-Json
-if($revision.version -ne $pc.version -or $revision.version -ne $android.versionName -or
+if($version -cne $pc.version -or $version -cne $android.versionName -or
     $revision.versionCode -ne $pc.versionCode -or $revision.versionCode -ne $android.versionCode -or
-    $revision.channel -ne $pc.releaseChannel -or $revision.channel -ne $android.releaseChannel){throw '双端版本、构建序号或渠道不一致。'}
+    $channel -cne $pc.releaseChannel -or $channel -cne $android.releaseChannel){throw '双端版本、构建序号或渠道不一致。'}
 if($pc.sha256 -ine $verified[0].sha256 -or $android.sha256 -ine $verified[2].sha256){throw '构建结果与发布哈希清单不一致。'}
 $catalog=@(foreach($dir in Get-ChildItem -LiteralPath $root -Directory | Sort-Object Name){
     # Only immediate package names are checked; historical backups are never selected for installation.
     $files=@(foreach($sub in @('', 'windows','android')){Get-ChildItem -LiteralPath (Join-Path $dir.FullName $sub) -File -ErrorAction SilentlyContinue})
-    [ordered]@{directory=$dir.Name;role=if($dir.Name -ceq $Candidate){if($revision.installed){'selected-with-installed-evidence'}else{'local-candidate-not-installed'}}elseif($dir.Name -eq 'candidate-0.8.7-138'){'last-installed-evidence-stage77'}else{'historical-keep'};
+    [ordered]@{directory=$dir.Name;role=if($dir.Name -ceq $Candidate){'selected-artifacts-verified-installation-not-assessed'}else{'not-selected'};
         windows=@($files | Where-Object Name -EQ '我控制-电脑端安装.exe' | ForEach-Object {[IO.Path]::GetRelativePath($dir.FullName,$_.FullName)});
         android=@($files | Where-Object Name -EQ '我控制-安卓端.apk' | ForEach-Object {[IO.Path]::GetRelativePath($dir.FullName,$_.FullName)})}
 })
-$report=[ordered]@{checkedUtc=[DateTimeOffset]::UtcNow.ToString('o');releaseRoot=$root;selected=$Candidate;version=$revision.version;versionCode=$revision.versionCode;channel=$revision.channel;
+$report=[ordered]@{checkedUtc=[DateTimeOffset]::UtcNow.ToString('o');releaseRoot=$root;selected=$Candidate;version=$version;versionCode=$revision.versionCode;channel=$channel;sourceRevision=$sourceRevision;
     artifactChecksPassed=$true;installed=$revision.installed;deviceAcceptance=$revision.deviceAcceptance;files=$verified;directories=$catalog;
     note='只读包盘点；不安装、不运行候选、不清理历史包。文件存在和哈希一致不代表安装或发布门通过。'}
 $json=$report | ConvertTo-Json -Depth 8

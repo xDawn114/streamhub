@@ -49,7 +49,7 @@ if($readiness.windows.feedReady -and $readiness.android.feedReady){
     if(-not $sameOrigin){$missing.Add('双端清单必须位于同一HTTPS站点')}
 }
 $plan=[ordered]@{schema=1;mode=$Mode;version=$version.Name;versionCode=$version.Code;channel=$version.Channel;
-    sourceRevision=(Get-Content -LiteralPath (Join-Path $candidate 'source-revision.json') -Raw|ConvertFrom-Json).productRevision;
+    sourceRevision=$catalog.sourceRevision;
     candidate=$candidate;trustMatchesCandidate=$trustMatches;pairedManifestKey=$readiness.pairedManifestKey;sameOrigin=$sameOrigin;
     windowsQueryOnly=[bool]$WindowsQueryOnly;artifacts=$catalog.files;missing=@($missing);readyToUpload=$false;
     onlineAcceptance='未执行；Plan不联网、不签名、不生成私钥，Stage只在本机生成待审目录，不上传';

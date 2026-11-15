@@ -6,12 +6,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.limelight.utils.SpinnerDialog;
+import com.limelight.utils.HelpUrlPolicy;
 
 public class HelpActivity extends AppCompatActivity {
 
@@ -24,6 +27,9 @@ public class HelpActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        String initialUrl = getIntent().getDataString();
+        if (!HelpUrlPolicy.allowed(initialUrl)) { finish(); return; }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             onBackInvokedCallback = new OnBackInvokedCallback() {
@@ -49,10 +55,20 @@ public class HelpActivity extends AppCompatActivity {
         webView.getSettings().setUseWideViewPort(true);
         webView.getSettings().setLoadWithOverviewMode(true);
 
-        // This allows the links to places on the same page to work
-        webView.getSettings().setJavaScriptEnabled(true);
+        // Ordinary links and anchors work without script execution or access to app data.
+        webView.getSettings().setJavaScriptEnabled(false);
+        webView.getSettings().setAllowFileAccess(false);
+        webView.getSettings().setAllowContentAccess(false);
+        webView.getSettings().setAllowFileAccessFromFileURLs(false);
+        webView.getSettings().setAllowUniversalAccessFromFileURLs(false);
+        webView.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return !HelpUrlPolicy.allowed(request.getUrl().toString());
+            }
+
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 if (loadingDialog == null) {
@@ -75,7 +91,7 @@ public class HelpActivity extends AppCompatActivity {
             }
         });
 
-        webView.loadUrl(getIntent().getData().toString());
+        webView.loadUrl(initialUrl);
     }
 
     private void refreshBackDispatchState() {
@@ -100,6 +116,8 @@ public class HelpActivity extends AppCompatActivity {
             }
         }
 
+        if (loadingDialog != null) { loadingDialog.dismiss(); loadingDialog = null; }
+        if (webView != null) { webView.stopLoading(); webView.destroy(); webView = null; }
         super.onDestroy();
     }
 
