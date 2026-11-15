@@ -1,4 +1,5 @@
 #include "src/streamhub_probe_cache.h"
+#include "src/streamhub_probe_plan.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -29,5 +30,13 @@ int main() {
   cache.invalidate();
   check(!cache.matches(target, now + std::chrono::hours(2)), "capture or encoder failure requires full validation");
   check(!cache.same_target(target, now + std::chrono::hours(2)), "failed target cannot enter sample-only revalidation");
-  std::cout << checks << " encoder cache policy checks passed.\n";
+  for (auto value : {"full", "", "untrusted", "sdr-hevc\nfull"}) {
+    streamhub::probe_plan plan {value};
+    check(!plan.basic_only() && plan.hevc() && plan.av1(), "legacy and unrecognised hints retain complete probes");
+  }
+  check(streamhub::probe_plan{"sdr-h264"}.basic_only() && !streamhub::probe_plan{"sdr-h264"}.hevc() && !streamhub::probe_plan{"sdr-h264"}.av1(), "H264 SDR request excludes unrelated codec probes");
+  check(streamhub::probe_plan{"sdr-hevc"}.hevc() && !streamhub::probe_plan{"sdr-hevc"}.av1(), "HEVC SDR request retains HEVC and excludes AV1");
+  check(!streamhub::probe_plan{"sdr-av1"}.hevc() && streamhub::probe_plan{"sdr-av1"}.av1(), "AV1 SDR request retains AV1 and excludes HEVC");
+  check(streamhub::probe_plan{"sdr-auto"}.hevc() && streamhub::probe_plan{"sdr-auto"}.av1(), "automatic SDR retains all basic codec choices");
+  std::cout << checks << " encoder cache and probe policy checks passed.\n";
 }

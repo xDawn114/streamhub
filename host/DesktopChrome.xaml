@@ -57,7 +57,7 @@
    <Trigger Property="IsMouseCaptureWithin" Value="True"><Setter Property="Opacity" Value="1"/></Trigger>
   </Style.Triggers>
  </Style>
- <Style TargetType="ScrollViewer">
+ <Style x:Key="OverlayScrollViewer" TargetType="ScrollViewer">
   <Setter Property="FontWeight" Value="Normal"/><Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
   <Setter Property="local:ScrollActivity.Enabled" Value="True"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
@@ -68,4 +68,5 @@
    </Grid>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
+ <Style TargetType="ScrollViewer" BasedOn="{StaticResource OverlayScrollViewer}"/>
 </ResourceDictionary>

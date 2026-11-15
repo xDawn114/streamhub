@@ -24,10 +24,10 @@ jobs:
       actions: read
       security-events: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4; existing reviewed lock
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pinned upstream action; reviewed stage120
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v4; existing reviewed lock
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # pinned upstream action; reviewed stage120
         with:
           dotnet-version: '8.0.x'
       # v4 annotated tag peeled to the commit via read-only git ls-remote, 2026-11-13.
@@ -57,7 +57,7 @@ jobs:
       actions: read
       security-events: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4; existing reviewed lock
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pinned upstream action; reviewed stage120
         with:
           persist-credentials: false
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066

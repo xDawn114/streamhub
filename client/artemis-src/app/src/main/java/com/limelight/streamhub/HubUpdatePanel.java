@@ -3,7 +3,6 @@ package com.limelight.streamhub;
 import android.app.Activity;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -34,6 +33,8 @@ public final class HubUpdatePanel extends LinearLayout {
         progress.setMax(100); progress.setProgressTintList(ColorStateList.valueOf(HubTheme.primary(activity))); progress.setContentDescription("更新下载进度");
         LayoutParams progressSize = new LayoutParams(-1, dp(6)); progressSize.setMargins(0, dp(8), 0, dp(8)); addView(progress, progressSize);
         check = button("检查更新", false, v -> updates.check(true, null));
+        HubButtons.settingAction(check);
+        check.setLayoutParams(new LayoutParams(-1, -2));
         download = button("下载更新", true, v -> updates.download());
         install = button("安装更新", true, v -> HubStreamUi.hubDialog(activity).setTitle("安装更新？")
                 .setMessage("安装将保留电脑绑定和设置。请先结束串流与文件操作，并完成系统安装确认。")
@@ -69,11 +70,7 @@ public final class HubUpdatePanel extends LinearLayout {
         LayoutParams layout = new LayoutParams(-1, -2); layout.bottomMargin = dp(8); addView(view, layout); return view;
     }
     private Button button(String title, boolean primary, OnClickListener action) {
-        Button button = new Button(activity); button.setText(title); button.setAllCaps(false); button.setTextSize(16);
-        button.setTextColor(primary ? HubTheme.onAccent(activity) : HubTheme.accent(activity));
-        GradientDrawable shape = new GradientDrawable(); shape.setColor(primary ? HubTheme.primary(activity) : HubTheme.selected(activity)); shape.setCornerRadius(dp(10));
-        button.setBackground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(HubTheme.ripple(activity)), shape, null));
-        button.setElevation(0); button.setStateListAnimator(null); button.setMinimumHeight(dp(48)); button.setPadding(dp(16), dp(8), dp(16), dp(8));
+        Button button = new Button(activity); button.setText(title); HubButtons.apply(button, primary);
         LayoutParams layout = new LayoutParams(-2, -2); layout.topMargin = dp(8); addView(button, layout); button.setOnClickListener(action); return button;
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }

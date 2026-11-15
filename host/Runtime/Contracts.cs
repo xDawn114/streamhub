@@ -25,7 +25,8 @@ public sealed record RuntimeRequest(string Command, string? Profile = null, stri
     string? LoginSecret = null, bool? LoginSubmit = null, string? PreventSleepMode = null,
     bool? AutomaticLoginEnabled = null, long? PolicyRevision = null, bool? AllowPublicLan = null,
     int? DeviceScope = null, bool? LegacyBindingAllowed = null,
-    string? ControllerName = null, string? ControllerCredentialId = null, string? ControllerChannel = null);
+    string? ControllerName = null, string? ControllerCredentialId = null, string? ControllerChannel = null,
+    string? EncoderProbe = null);
 
 public sealed record MediaIdentityRequest(string Mode, string ClientCertificate);
 public sealed record MediaIdentityResult([property: JsonRequired] bool Paired, [property: JsonRequired] string? ServerCertificate);

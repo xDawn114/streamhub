@@ -298,6 +298,30 @@ internal sealed class ProfileStore(string root, string data)
         .Where(kv => !string.Equals(kv.Key, "encoder", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(kv.Value))
         .Select(kv => $"{kv.Key} = {kv.Value}");
 
+    internal async Task<string> ReadEncoderProbeAsync(string profile, CancellationToken token)
+    {
+        var path = ConfigFor(profile);
+        if (!File.Exists(path)) return "full";
+        var entries = (await File.ReadAllLinesAsync(path, token))
+            .Where(line => Regex.IsMatch(line, @"^\s*streamhub_probe_plan\s*=", RegexOptions.IgnoreCase)).ToArray();
+        if (entries.Length > 1) throw new InvalidOperationException("编码探测配置重复，未更改配置。");
+        return StreamHub.Host.Runtime.EncoderProbePlan.Validate(entries.Length == 0 ? null : entries[0].Split('=', 2)[1].Trim());
+    }
+
+    // Caller owns the runtime gate and has verified the selected engine is stopped.
+    internal async Task ConfigureEncoderProbeAsync(string profile, string plan, CancellationToken token)
+    {
+        plan = StreamHub.Host.Runtime.EncoderProbePlan.Validate(plan);
+        await EnsureAsync(profile, token);
+        var path = ConfigFor(profile);
+        var lines = (await File.ReadAllLinesAsync(path, token)).ToList();
+        lines.RemoveAll(line => Regex.IsMatch(line, @"^\s*streamhub_probe_plan\s*=", RegexOptions.IgnoreCase));
+        lines.Add("streamhub_probe_plan = " + plan);
+        var temporary = path + ".new";
+        await File.WriteAllLinesAsync(temporary, lines, new UTF8Encoding(false), token);
+        File.Move(temporary, path, true);
+    }
+
     public async Task<BackendCredentials> ReadCredentialsAsync(string profile, CancellationToken cancellationToken) =>
         JsonSerializer.Deserialize<BackendCredentials>(await File.ReadAllTextAsync(Path.Combine(DirectoryFor(profile), "admin.json"), cancellationToken))
         ?? throw new InvalidOperationException("串流认证配置不完整，请修复安装。");

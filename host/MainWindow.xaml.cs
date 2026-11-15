@@ -114,9 +114,6 @@ public partial class MainWindow : Window
                 PeerList.ItemsSource = null;
                 PeerEmptyText.Visibility = Visibility.Visible;
             }
-            var usb = local.Where(x => x.Usb).ToArray();
-            UsbStateText.Text = usb.Length == 0 ? "当前未发现 USB 共享网卡。" : string.Join(Environment.NewLine, usb.Select(x => $"已发现 {x.Name}：{string.Join(" / ", x.Addresses)}"));
-            DisplayStateText.Text = DisplayController.Describe();
             RefreshDevicePresentation();
             _ = RefreshLocalBindingAsync();
             if (!_detailsRefreshing && DateTimeOffset.UtcNow - _lastDetailsRefresh >= TimeSpan.FromSeconds(10))

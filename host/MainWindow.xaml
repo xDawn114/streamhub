@@ -9,7 +9,7 @@
     <ResourceDictionary Source="DesktopChrome.xaml" />
     <ResourceDictionary Source="DesktopLayout.xaml" />
    </ResourceDictionary.MergedDictionaries>
-   <Style TargetType="ScrollViewer"><Setter Property="Focusable" Value="False"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/></Style>
+   <Style TargetType="ScrollViewer" BasedOn="{StaticResource OverlayScrollViewer}"><Setter Property="Focusable" Value="False"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/></Style>
    <Style TargetType="TextBlock">
     <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
@@ -341,11 +341,7 @@
     <ColumnDefinition Width="138" />
    </Grid.ColumnDefinitions>
    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,16,0">
-    <Border Width="24" Height="24" Background="{DynamicResource Accent}" CornerRadius="7" Margin="0,0,8,0">
-     <Viewbox Margin="5">
-      <Path Fill="{DynamicResource OnAccent}" Data="M 2,3 L 22,3 A 2,2 0 0 1 24,5 L 24,16 A 2,2 0 0 1 22,18 L 2,18 A 2,2 0 0 1 0,16 L 0,5 A 2,2 0 0 1 2,3 Z M 7,20 L 17,20 L 17,22 L 7,22 Z M 4,23 L 20,23 L 20,24 L 4,24 Z" />
-     </Viewbox>
-    </Border>
+    <Image x:Name="SoftwareIcon" Source="Assets/我控制.png" Width="24" Height="24" Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="我控制图标"/>
     <TextBlock Text="我控制" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
     <TextBlock Text="iControl" FontSize="12" Foreground="{DynamicResource Muted}" Margin="8,0,0,0" VerticalAlignment="Center" />
     <TextBlock x:Name="BrandVersion" FontSize="11" Foreground="{DynamicResource Muted}" Margin="12,0,0,0" VerticalAlignment="Center" />
@@ -574,7 +570,7 @@
      <TextBlock Text="设置" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,20" />
      <TabControl x:Name="SettingsCategories" Grid.Row="1" Style="{StaticResource SettingsCategoryControl}" AutomationProperties.Name="电脑设置分类">
       <TabItem Header="常规" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>
          <local:SettingRow Header="应用主题" ToolTip="跟随系统，或选择浅色与深色外观" Tag="">
           <ComboBox x:Name="ThemeChoice" Grid.Column="1" AutomationProperties.Name="应用主题" SelectionChanged="Appearance_Changed" Width="224">
@@ -602,7 +598,7 @@
        </ScrollViewer>
       </TabItem>
       <TabItem Header="安全与权限" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>
          <Border Style="{StaticResource Card}">
           <StackPanel>
@@ -624,34 +620,30 @@
        </ScrollViewer>
       </TabItem>
       <TabItem Header="输入" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>
          <Border Style="{StaticResource Card}">
           <StackPanel>
-           <TextBlock Text="快捷键中心" Style="{StaticResource Heading}" />
-           <TextBlock Text="本机快捷键只操作这台电脑；安卓控制菜单里的组合键发送给远端 Windows。" Style="{StaticResource Caption}" Margin="0,0,0,16" />
+           <TextBlock Text="快捷键" Style="{StaticResource Heading}" />
            <TextBlock Text="本机操作" FontWeight="SemiBold" Margin="0,0,0,8" />
            <TextBlock Text="Ctrl + Alt + F12    立即恢复隐私屏" Margin="0,0,0,16" />
            <TextBlock Text="发送到电脑" FontWeight="SemiBold" Margin="0,0,0,8" />
            <TextBlock Text="Alt + Tab    切换上一个窗口&#10;Win + Tab    查看 Windows 任务视图&#10;Win + D    显示桌面&#10;Ctrl + C / V / X    复制、粘贴、剪切&#10;Ctrl + Z    撤销&#10;Esc    取消当前操作" LineHeight="30" />
-           <TextBlock Text="Android 可能保留实体键盘的原始 Alt+Tab；可用控制菜单的 Alt+Tab，或 Ctrl+Alt+Tab 替代组合键。不会更改系统保留键。" Style="{StaticResource Caption}" Margin="0,16,0,0" />
-           <TextBlock Text="触控、键盘、声音、画质和分辨率在安卓会话内调整；电脑的安全策略不在安卓重复配置。" Style="{StaticResource Caption}" Margin="0,12,0,0" />
           </StackPanel>
          </Border>
         </StackPanel>
        </ScrollViewer>
       </TabItem>
       <TabItem Header="网络" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>
          <Border Style="{StaticResource Card}" Loaded="NetworkAccess_Loaded">
           <StackPanel>
            <TextBlock Text="网络访问" Style="{StaticResource Heading}" />
-           <TextBlock Text="局域网默认仅允许专用和域网络。异地连接使用独立的安全隧道规则，设备仍需绑定认证。" Style="{StaticResource Caption}" FontSize="12" />
            <local:SettingRow Header="允许公共网络局域网连接" ToolTip="仅在确认网络可信时开启，设备仍需绑定" Tag="">
             <CheckBox x:Name="PublicLanAccessCheck" Click="NetworkAccess_Changed" MinHeight="40" AutomationProperties.Name="允许公共网络局域网连接" />
            </local:SettingRow>
-           <TextBlock x:Name="NetworkAccessStateText" Text="正在读取电脑网络访问策略…" Style="{StaticResource Caption}" FontSize="12" AutomationProperties.LiveSetting="Polite" />
+           <TextBlock x:Name="NetworkAccessStateText" Text="读取中…" Style="{StaticResource Caption}" FontSize="12" AutomationProperties.LiveSetting="Polite" />
            <Button x:Name="SaveNetworkAccessButton" Content="保存网络访问" Click="SaveNetworkAccess_Click" Margin="0,12,0,0" />
           </StackPanel>
          </Border>
@@ -659,7 +651,7 @@
        </ScrollViewer>
       </TabItem>
       <TabItem Header="更新与维护" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>
          <Border Style="{StaticResource Card}">
           <StackPanel>
@@ -697,7 +689,7 @@
         </StackPanel>
        </ScrollViewer>
       </TabItem>
-           <TabItem x:Name="TabletSettingsCategory" Header="副屏" Style="{StaticResource SettingsCategoryItem}"><ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12"><StackPanel>
+           <TabItem x:Name="TabletSettingsCategory" Header="副屏" Style="{StaticResource SettingsCategoryItem}"><ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12"><StackPanel>
        <TextBlock Text="副屏偏好" Style="{StaticResource Heading}"/>
         <Grid Margin="0,12,0,0">
          <Grid.ColumnDefinitions>
@@ -716,7 +708,7 @@
          </StackPanel>
          <StackPanel Grid.Column="2">
           <TextBlock Text="连接方式" Margin="0,0,0,8" />
-          <ComboBox x:Name="RequestLinkBox" SelectedIndex="0">
+          <ComboBox x:Name="RequestLinkBox" SelectedIndex="0" ToolTip="USB 直连需在安卓开启 USB 网络共享">
            <ComboBoxItem Content="自动选择" Tag="auto" />
            <ComboBoxItem Content="无线网络" Tag="lan" />
            <ComboBoxItem Content="USB 直连" Tag="usb" />
@@ -724,8 +716,6 @@
          </StackPanel>
         </Grid>
 
-       <TextBlock x:Name="DisplayStateText" Style="{StaticResource Caption}" Margin="0,16,0,0"/>
-       <TextBlock Text="声音与 USB" Style="{StaticResource Heading}" Margin="0,28,0,8"/><TextBlock Text="副屏不传声音。USB 连接需要在安卓设备开启 USB 网络共享。" Style="{StaticResource Caption}"/><TextBlock x:Name="UsbStateText" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
       </StackPanel></ScrollViewer></TabItem>
 </TabControl>
     </Grid>

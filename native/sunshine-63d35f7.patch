@@ -1,6 +1,8 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4e3d52b..004e290 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -88,5 +88,13 @@
+@@ -88,5 +88,13 @@ include(${CMAKE_MODULE_PATH}/compile_definitions/common.cmake)
  # target definitions
  include(${CMAKE_MODULE_PATH}/targets/common.cmake)
  
@@ -14,6 +16,40 @@
 +
  # packaging
  include(${CMAKE_MODULE_PATH}/packaging/common.cmake)
+diff --git a/src/config.cpp b/src/config.cpp
+index e0e8647..1350b07 100644
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -719,6 +719,7 @@ namespace config {
+ 
+     0,  // hevc_mode
+     0,  // av1_mode
++    "full"s,  // streamhub_probe_plan
+ 
+     2,  // min_threads
+     {
+@@ -1607,6 +1608,7 @@ namespace config {
+     int_f(vars, "qp", video.qp);
+     int_between_f(vars, "hevc_mode", video.hevc_mode, {0, 3});
+     int_between_f(vars, "av1_mode", video.av1_mode, {0, 3});
++    string_f(vars, "streamhub_probe_plan", video.streamhub_probe_plan);
+     int_f(vars, "min_threads", video.min_threads);
+     string_f(vars, "sw_preset", video.sw.sw_preset);
+     if (!video.sw.sw_preset.empty()) {
+diff --git a/src/config.h b/src/config.h
+index 7861538..7d2204f 100644
+--- a/src/config.h
++++ b/src/config.h
+@@ -68,6 +68,7 @@ namespace config {
+ 
+     int hevc_mode;  ///< HEVC support mode advertised to clients.
+     int av1_mode;  ///< AV1 support mode advertised to clients.
++    std::string streamhub_probe_plan;  ///< Bounded receiver codec/chroma probe plan.
+ 
+     int min_threads;  ///< Minimum number of threads or slices for CPU encoding.
+ 
+diff --git a/src/main.cpp b/src/main.cpp
+index f349a23..7868650 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
 @@ -1,3 +1,4 @@
@@ -21,7 +57,7 @@
  /**
   * @file src/main.cpp
   * @brief Definitions for the main entry point for Sunshine.
-@@ -288,26 +289,26 @@
+@@ -288,26 +289,26 @@ int main(int argc, char *argv[]) {
    }
  
  #ifdef _WIN32
@@ -54,7 +90,7 @@
      // Unload dynamic library to survive driver re-installation
      nvprefs_instance.unload();
    }
-@@ -436,33 +437,33 @@
+@@ -436,33 +437,33 @@ int main(int argc, char *argv[]) {
    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
  #endif
  
@@ -78,10 +114,9 @@
  
    reed_solomon_init();
 -  auto input_deinit_guard = input::init();
--
--  if (config::input.controller && input::probe_gamepads()) {
 +  auto input_deinit_guard = streamhub::measured("input-init", [&] { return input::init(); });
-+
+ 
+-  if (config::input.controller && input::probe_gamepads()) {
 +  if (config::input.controller && streamhub::measured("gamepad-probe", [&] { return input::probe_gamepads(); })) {
      BOOST_LOG(warning) << "No gamepad input is available"sv;
    }
@@ -96,201 +131,8 @@
      BOOST_LOG(fatal) << "HTTP interface failed to initialize"sv;
  
  #ifdef _WIN32
---- a/src/video.cpp
-+++ b/src/video.cpp
-@@ -1,3 +1,5 @@
-+#include "src/streamhub_timing.h"
-+#include "src/streamhub_probe_cache.h"
- /**
-  * @file src/video.cpp
-  * @brief Definitions for video.
-@@ -1470,6 +1472,8 @@
-   static encoder_t *chosen_encoder;
-   int active_hevc_mode;  ///< HEVC mode selected by the most recent encoder probe.
-   int active_av1_mode;  ///< AV1 mode selected by the most recent encoder probe.
-+  static streamhub::probe_cache_gate streamhub_probe_cache;
-+  static std::atomic_bool streamhub_encode_failed {false};
-   bool last_encoder_probe_supported_ref_frames_invalidation = false;  ///< Whether the last probe found reference-frame invalidation support.
-   std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec = {};  ///< YUV444 support discovered for each probed codec.
- 
-@@ -2410,6 +2414,7 @@
-   ) {
-     auto session = make_encode_session(disp.get(), encoder, config, disp->width, disp->height, std::move(encode_device));
-     if (!session) {
-+      streamhub_encode_failed = true;
-       return;
-     }
- 
-@@ -2640,6 +2645,7 @@
- 
-     auto encode_device = make_encode_device(*disp, encoder, ctx.config);
-     if (!encode_device) {
-+      streamhub_encode_failed = true;
-       return std::nullopt;
-     }
- 
-@@ -2659,6 +2665,7 @@
- 
-     auto session = make_encode_session(disp, encoder, ctx.config, img.width, img.height, std::move(encode_device));
-     if (!session) {
-+      streamhub_encode_failed = true;
-       return std::nullopt;
-     }
- 
-@@ -2925,6 +2932,7 @@
- 
-       auto encode_device = make_encode_device(*display, encoder, config);
-       if (!encode_device) {
-+        streamhub_encode_failed = true;
-         return;
-       }
- 
-@@ -3068,6 +3076,17 @@
-   bool validate_encoder(encoder_t &encoder, bool expect_failure) {
-     const auto output_name {display_device::map_output_name(config::video.output_name)};
-     std::shared_ptr<platf::display_t> disp;
-+    int probe_dynamic_range = -1;
-+    auto probe_display = [&](const config_t &config) {
-+#ifdef _WIN32
-+      // DXGI capture initialization depends on SDR/HDR and frame rate, not the
-+      // codec/chroma selected later by make_encode_device(). Every probe here
-+      // uses 1920x1080/60. Reuse its capture device within each color group.
-+      if (disp && probe_dynamic_range == config.dynamicRange) return;
-+#endif
-+      reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
-+      probe_dynamic_range = disp ? config.dynamicRange : -1;
-+    };
- 
-     BOOST_LOG(info) << "Trying encoder ["sv << encoder.name << ']';
-     auto fg = util::fail_guard([&]() {
-@@ -3086,7 +3105,7 @@
-     config_t config_autoselect {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
- 
-     // If the encoder isn't supported at all (not even H.264), bail early
--    reset_display(disp, encoder.platform_formats->dev_type, output_name, config_autoselect);
-+    probe_display(config_autoselect);
-     if (!disp) {
-       return false;
-     }
-@@ -3178,8 +3197,11 @@
-     {
-       auto test_yuv444 = [&](auto &flag_map, auto video_format) {
-         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 1, video_format, 0, 1, 0};
--
--        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
-+        if (!flag_map[encoder_t::PASSED] || !(encoder.flags & YUV444_SUPPORT)) {
-+          flag_map[encoder_t::YUV444] = false;
-+          return;
-+        }
-+        probe_display(config);
-         if (!disp) {
-           return;
-         }
-@@ -3198,8 +3220,8 @@
- 
-       auto test_yuv420_hdr = [&](auto &flag_map, auto video_format) {
-         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 0, 0};
--
--        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
-+        if (!flag_map[encoder_t::PASSED]) return;
-+        probe_display(config);
-         if (!disp) {
-           return;
-         }
-@@ -3218,8 +3240,11 @@
- 
-       auto test_yuv444_hdr = [&](auto &flag_map, auto video_format) {
-         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 1, 0};
--
--        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
-+        if (!flag_map[encoder_t::PASSED] || !(encoder.flags & YUV444_SUPPORT)) {
-+          flag_map[encoder_t::DYNAMIC_RANGE_YUV444] = false;
-+          return;
-+        }
-+        probe_display(config);
-         if (!disp) {
-           return;
-         }
-@@ -3242,9 +3267,9 @@
-       encoder.h264[encoder_t::DYNAMIC_RANGE_YUV444] = false;
- 
-       test_yuv444(encoder.hevc, 1);
-+      test_yuv444(encoder.av1, 2);
-       test_yuv420_hdr(encoder.hevc, 1);
-       test_yuv444_hdr(encoder.hevc, 1);
--      test_yuv444(encoder.av1, 2);
-       test_yuv420_hdr(encoder.av1, 2);
-       test_yuv444_hdr(encoder.av1, 2);
-     }
-@@ -3264,6 +3289,7 @@
-   }
- 
-   int probe_encoders() {
-+    streamhub::timer duration("probe-encoders");
-     if (!allow_encoder_probing()) {
-       // Error already logged
-       return -1;
-@@ -3271,10 +3297,50 @@
- 
-     auto encoder_list = encoders;
- 
--    // If we already have a good encoder, check to see if another probe is required
--    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platf::needs_encoder_reenumeration()) {
-+    // Snapshot DXGI at startup too: the old short circuit delayed the first
-+    // factory until launch and forced duplicate validation on an unchanged GPU.
-+    const auto platform_changed = streamhub::measured("encoder-enumeration-check", [] { return platf::needs_encoder_reenumeration(); });
-+    const auto output_name = display_device::map_output_name(config::video.output_name);
-+    std::string environment;
-+#ifdef _WIN32
-+    environment = platf::streamhub_encoder_environment(output_name);
-+    if (!environment.empty()) environment += ":" + config::video.output_name + ":" + config::video.adapter_name + ":" + config::video.encoder +
-+      ":" + std::to_string(config::video.hevc_mode) + ":" + std::to_string(config::video.av1_mode) + ":" +
-+      std::to_string(config::sunshine.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE]);
-+#endif
-+#ifdef _WIN32
-+    const bool environment_unchanged = streamhub_probe_cache.matches(environment);
-+#else
-+    const bool environment_unchanged = true;
-+#endif
-+    const bool encode_failed = streamhub_encode_failed.exchange(false);
-+    if (encode_failed) streamhub_probe_cache.invalidate();
-+    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platform_changed && !encode_failed &&
-+        environment_unchanged) {
-+      BOOST_LOG(info) << "[StreamHub] encoder-probe=reused encoder=" << chosen_encoder->name;
-       return 0;
-     }
-+    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && streamhub_probe_cache.same_target(environment)) {
-+      // A VDD detach/reattach invalidates the DXGI factory even when the target
-+      // GPU, driver, mode and codec configuration are identical. Recreate the
-+      // capture device, but retain the capability flags that were actually tested.
-+      // An expired identity uses the same real sample instead of fully probing
-+      // every codec after a long idle. Failure always falls through to full probe.
-+      const config_t check {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
-+      std::shared_ptr<platf::display_t> display;
-+      reset_display(display, chosen_encoder->platform_formats->dev_type, output_name, check);
-+      if (display && display->is_codec_supported(chosen_encoder->h264.name, check) &&
-+          validate_config(display, *chosen_encoder, check) >= 0) {
-+        streamhub_probe_cache.remember(environment);
-+        BOOST_LOG(info) << "[StreamHub] encoder-probe=target-cache-revalidated encoder=" << chosen_encoder->name;
-+        return 0;
-+      }
-+      streamhub_probe_cache.invalidate();
-+    }
-+    BOOST_LOG(info) << "[StreamHub] encoder-probe=validate reason=" <<
-+      (!chosen_encoder ? "no-valid-result" : encode_failed ? "encode-failed" :
-+       (chosen_encoder->flags & ALWAYS_REPROBE) ? "fallback-encoder" :
-+       platform_changed ? "display-or-driver-changed" : "target-unknown-changed-or-revalidation-failed");
- 
-     // Restart encoder selection
-     auto previous_encoder = chosen_encoder;
-@@ -3502,6 +3568,7 @@
-       BOOST_LOG(debug) << "ENCODER STATUS ACTIVE_AV1_MODE: "sv << active_av1_mode;
-     }
- 
-+    streamhub_probe_cache.remember(environment);
-     return 0;
-   }
- 
+diff --git a/src/nvhttp.cpp b/src/nvhttp.cpp
+index 8e33cad..1ee7f4a 100644
 --- a/src/nvhttp.cpp
 +++ b/src/nvhttp.cpp
 @@ -1,3 +1,4 @@
@@ -298,7 +140,7 @@
  /**
   * @file src/nvhttp.cpp
   * @brief Definitions for the nvhttp (GameStream) server.
-@@ -1390,7 +1391,7 @@
+@@ -1390,7 +1391,7 @@ namespace nvhttp {
        // encoder matches the active GPU (which could have changed
        // due to hotplugging, driver crash, primary monitor change,
        // or any number of other factors).
@@ -307,7 +149,7 @@
          tree.put("root.<xmlattr>.status_code", 503);
          tree.put("root.<xmlattr>.status_message", "Failed to initialize video capture/encoding. Is a display connected and turned on?");
          tree.put("root.gamesession", 0);
-@@ -1502,7 +1503,7 @@
+@@ -1502,7 +1503,7 @@ namespace nvhttp {
        // encoder matches the active GPU (which could have changed
        // due to hotplugging, driver crash, primary monitor change,
        // or any number of other factors).
@@ -316,6 +158,23 @@
          tree.put("root.resume", 0);
          tree.put("root.<xmlattr>.status_code", 503);
          tree.put("root.<xmlattr>.status_message", "Failed to initialize video capture/encoding. Is a display connected and turned on?");
+diff --git a/src/platform/common.h b/src/platform/common.h
+index 325f913..f02d555 100644
+--- a/src/platform/common.h
++++ b/src/platform/common.h
+@@ -926,6 +926,10 @@ namespace platf {
+    * @return Display names accepted by the selected capture backend.
+    */
+   std::vector<std::string> display_names(mem_type_e hwdevice_type);
++#ifdef _WIN32
++  // Empty means the target, adapter driver or display mode could not be verified.
++  std::string streamhub_encoder_environment(const std::string &output_name);
++#endif
+ 
+   /**
+    * @brief Check if GPUs/drivers have changed since the last call to this function.
+diff --git a/src/platform/virtualhid_input.cpp b/src/platform/virtualhid_input.cpp
+index 362f50a..6177422 100644
 --- a/src/platform/virtualhid_input.cpp
 +++ b/src/platform/virtualhid_input.cpp
 @@ -1,3 +1,4 @@
@@ -323,7 +182,7 @@
  /**
   * @file src/platform/virtualhid_input.cpp
   * @brief Definitions for libvirtualhid-backed input helpers.
-@@ -447,14 +448,14 @@
+@@ -447,14 +448,14 @@ namespace platf::virtualhid {
        input_context_t {lvh::BackendKind::platform_default} {}
  
    input_context_t::input_context_t(lvh::BackendKind backend):
@@ -341,111 +200,8 @@
    }
  
    void input_context_t::refresh_keyboard() {
---- a/src/platform/windows/input.cpp
-+++ b/src/platform/windows/input.cpp
-@@ -1,3 +1,4 @@
-+#include "src/streamhub_timing.h"
- /**
-  * @file src/platform/windows/input.cpp
-  * @brief Definitions for input handling on Windows.
-@@ -559,6 +560,7 @@
-   }
- 
-   input_t input() {
-+    streamhub::timer duration("windows-input-init");
-     input_t result {new input_raw_t {}};
- 
-     if (auto &raw = *result; config::input.controller && !should_use_virtualhid_gamepads(raw) && virtualhid::should_try_vigembus_fallback(config::input.gamepad, false, config::input.gamepad_driver)) {
---- a/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
-+++ b/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
-@@ -84,12 +84,28 @@
- 
-     static UniqueHandle connect_to_broker_pipe() {
-       DWORD last_error = ERROR_FILE_NOT_FOUND;
--      for (auto attempt = 0U; attempt < pipe_wait_timeout / pipe_retry_interval; ++attempt) {
-+      const auto deadline = ::GetTickCount64() + pipe_wait_timeout;
-+      for (auto attempt = 0U; ::GetTickCount64() < deadline; ++attempt) {
-         if (HANDLE pipe = open_broker_pipe(); pipe != INVALID_HANDLE_VALUE) {
-           return make_unique_handle(pipe);
-         }
- 
-         last_error = ::GetLastError();
-+        // A missing pipe and an explicitly absent installed service cannot
-+        // become ready by sleeping. Preserve every broker identity/license
-+        // check for an existing service; unknown SCM errors keep normal retry.
-+        if (attempt == 0 && last_error == ERROR_FILE_NOT_FOUND) {
-+          if (auto manager = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT)) {
-+            auto service = ::OpenServiceW(manager, broker_service_name, SERVICE_QUERY_STATUS);
-+            const auto error = ::GetLastError();
-+            if (service) ::CloseServiceHandle(service);
-+            ::CloseServiceHandle(manager);
-+            if (!service && error == ERROR_SERVICE_DOES_NOT_EXIST) {
-+              ::SetLastError(last_error);
-+              return make_unique_handle(INVALID_HANDLE_VALUE);
-+            }
-+          }
-+        }
-         if (!wait_to_retry_broker_pipe(last_error)) {
-           ::SetLastError(last_error);
-           return make_unique_handle(INVALID_HANDLE_VALUE);
---- /dev/null
-+++ b/src/streamhub_timing.h
-@@ -0,0 +1,42 @@
-+/**
-+ * @file src/streamhub_timing.h
-+ * @brief Monotonic timing of StreamHub engine startup and launch stages.
-+ */
-+#pragma once
-+
-+#include <chrono>
-+#include <utility>
-+
-+#include "logging.h"
-+
-+namespace streamhub {
-+  /** @brief Log one complete stage, including early returns and failures. */
-+  class timer {
-+    const char *name;
-+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-+
-+  public:
-+    /** @brief Begin a stage whose name has static storage duration. */
-+    explicit timer(const char *name): name(name) {
-+      BOOST_LOG(info) << "[StreamHub] begin stage=" << name;
-+    }
-+
-+    /** @brief Finish the stage using elapsed monotonic milliseconds. */
-+    ~timer() {
-+      BOOST_LOG(info) << "[StreamHub] end stage=" << name << " elapsed_ms=" <<
-+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-+    }
-+  };
-+
-+  /**
-+   * @brief Measure a call without changing its return value or ownership.
-+   * @param name Stage name with static storage duration.
-+   * @param call Operation to execute once.
-+   * @return The operation's original result.
-+   */
-+  template<class F>
-+  decltype(auto) measured(const char *name, F &&call) {
-+    timer duration(name);
-+    return std::forward<F>(call)();
-+  }
-+}
---- a/src/platform/common.h
-+++ b/src/platform/common.h
-@@ -926,6 +926,10 @@
-    * @return Display names accepted by the selected capture backend.
-    */
-   std::vector<std::string> display_names(mem_type_e hwdevice_type);
-+#ifdef _WIN32
-+  // Empty means the target, adapter driver or display mode could not be verified.
-+  std::string streamhub_encoder_environment(const std::string &output_name);
-+#endif
- 
-   /**
-    * @brief Check if GPUs/drivers have changed since the last call to this function.
+diff --git a/src/platform/windows/display_base.cpp b/src/platform/windows/display_base.cpp
+index 151b8a6..c4a7b29 100644
 --- a/src/platform/windows/display_base.cpp
 +++ b/src/platform/windows/display_base.cpp
 @@ -5,6 +5,7 @@
@@ -456,7 +212,7 @@
  
  // platform includes
  #include <initguid.h>
-@@ -43,6 +44,7 @@
+@@ -43,6 +44,7 @@ typedef enum _D3DKMT_GPU_PREFERENCE_QUERY_STATE : DWORD {
  #include "src/display_device.h"
  #include "src/logging.h"
  #include "src/platform/common.h"
@@ -464,7 +220,7 @@
  #include "src/video.h"
  
  namespace platf {
-@@ -1122,6 +1124,65 @@
+@@ -1122,6 +1124,65 @@ namespace platf {
     *
     * @return `true` if a change has occurred or if it is unknown whether a change occurred.
     */
@@ -530,6 +286,26 @@
    bool needs_encoder_reenumeration() {
      // Serialize access to the static DXGI factory
      static std::mutex reenumeration_state_lock;
+diff --git a/src/platform/windows/input.cpp b/src/platform/windows/input.cpp
+index 5eac499..386f79e 100644
+--- a/src/platform/windows/input.cpp
++++ b/src/platform/windows/input.cpp
+@@ -1,3 +1,4 @@
++#include "src/streamhub_timing.h"
+ /**
+  * @file src/platform/windows/input.cpp
+  * @brief Definitions for input handling on Windows.
+@@ -559,6 +560,7 @@ namespace platf {
+   }
+ 
+   input_t input() {
++    streamhub::timer duration("windows-input-init");
+     input_t result {new input_raw_t {}};
+ 
+     if (auto &raw = *result; config::input.controller && !should_use_virtualhid_gamepads(raw) && virtualhid::should_try_vigembus_fallback(config::input.gamepad, false, config::input.gamepad_driver)) {
+diff --git a/src/streamhub_probe_cache.h b/src/streamhub_probe_cache.h
+new file mode 100644
+index 0000000..fe45555
 --- /dev/null
 +++ b/src/streamhub_probe_cache.h
 @@ -0,0 +1,38 @@
@@ -571,3 +347,351 @@
 +    clock::time_point created {};
 +  };
 +}
+diff --git a/src/streamhub_probe_plan.h b/src/streamhub_probe_plan.h
+new file mode 100644
+index 0000000..87d52a7
+--- /dev/null
++++ b/src/streamhub_probe_plan.h
+@@ -0,0 +1,15 @@
++#pragma once
++#include <string_view>
++
++namespace streamhub {
++  // Process configuration is immutable during a stream. Unrecognised values
++  // retain upstream full validation; selective plans never advertise untested HDR/chroma.
++  struct probe_plan {
++    std::string_view value;
++    bool basic_only() const {
++      return value == "sdr-auto" || value == "sdr-h264" || value == "sdr-hevc" || value == "sdr-av1";
++    }
++    bool hevc() const { return !basic_only() || value == "sdr-auto" || value == "sdr-hevc"; }
++    bool av1() const { return !basic_only() || value == "sdr-auto" || value == "sdr-av1"; }
++  };
++}
+diff --git a/src/streamhub_timing.h b/src/streamhub_timing.h
+new file mode 100644
+index 0000000..4940b2b
+--- /dev/null
++++ b/src/streamhub_timing.h
+@@ -0,0 +1,42 @@
++/**
++ * @file src/streamhub_timing.h
++ * @brief Monotonic timing of StreamHub engine startup and launch stages.
++ */
++#pragma once
++
++#include <chrono>
++#include <utility>
++
++#include "logging.h"
++
++namespace streamhub {
++  /** @brief Log one complete stage, including early returns and failures. */
++  class timer {
++    const char *name;
++    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
++
++  public:
++    /** @brief Begin a stage whose name has static storage duration. */
++    explicit timer(const char *name): name(name) {
++      BOOST_LOG(info) << "[StreamHub] begin stage=" << name;
++    }
++
++    /** @brief Finish the stage using elapsed monotonic milliseconds. */
++    ~timer() {
++      BOOST_LOG(info) << "[StreamHub] end stage=" << name << " elapsed_ms=" <<
++        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
++    }
++  };
++
++  /**
++   * @brief Measure a call without changing its return value or ownership.
++   * @param name Stage name with static storage duration.
++   * @param call Operation to execute once.
++   * @return The operation's original result.
++   */
++  template<class F>
++  decltype(auto) measured(const char *name, F &&call) {
++    timer duration(name);
++    return std::forward<F>(call)();
++  }
++}
+diff --git a/src/video.cpp b/src/video.cpp
+index 843a19a..4337e67 100644
+--- a/src/video.cpp
++++ b/src/video.cpp
+@@ -1,3 +1,6 @@
++#include "src/streamhub_timing.h"
++#include "src/streamhub_probe_cache.h"
++#include "src/streamhub_probe_plan.h"
+ /**
+  * @file src/video.cpp
+  * @brief Definitions for video.
+@@ -31,6 +34,7 @@ extern "C" {
+ #include "globals.h"
+ #include "input.h"
+ #include "logging.h"
++#include "rtsp.h"
+ #include "nvenc/nvenc_encoder.h"
+ #include "platform/common.h"
+ #include "sync.h"
+@@ -1470,6 +1474,8 @@ namespace video {
+   static encoder_t *chosen_encoder;
+   int active_hevc_mode;  ///< HEVC mode selected by the most recent encoder probe.
+   int active_av1_mode;  ///< AV1 mode selected by the most recent encoder probe.
++  static streamhub::probe_cache_gate streamhub_probe_cache;
++  static std::atomic_bool streamhub_encode_failed {false};
+   bool last_encoder_probe_supported_ref_frames_invalidation = false;  ///< Whether the last probe found reference-frame invalidation support.
+   std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec = {};  ///< YUV444 support discovered for each probed codec.
+ 
+@@ -2410,6 +2416,7 @@ namespace video {
+   ) {
+     auto session = make_encode_session(disp.get(), encoder, config, disp->width, disp->height, std::move(encode_device));
+     if (!session) {
++      streamhub_encode_failed = true;
+       return;
+     }
+ 
+@@ -2640,6 +2647,7 @@ namespace video {
+ 
+     auto encode_device = make_encode_device(*disp, encoder, ctx.config);
+     if (!encode_device) {
++      streamhub_encode_failed = true;
+       return std::nullopt;
+     }
+ 
+@@ -2659,6 +2667,7 @@ namespace video {
+ 
+     auto session = make_encode_session(disp, encoder, ctx.config, img.width, img.height, std::move(encode_device));
+     if (!session) {
++      streamhub_encode_failed = true;
+       return std::nullopt;
+     }
+ 
+@@ -2925,6 +2934,7 @@ namespace video {
+ 
+       auto encode_device = make_encode_device(*display, encoder, config);
+       if (!encode_device) {
++        streamhub_encode_failed = true;
+         return;
+       }
+ 
+@@ -3068,14 +3078,26 @@ namespace video {
+   bool validate_encoder(encoder_t &encoder, bool expect_failure) {
+     const auto output_name {display_device::map_output_name(config::video.output_name)};
+     std::shared_ptr<platf::display_t> disp;
++    int probe_dynamic_range = -1;
++    auto probe_display = [&](const config_t &config) {
++#ifdef _WIN32
++      // DXGI capture initialization depends on SDR/HDR and frame rate, not the
++      // codec/chroma selected later by make_encode_device(). Every probe here
++      // uses 1920x1080/60. Reuse its capture device within each color group.
++      if (disp && probe_dynamic_range == config.dynamicRange) return;
++#endif
++      reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++      probe_dynamic_range = disp ? config.dynamicRange : -1;
++    };
+ 
+     BOOST_LOG(info) << "Trying encoder ["sv << encoder.name << ']';
+     auto fg = util::fail_guard([&]() {
+       BOOST_LOG(info) << "Encoder ["sv << encoder.name << "] failed"sv;
+     });
+ 
+-    auto test_hevc = active_hevc_mode >= 2 || (active_hevc_mode == 0 && !(encoder.flags & H264_ONLY));
+-    auto test_av1 = active_av1_mode >= 2 || (active_av1_mode == 0 && !(encoder.flags & H264_ONLY));
++    const streamhub::probe_plan plan {config::video.streamhub_probe_plan};
++    auto test_hevc = plan.hevc() && (active_hevc_mode >= 2 || (active_hevc_mode == 0 && !(encoder.flags & H264_ONLY)));
++    auto test_av1 = plan.av1() && (active_av1_mode >= 2 || (active_av1_mode == 0 && !(encoder.flags & H264_ONLY)));
+ 
+     encoder.h264.capabilities.set();
+     encoder.hevc.capabilities.set();
+@@ -3086,7 +3108,7 @@ namespace video {
+     config_t config_autoselect {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
+ 
+     // If the encoder isn't supported at all (not even H.264), bail early
+-    reset_display(disp, encoder.platform_formats->dev_type, output_name, config_autoselect);
++    probe_display(config_autoselect);
+     if (!disp) {
+       return false;
+     }
+@@ -3174,12 +3196,21 @@ namespace video {
+       encoder.av1.capabilities.reset();
+     }
+ 
+-    // Test HDR and YUV444 support
+-    {
++    // Untested HDR/chroma must not be exposed by a bounded SDR-only probe.
++    for (auto *codec : {&encoder.h264, &encoder.hevc, &encoder.av1}) {
++      (*codec)[encoder_t::YUV444] = false;
++      (*codec)[encoder_t::DYNAMIC_RANGE] = false;
++      (*codec)[encoder_t::DYNAMIC_RANGE_YUV444] = false;
++    }
++    // Explicit HDR requests and legacy clients retain full capability validation.
++    if (!plan.basic_only()) {
+       auto test_yuv444 = [&](auto &flag_map, auto video_format) {
+         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 1, video_format, 0, 1, 0};
+-
+-        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++        if (!flag_map[encoder_t::PASSED] || !(encoder.flags & YUV444_SUPPORT)) {
++          flag_map[encoder_t::YUV444] = false;
++          return;
++        }
++        probe_display(config);
+         if (!disp) {
+           return;
+         }
+@@ -3198,8 +3229,8 @@ namespace video {
+ 
+       auto test_yuv420_hdr = [&](auto &flag_map, auto video_format) {
+         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 0, 0};
+-
+-        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++        if (!flag_map[encoder_t::PASSED]) return;
++        probe_display(config);
+         if (!disp) {
+           return;
+         }
+@@ -3218,8 +3249,11 @@ namespace video {
+ 
+       auto test_yuv444_hdr = [&](auto &flag_map, auto video_format) {
+         const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 1, 0};
+-
+-        reset_display(disp, encoder.platform_formats->dev_type, output_name, config);
++        if (!flag_map[encoder_t::PASSED] || !(encoder.flags & YUV444_SUPPORT)) {
++          flag_map[encoder_t::DYNAMIC_RANGE_YUV444] = false;
++          return;
++        }
++        probe_display(config);
+         if (!disp) {
+           return;
+         }
+@@ -3242,9 +3276,9 @@ namespace video {
+       encoder.h264[encoder_t::DYNAMIC_RANGE_YUV444] = false;
+ 
+       test_yuv444(encoder.hevc, 1);
++      test_yuv444(encoder.av1, 2);
+       test_yuv420_hdr(encoder.hevc, 1);
+       test_yuv444_hdr(encoder.hevc, 1);
+-      test_yuv444(encoder.av1, 2);
+       test_yuv420_hdr(encoder.av1, 2);
+       test_yuv444_hdr(encoder.av1, 2);
+     }
+@@ -3264,6 +3298,11 @@ namespace video {
+   }
+ 
+   int probe_encoders() {
++    streamhub::timer duration("probe-encoders");
++    if (rtsp_stream::session_count() != 0) {
++      BOOST_LOG(warning) << "[StreamHub] encoder-probe=blocked-active-session";
++      return chosen_encoder ? 0 : -1;
++    }
+     if (!allow_encoder_probing()) {
+       // Error already logged
+       return -1;
+@@ -3271,16 +3310,62 @@ namespace video {
+ 
+     auto encoder_list = encoders;
+ 
+-    // If we already have a good encoder, check to see if another probe is required
+-    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platf::needs_encoder_reenumeration()) {
++    // Snapshot DXGI at startup too: the old short circuit delayed the first
++    // factory until launch and forced duplicate validation on an unchanged GPU.
++    const auto platform_changed = streamhub::measured("encoder-enumeration-check", [] { return platf::needs_encoder_reenumeration(); });
++    const auto output_name = display_device::map_output_name(config::video.output_name);
++    std::string environment;
++#ifdef _WIN32
++    environment = platf::streamhub_encoder_environment(output_name);
++    if (!environment.empty()) environment += ":" + config::video.output_name + ":" + config::video.adapter_name + ":" + config::video.encoder +
++      ":" + std::to_string(config::video.hevc_mode) + ":" + std::to_string(config::video.av1_mode) + ":" +
++      std::to_string(config::sunshine.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE]) + ":" + config::video.streamhub_probe_plan;
++#endif
++#ifdef _WIN32
++    const bool environment_unchanged = streamhub_probe_cache.matches(environment);
++#else
++    const bool environment_unchanged = true;
++#endif
++    const bool encode_failed = streamhub_encode_failed.exchange(false);
++    if (encode_failed) streamhub_probe_cache.invalidate();
++    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platform_changed && !encode_failed &&
++        environment_unchanged) {
++      BOOST_LOG(info) << "[StreamHub] encoder-probe=reused encoder=" << chosen_encoder->name;
+       return 0;
+     }
++    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && streamhub_probe_cache.same_target(environment)) {
++      // A VDD detach/reattach invalidates the DXGI factory even when the target
++      // GPU, driver, mode and codec configuration are identical. Recreate the
++      // capture device, but retain the capability flags that were actually tested.
++      // An expired identity uses the same real sample instead of fully probing
++      // every codec after a long idle. Failure always falls through to full probe.
++      const config_t check {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
++      std::shared_ptr<platf::display_t> display;
++      reset_display(display, chosen_encoder->platform_formats->dev_type, output_name, check);
++      if (display && display->is_codec_supported(chosen_encoder->h264.name, check) &&
++          validate_config(display, *chosen_encoder, check) >= 0) {
++        streamhub_probe_cache.remember(environment);
++        BOOST_LOG(info) << "[StreamHub] encoder-probe=target-cache-revalidated encoder=" << chosen_encoder->name;
++        return 0;
++      }
++      streamhub_probe_cache.invalidate();
++    }
++    BOOST_LOG(info) << "[StreamHub] encoder-probe=validate reason=" <<
++      (!chosen_encoder ? "no-valid-result" : encode_failed ? "encode-failed" :
++       (chosen_encoder->flags & ALWAYS_REPROBE) ? "fallback-encoder" :
++       platform_changed ? "display-or-driver-changed" : "target-unknown-changed-or-revalidation-failed");
+ 
+     // Restart encoder selection
+     auto previous_encoder = chosen_encoder;
+     chosen_encoder = nullptr;
+     active_hevc_mode = config::video.hevc_mode;
+     active_av1_mode = config::video.av1_mode;
++    const streamhub::probe_plan plan {config::video.streamhub_probe_plan};
++    if (plan.basic_only()) {
++      if (!plan.hevc()) active_hevc_mode = 1;
++      if (!plan.av1()) active_av1_mode = 1;
++      BOOST_LOG(info) << "[StreamHub] encoder-probe-plan=" << plan.value;
++    }
+     last_encoder_probe_supported_ref_frames_invalidation = false;
+ 
+     auto adjust_encoder_constraints_hevc = [&](encoder_t *encoder) {
+@@ -3502,6 +3587,7 @@ namespace video {
+       BOOST_LOG(debug) << "ENCODER STATUS ACTIVE_AV1_MODE: "sv << active_av1_mode;
+     }
+ 
++    streamhub_probe_cache.remember(environment);
+     return 0;
+   }
+ 
+diff --git a/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp b/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
+index d05eb11..cdc3607 100644
+--- a/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
++++ b/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
+@@ -84,12 +84,28 @@ namespace lvh::detail::windows_broker {
+ 
+     static UniqueHandle connect_to_broker_pipe() {
+       DWORD last_error = ERROR_FILE_NOT_FOUND;
+-      for (auto attempt = 0U; attempt < pipe_wait_timeout / pipe_retry_interval; ++attempt) {
++      const auto deadline = ::GetTickCount64() + pipe_wait_timeout;
++      for (auto attempt = 0U; ::GetTickCount64() < deadline; ++attempt) {
+         if (HANDLE pipe = open_broker_pipe(); pipe != INVALID_HANDLE_VALUE) {
+           return make_unique_handle(pipe);
+         }
+ 
+         last_error = ::GetLastError();
++        // A missing pipe and an explicitly absent installed service cannot
++        // become ready by sleeping. Preserve every broker identity/license
++        // check for an existing service; unknown SCM errors keep normal retry.
++        if (attempt == 0 && last_error == ERROR_FILE_NOT_FOUND) {
++          if (auto manager = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT)) {
++            auto service = ::OpenServiceW(manager, broker_service_name, SERVICE_QUERY_STATUS);
++            const auto error = ::GetLastError();
++            if (service) ::CloseServiceHandle(service);
++            ::CloseServiceHandle(manager);
++            if (!service && error == ERROR_SERVICE_DOES_NOT_EXIST) {
++              ::SetLastError(last_error);
++              return make_unique_handle(INVALID_HANDLE_VALUE);
++            }
++          }
++        }
+         if (!wait_to_retry_broker_pipe(last_error)) {
+           ::SetLastError(last_error);
+           return make_unique_handle(INVALID_HANDLE_VALUE);

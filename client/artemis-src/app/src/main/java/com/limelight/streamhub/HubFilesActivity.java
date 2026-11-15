@@ -28,7 +28,8 @@ public final class HubFilesActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private HubStore store; private HubFileTasks tasks;
     private Button pauseButton;
-    private ImageButton destinationButton, sortButton, refreshButton;
+    private ImageButton destinationButton, sortButton, refreshButton, moreButton;
+    private boolean compactToolbar;
     private View sendButton;
     private Button clearButton, rootChoice;
     private TextView state, browseLocation; private LinearLayout localList, remoteList, browseList;
@@ -87,8 +88,19 @@ public final class HubFilesActivity extends Activity {
         refreshButton=iconAction(toolbar,R.drawable.ic_hub_refresh,"刷新电脑文件",this::loadRemote);
         sortButton=iconAction(toolbar,R.drawable.ic_hub_sort,"排序："+sortLabel(),this::showSortChoices);
         destinationButton=iconAction(toolbar,R.drawable.ic_hub_folder,"保存位置",()->pickDestination(CHANGE_FOLDER)); updateDestinationLabel();
-        if(layout.widthDp<480)sendButton=iconAction(toolbar,R.drawable.ic_hub_upload,"发送文件",this::chooseUpload);
-        else {
+        compactToolbar=layout.widthDp-layout.railWidthDp()<480;
+        if(compactToolbar) {
+            ((View)sortButton.getParent()).setVisibility(View.GONE);
+            ((View)destinationButton.getParent()).setVisibility(View.GONE);
+            moreButton=iconAction(toolbar,R.drawable.ic_hub_more,"更多文件操作",()->HubStreamUi.hubDialog(this)
+                    .setItems(new String[]{"排序", "保存位置"},(dialog,which)->{
+                        if(which==0) {
+                            if(sortButton.isEnabled())showSortChoices();
+                            else Toast.makeText(this,sortButton.getContentDescription(),Toast.LENGTH_SHORT).show();
+                        } else pickDestination(CHANGE_FOLDER);
+                    }).show());
+        }
+        {
             FrameLayout sendHint=new HintFrame();toolbar.addView(sendHint,new LinearLayout.LayoutParams(-2,dp(48)));
             LinearLayout sendSlot=new LinearLayout(this);sendHint.addView(sendSlot);
             Button send=button(sendSlot,"发送文件",true,this::chooseUpload);
@@ -155,9 +167,7 @@ public final class HubFilesActivity extends Activity {
     private TextView heading(String value) { TextView view=text(value,20); view.setTypeface(null,Typeface.BOLD); view.setPadding(0,dp(16),0,dp(8)); LinearLayout.LayoutParams spacing=new LinearLayout.LayoutParams(-1,-2); spacing.topMargin=dp(8); view.setLayoutParams(spacing); return view; }
     private Button button(LinearLayout parent,String label,Runnable action) { return button(parent,label,false,action); }
     private Button button(LinearLayout parent,String label,boolean primary,Runnable action) {
-        Button button=new Button(this); button.setStateListAnimator(null); button.setElevation(0); button.setText(label); button.setTextSize(16); button.setTextColor(primary ? onAccent : accent); button.setAllCaps(false); button.setMinHeight(dp(52));button.setPadding(dp(12),dp(8),dp(12),dp(8));
-        GradientDrawable shape=new GradientDrawable(); shape.setColor(primary ? this.primary : field); shape.setCornerRadius(dp(8)); shape.setStroke(dp(1),primary ? this.primary : border);
-        button.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(ripple),shape,null));
+        Button button=new Button(this); button.setText(label); HubButtons.apply(button,primary); button.setMinHeight(dp(52));
         LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2); params.topMargin=dp(8); parent.addView(button,params); button.setOnClickListener(v->action.run()); return button;
     }
     private void compactButton(Button button) {
@@ -166,7 +176,7 @@ public final class HubFilesActivity extends Activity {
     }
     private LinearLayout emptyPane(String message) {
         LinearLayout pane=new LinearLayout(this);pane.setOrientation(LinearLayout.VERTICAL);pane.setGravity(Gravity.CENTER);pane.setPadding(dp(20),dp(28),dp(20),dp(28));
-        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_hub_folder);icon.setImageTintList(android.content.res.ColorStateList.valueOf(muted));icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_nav_files);icon.setImageTintList(android.content.res.ColorStateList.valueOf(muted));icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         pane.addView(icon,new LinearLayout.LayoutParams(dp(40),dp(40)));
         TextView label=text(message,15);label.setTextColor(muted);label.setGravity(Gravity.CENTER);pane.addView(label,new LinearLayout.LayoutParams(-1,-2));return pane;
     }
@@ -298,6 +308,7 @@ public final class HubFilesActivity extends Activity {
     }
     private void styleTab(Button tab, boolean selected) {
         tab.setTextColor(selected?accent:muted);
+        tab.setTypeface(null,selected?Typeface.BOLD:Typeface.NORMAL);
         GradientDrawable base=new GradientDrawable();base.setColor(android.graphics.Color.TRANSPARENT);
         GradientDrawable line=new GradientDrawable();line.setColor(selected?accent:border);
         android.graphics.drawable.LayerDrawable layers=new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{base,line});
@@ -508,8 +519,10 @@ public final class HubFilesActivity extends Activity {
         state.setVisibility((showingTasks?fileTransferAllowed||busy:canBrowse)?View.VISIBLE:View.GONE);
         requestAuthorization.setText(store.bound()?"重试连接":"添加电脑");requestAuthorization.setEnabled(!checking);
         if(rootChoice!=null)rootChoice.setEnabled(!checking);
-        sortButton.setVisibility(showingTasks?View.GONE:View.VISIBLE);((View)sortButton.getParent()).setVisibility(showingTasks?View.GONE:View.VISIBLE);
-        destinationButton.setVisibility(showingTasks?View.GONE:View.VISIBLE);((View)destinationButton.getParent()).setVisibility(showingTasks?View.GONE:View.VISIBLE);
+        int auxiliaryVisibility=showingTasks||compactToolbar?View.GONE:View.VISIBLE;
+        sortButton.setVisibility(auxiliaryVisibility);((View)sortButton.getParent()).setVisibility(auxiliaryVisibility);
+        destinationButton.setVisibility(auxiliaryVisibility);((View)destinationButton.getParent()).setVisibility(auxiliaryVisibility);
+        if(moreButton!=null)((View)moreButton.getParent()).setVisibility(showingTasks?View.GONE:View.VISIBLE);
         sendButton.setVisibility(showingTasks?View.GONE:View.VISIBLE);((View)sendButton.getTag()).setVisibility(showingTasks?View.GONE:View.VISIBLE);
         renderSelectionBar();
         pauseButton.setVisibility(busy ? View.VISIBLE : View.GONE);

@@ -321,8 +321,8 @@ public final class HubActivity extends Activity {
         LinearLayout card = column(); card.setPadding(0, dp(12), 0, dp(8));
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2); size.bottomMargin = dp(12); content.addView(card, size);
         View divider = new View(this); divider.setBackgroundColor(BORDER); card.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
-        TextView heading = label(title, 16, MUTED); heading.setTypeface(null, Typeface.BOLD);
-        LinearLayout.LayoutParams headingSize = new LinearLayout.LayoutParams(-1, -2); headingSize.topMargin = dp(14); headingSize.bottomMargin = dp(8); card.addView(heading, headingSize); return card;
+        TextView heading = label(title, 13, ACCENT_DARK); heading.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams headingSize = new LinearLayout.LayoutParams(-1, -2); headingSize.topMargin = dp(18); headingSize.bottomMargin = dp(8); card.addView(heading, headingSize); return card;
     }
     private LinearLayout nestedCard(String title) {
         LinearLayout card = column(); card.setPadding(0, dp(12), 0, dp(12));
@@ -372,8 +372,8 @@ public final class HubActivity extends Activity {
         cell.setGravity(Gravity.CENTER_VERTICAL);
         cell.setPadding(dp(16), dp(14), dp(16), dp(14));
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(primary ? SELECTED : SURFACE);
-        bg.setCornerRadius(dp(8));
+        bg.setColor(primary ? SELECTED : FIELD);
+        bg.setCornerRadius(dp(12));
         bg.setStroke(dp(1), primary ? ACCENT_DARK : BORDER);
         cell.setBackground(new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(RIPPLE), bg, null));
@@ -414,11 +414,7 @@ public final class HubActivity extends Activity {
         parent.addView(item, size);
     }
     private Button button(LinearLayout parent, String title, boolean primary, View.OnClickListener action) {
-        Button v = new Button(this); v.setStateListAnimator(null); v.setElevation(0); v.setText(title); v.setTextSize(16); v.setAllCaps(false); v.setTextColor(primary ? ON_ACCENT : ACCENT_DARK); v.setMinHeight(dp(52));
-        GradientDrawable shape = new GradientDrawable(); shape.setCornerRadius(dp(8)); shape.setColor(primary ? ACCENT : FIELD); shape.setStroke(dp(1), primary ? ACCENT : BORDER); v.setBackground(shape);
-        android.content.res.ColorStateList ripple = android.content.res.ColorStateList.valueOf(RIPPLE);
-        v.setBackground(new android.graphics.drawable.RippleDrawable(ripple, shape, null));
-        v.setPadding(dp(12), dp(10), dp(12), dp(10));
+        Button v = new Button(this); v.setText(title); HubButtons.apply(v, primary); v.setMinHeight(dp(52));
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2); size.topMargin = dp(8); parent.addView(v, size);
         v.setOnClickListener(action); actions.add(v); return v;
     }
@@ -447,6 +443,9 @@ public final class HubActivity extends Activity {
     }
     private ScrollView pageScroll(LinearLayout page) { return pageScroll(page, 720); }
     private ScrollView pageScroll(LinearLayout page, int maxDp) {
+        return pageScroll(page, maxDp, false);
+    }
+    private ScrollView pageScroll(LinearLayout page, int maxDp, boolean balanceHome) {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setFocusableInTouchMode(true);
@@ -455,8 +454,9 @@ public final class HubActivity extends Activity {
         scroll.addView(centered, new ScrollView.LayoutParams(-1, -2));
         HubWindowLayout layout = HubWindowLayout.of(this);
         page.setPadding(dp(layout.pageInsetDp()), dp(layout.compact() ? 16 : 24), dp(layout.pageInsetDp()), dp(30));
-        int width = dp(Math.min(layout.contentWidthDp(), maxDp));
-        centered.addView(page, new FrameLayout.LayoutParams(width, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        int width = dp(Math.max(1, Math.min(layout.widthDp - layout.railWidthDp(), maxDp)));
+        int gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        centered.addView(page, new FrameLayout.LayoutParams(width, -2, gravity));
         return scroll;
     }
     private Rect windowBounds() {
@@ -485,7 +485,8 @@ public final class HubActivity extends Activity {
         page.setFocusableInTouchMode(true); page.setBackgroundColor(BACKGROUND); setContentView(page); page.requestFocus();
         pageSlot = new FrameLayout(this);
         LinearLayout home = column(), connection = column(), settings = column();
-        pageSlot.addView(pageScroll(home), new FrameLayout.LayoutParams(-1, -1));
+        HubWindowLayout homeLayout = HubWindowLayout.of(this);
+        pageSlot.addView(pageScroll(home, homeLayout.widthDp > homeLayout.heightDp ? 840 : 640, true), new FrameLayout.LayoutParams(-1, -1));
         pageSlot.addView(pageScroll(connection), new FrameLayout.LayoutParams(-1, -1));
         pageSlot.addView(pageScroll(settings, 680), new FrameLayout.LayoutParams(-1, -1));
         navigation = new HubNavigation(this, pageSlot, currentPage, index -> {
@@ -500,8 +501,8 @@ public final class HubActivity extends Activity {
         Button more = textButton(homeHeader, "⋯", TEXT, v -> HubStreamUi.hubDialog(this).setItems(new String[]{"账号与连接", "连接诊断", "使用手册"}, (d, which) -> { if (which == 0) showPage(1); else if(which == 1) showConnectionDiagnostics(); else showManual(); }).show());
         more.setContentDescription("更多"); more.setGravity(Gravity.CENTER); more.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48)));
         home.addView(homeHeader, new LinearLayout.LayoutParams(-1, -2)); gap(home, 8);
-        LinearLayout computer = column(); computer.setPadding(dp(20),dp(24),dp(20),dp(20));
-        GradientDrawable computerBg = new GradientDrawable(); computerBg.setColor(SURFACE);computerBg.setCornerRadius(dp(10));computerBg.setStroke(dp(1),BORDER);computer.setBackground(computerBg);
+        LinearLayout computer = column(); computer.setPadding(dp(20),dp(20),dp(20),dp(20));
+        GradientDrawable computerBg = new GradientDrawable(); computerBg.setColor(SURFACE);computerBg.setCornerRadius(dp(20));computerBg.setStroke(dp(1),BORDER);computer.setBackground(computerBg);
         LinearLayout.LayoutParams computerSize = new LinearLayout.LayoutParams(-1,-2);computerSize.topMargin=dp(16);home.addView(computer,computerSize);
         LinearLayout identity = new LinearLayout(this); identity.setGravity(Gravity.CENTER_VERTICAL);
         ImageView icon = new ImageView(this); icon.setImageResource(R.drawable.ic_hub_computer);
@@ -522,9 +523,13 @@ public final class HubActivity extends Activity {
         computerDetail.setMinHeight(dp(48)); computerDetail.setGravity(Gravity.CENTER_VERTICAL); computerDetail.setClickable(true); computerDetail.setFocusable(true);
         computerDetail.setOnClickListener(v -> {
             List<String> annotated = new ArrayList<>();
-            for (String address : HubRoutes.usableAddresses(store.get("hosts", ""))) annotated.add(HubRoutes.label(address) + "：" + address);
-            String addresses = android.text.TextUtils.join("\n", annotated);
-            HubStreamUi.hubDialog(this).setTitle("连接地址").setMessage(addresses.isEmpty() ? "尚未发现可用的 IPv4 地址" : addresses)
+            List<HubAddressLabels.Link> links = HubAddressLabels.currentLinks();
+            String current = computerOnline ? presenceHost : "";
+            for (String address : HubRoutes.usableAddresses(bindingAddresses())) annotated.add(HubAddressLabels.line(address, current, links));
+            String addresses = android.text.TextUtils.join("\n\n", annotated);
+            String detail = addresses.isEmpty() ? "尚未发现可用的 IPv4 地址" : addresses;
+            if (store.bound()) detail += "\n\n已绑定，可检查电脑状态或开始连接。";
+            HubStreamUi.hubDialog(this).setTitle("连接地址").setMessage(detail)
                 .setPositiveButton("关闭", null).show();
         });
         computerDetail.setText(""); computerDetail.setContentDescription("电脑详情");
@@ -537,11 +542,12 @@ public final class HubActivity extends Activity {
                         .setTitle("扩展屏连接方式").setItems(new String[]{"无线网络", "USB 网络共享"},
                             (dialog, which) -> startSession("tablet", which == 0 ? "lan" : "usb", false, selectedOrientation())).show()));
 
-        gap(computer,24);
+        gap(computer,20);
         View connectionDivider=new View(this);connectionDivider.setBackgroundColor(BORDER);computer.addView(connectionDivider,new LinearLayout.LayoutParams(-1,dp(1)));gap(computer,16);
         homeChannel = label("",13,MUTED);computer.addView(homeChannel);gap(computer,8);
         lastConnectionSummary = label("",13,MUTED);computer.addView(lastConnectionSummary);refreshDiagnosticsCard();updateComputerAddress();
-        status = label(store.bound() ? "已绑定，可检查电脑状态或开始连接。" : "点“+ 添加电脑”绑定。", 14, MUTED);
+        status = label(store.bound() ? "" : "点“+ 添加电脑”绑定。", 14, MUTED);
+        status.setVisibility(store.bound() ? View.GONE : View.VISIBLE);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); computer.addView(status); renderDeviceState();
         cancelConnection = button(computer, "取消连接", false, v -> {
             HubSessionCoordinator coordinator = activeCoordinator;
@@ -587,17 +593,6 @@ public final class HubActivity extends Activity {
             if(position!=HubTheme.mode(this)){HubTheme.setMode(this,position);refreshPalette();build();}
         });
 
-        LinearLayout updateCard = card("版本与更新");
-        updateCard.addView(new HubUpdatePanel(this, updates, () -> !busy && activeCoordinator == null), new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout advanced = card("高级设置");
-        settingLink(advanced, "音视频与输入高级设置", "分辨率、编码器、解码、键盘与手势", v -> startActivity(new Intent(this, StreamSettings.class)));
-        if (new HubLoginSecrets(this).saved() || "legacy".equals(store.hostPolicyMode()))
-            settingLink(advanced, "旧版登录设置", "", v -> HubStreamUi.hubDialog(this).setTitle("旧版登录设置").setView(HubLoginSettings.view(this,false,null)).setPositiveButton("关闭",null).show());
-        settingLink(advanced, "兼容主机列表", "管理上游兼容连接", v -> startActivity(new Intent(this, PcView.class)));
-        View shortcutsRow = settingLink(advanced, "系统快捷键", "", v -> showShortcuts());
-        shortcutsState = (TextView)((LinearLayout)((LinearLayout)shortcutsRow).getChildAt(0)).getChildAt(1);
-        shortcutsState.setVisibility(View.VISIBLE); refreshShortcutsState();
-        settingLink(advanced, "使用手册", "", v -> showManual());
         LinearLayout receiver = card("电脑主动副屏");
         receiverSwitch = new Switch(this); receiverSwitch.setText("接收电脑副屏请求"); receiverSwitch.setTextColor(TEXT); receiverSwitch.setTextSize(16); receiverSwitch.setPadding(0, dp(8), 0, dp(8));
         receiverSwitch.setThumbTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{ACCENT_DARK, MUTED}));
@@ -632,6 +627,19 @@ public final class HubActivity extends Activity {
             String mode=position==0?"tablet":position==1?"computer":"both";
             audioPrefs.edit().putString("streamhub_audio_output",mode).putBoolean("checkbox_host_audio",position!=0).apply();
         },"仅平板输出会临时接管电脑音频；其余选项保留电脑当前设备。下次连接生效。");
+        LinearLayout input = card("输入");
+        View shortcutsRow = settingLink(input, "系统快捷键", "", v -> showShortcuts());
+        shortcutsState = (TextView)((LinearLayout)((LinearLayout)shortcutsRow).getChildAt(0)).getChildAt(1);
+        shortcutsState.setVisibility(View.VISIBLE); refreshShortcutsState();
+        LinearLayout updateCard = card("版本与更新");
+        updateCard.addView(new HubUpdatePanel(this, updates, () -> !busy && activeCoordinator == null), new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout advanced = card("高级与兼容");
+        settingLink(advanced, "音视频与输入高级设置", "", v -> startActivity(new Intent(this, StreamSettings.class)));
+        settingLink(advanced, "兼容主机列表", "", v -> startActivity(new Intent(this, PcView.class)));
+        if (new HubLoginSecrets(this).saved() || "legacy".equals(store.hostPolicyMode()))
+            settingLink(advanced, "旧版登录设置", "", v -> HubStreamUi.hubDialog(this).setTitle("旧版登录设置").setView(HubLoginSettings.view(this,false,null)).setPositiveButton("关闭",null).show());
+        LinearLayout help = card("帮助");
+        settingLink(help, "使用手册", "", v -> showManual());
         LinearLayout authorization = card("设备授权");
         authorization.addView(label("绑定码仅用于已授权设备；重新绑定会替换当前电脑信任。", 14, MUTED));
         Button clearBinding = textButton(authorization, "清除当前电脑绑定", DANGER, v -> HubStreamUi.hubDialog(this)
@@ -733,13 +741,13 @@ public final class HubActivity extends Activity {
         if (computerDetail == null) return;
         List<String> addresses = HubRoutes.usableAddresses(bindingAddresses());
         String text;
-        try { text = (computerOnline && !presenceHost.isEmpty() ? HubRoutes.label(presenceHost) : "通道待检测") + " · " + (addresses.isEmpty() ? "尚无可用地址" : "点按查看连接详情"); }
+        try { text = (computerOnline && !presenceHost.isEmpty() ? HubAddressLabels.describe(presenceHost, HubAddressLabels.currentLinks()) : "通道待检测") + " · " + (addresses.isEmpty() ? "尚无可用地址" : "点按查看连接详情"); }
         catch (IllegalArgumentException error) { text = "请重新设置连接通道"; }
         computerDetail.setContentDescription("连接地址：" + text + "，点按查看全部");
         computerDetail.setText("");
         if(homeChannel!=null) {
             String channel="通道待设置";
-            try { channel=computerOnline&&!presenceHost.isEmpty()?HubRoutes.label(presenceHost)+" · "+presenceHost:store.transport().transport().label(); }
+            try { channel=computerOnline&&!presenceHost.isEmpty()?HubAddressLabels.describe(presenceHost, HubAddressLabels.currentLinks())+" · "+presenceHost:store.transport().transport().label(); }
             catch(IllegalArgumentException ignored) { }
             homeChannel.setText(store.bound()?channel:"添加电脑后显示连接信息");
         }
@@ -747,8 +755,8 @@ public final class HubActivity extends Activity {
     private void renderDeviceState() {
         if (deviceState == null || deviceStateDot == null) return;
         int color = busy ? WARNING : lastOperationFailed ? DANGER : computerOnline ? SUCCESS : MUTED;
-        deviceState.setText(busy ? "正在连接" : lastOperationFailed ? "连接未完成" : computerOnline ? "电脑在线" + mediaState : store.bound() ? "已绑定 · 暂不可达" : "未绑定");
-        deviceState.setTextColor(color); GradientDrawable dot = new GradientDrawable(); dot.setShape(GradientDrawable.OVAL); dot.setColor(color); deviceStateDot.setBackground(dot);
+        deviceState.setText(busy ? "正在连接" : lastOperationFailed ? "连接未完成" : computerOnline ? "在线" + mediaState : store.bound() ? "暂不可达" : "未绑定");
+        deviceState.setTextColor(busy || lastOperationFailed ? color : MUTED); GradientDrawable dot = new GradientDrawable(); dot.setShape(GradientDrawable.OVAL); dot.setColor(color); deviceStateDot.setBackground(dot);
     }
     private void finishBindingInput() {
         hosts.clearFocus(); invitation.clearFocus(); pageRoot.requestFocus();

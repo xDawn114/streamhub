@@ -1,11 +1,11 @@
 {
   "upstreamCommit": "63d35f702ee9e362e43263742981836ec0710384",
-  "version": "2026.914.233613+streamhub.3",
-  "binarySha256": "281639B617EA67DF600DF8791D67C7FB1F7D47BC34C6FB5B07550D72F6094295",
+  "version": "2026.914.233613+streamhub.4",
+  "binarySha256": "43988C7DD0AB077F31366FDFC81F4F1002BBBC7A50C7F1B8A6CD2A483B43ECEA",
   "sourceArchive": "Sunshine-streamhub-source.tar.gz",
-  "sourceArchiveSha256": "E6B4200658783EE8C7580D6A38AB9A75140767975AAA7DF8177ACDF83D78DD5E",
-  "sourceFileCount": 1499,
-  "patchSha256": "DF2B51FB4BDC5AA7369D695A31A86F0A2F34F8664FB7AA572F04569BA651797E",
+  "sourceArchiveSha256": "C5474405414809F29D459E99173196E83534C76859A6D005BF0D98BFB99443FA",
+  "sourceFileCount": 1500,
+  "patchSha256": "5D0A49D3A55D6284457623D0DD1F9BAA490600A05FBDC5EC12CD1F09112302E4",
   "compiler": "GCC 16.2.0 UCRT64",
   "cmake": "4.5.0",
   "configuration": "Release; assets relative; no native tray; no CUDA; static libraries",
@@ -15,44 +15,56 @@
       "sha256": "210723CD507A34A5F4B7EC3C304A7D848C35A36E9E6D68E0E73C7DC6934C65DE"
     },
     {
-      "path": "src/main.cpp",
-      "sha256": "5D2B7A72DAA7658DD35241FA095C095F75AD3843B198BD3234AE1E533B6401BD"
+      "path": "src/config.cpp",
+      "sha256": "F53866B8FFB29A791E04989315F52F7BFB94385E3572902DC4B9BAF8592F0FF2"
     },
     {
-      "path": "src/video.cpp",
-      "sha256": "95C198B3F7B4A04A5D4ECCA93FC79D402A3C3F3E360A386B519297E74A4ED601"
+      "path": "src/config.h",
+      "sha256": "EC3E5D957D95777ECA844EE501FC55001134D6425AFA7B785190136037E1F3DA"
+    },
+    {
+      "path": "src/main.cpp",
+      "sha256": "5D2B7A72DAA7658DD35241FA095C095F75AD3843B198BD3234AE1E533B6401BD"
     },
     {
       "path": "src/nvhttp.cpp",
       "sha256": "FBA0AD5C79062F1B0202BB0FECA67D6DCE350A6CB6F3C4F13ABEAD3FAD803982"
     },
     {
-      "path": "src/platform/virtualhid_input.cpp",
-      "sha256": "F101A5A02CE2AF73A6F0A27880CD7E68F19D2F7399851412D9B42B7243635392"
-    },
-    {
-      "path": "src/platform/windows/input.cpp",
-      "sha256": "1D381D802453F3F929D5FB52ED7B0E2D8C0A10AA4C533AB22706E7279080BC37"
-    },
-    {
-      "path": "third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp",
-      "sha256": "9945BAD29BA1705595A37B154FE248A4778735C546026D5FA5A2597D74CEB813"
-    },
-    {
-      "path": "src/streamhub_timing.h",
-      "sha256": "BDBD113A2480C38F160A7452EEBF379E8957086D624BFEE02A43BE5946A7ABA1"
-    },
-    {
       "path": "src/platform/common.h",
       "sha256": "EC6048EB9D03A5D54D928A824D73F9288685AE9F0C29D8B9E420070BF68A4F46"
+    },
+    {
+      "path": "src/platform/virtualhid_input.cpp",
+      "sha256": "F101A5A02CE2AF73A6F0A27880CD7E68F19D2F7399851412D9B42B7243635392"
     },
     {
       "path": "src/platform/windows/display_base.cpp",
       "sha256": "14BF0E81C14AABA5432AF20E364D3E1A283379C616FD1BA5B3F2838E68B3E683"
     },
     {
+      "path": "src/platform/windows/input.cpp",
+      "sha256": "1D381D802453F3F929D5FB52ED7B0E2D8C0A10AA4C533AB22706E7279080BC37"
+    },
+    {
       "path": "src/streamhub_probe_cache.h",
       "sha256": "76A81150FF013454978B59A581DD9C3E08B99F4675566F114F82F58181DCB929"
+    },
+    {
+      "path": "src/streamhub_probe_plan.h",
+      "sha256": "910B1C334ECAEF7ADA302D4E7871CAAEF4EDE35A55B50DD7919D2CF855FA6FEF"
+    },
+    {
+      "path": "src/streamhub_timing.h",
+      "sha256": "BDBD113A2480C38F160A7452EEBF379E8957086D624BFEE02A43BE5946A7ABA1"
+    },
+    {
+      "path": "src/video.cpp",
+      "sha256": "7B15F7879AD475837685632A5CC45BBA959B3CCBF07EF53D6D5A4DAD972B39B8"
+    },
+    {
+      "path": "third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp",
+      "sha256": "9945BAD29BA1705595A37B154FE248A4778735C546026D5FA5A2597D74CEB813"
     }
   ],
   "submodules": [

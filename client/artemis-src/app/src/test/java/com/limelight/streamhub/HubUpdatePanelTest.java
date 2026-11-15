@@ -16,7 +16,7 @@ import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34, application = android.app.Application.class)
 public class HubUpdatePanelTest {
-    @Test public void unconfiguredSourceHasNoDownloadOrInstallAndKeepsPreferences() {
+    @Test public void embeddedSourceAllowsCheckingButNeverOffersAnUnverifiedInstall() {
         try(org.robolectric.android.controller.ActivityController<Activity> controller=Robolectric.buildActivity(Activity.class).setup()) {
             Activity activity=controller.get();HubUpdates updates=HubUpdates.get(activity);
             HubUpdatePanel panel=new HubUpdatePanel(activity,updates,()->true);activity.setContentView(panel);
@@ -25,15 +25,21 @@ public class HubUpdatePanelTest {
                 View child=panel.getChildAt(i);
                 if(child instanceof Button && !(child instanceof Switch)) {
                     Button button=(Button)child;
-                    if("检查更新".contentEquals(button.getText()))assertFalse(button.isEnabled());
-                    else assertEquals(View.GONE,button.getVisibility());
+                    if("检查更新".contentEquals(button.getText())) {
+                        assertTrue(updates.configured());
+                        assertTrue(button.isEnabled());
+                        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT,button.getLayoutParams().width);
+                        assertEquals(android.view.Gravity.START|android.view.Gravity.CENTER_VERTICAL,button.getGravity());
+                    } else {
+                        assertEquals(View.GONE,button.getVisibility());
+                        assertTrue(((ViewGroup.MarginLayoutParams)button.getLayoutParams()).topMargin>=8*activity.getResources().getDisplayMetrics().density);
+                    }
                     assertTrue(button.getMinimumHeight()>=48*activity.getResources().getDisplayMetrics().density);
-                    assertTrue(((ViewGroup.MarginLayoutParams)button.getLayoutParams()).topMargin>=8*activity.getResources().getDisplayMetrics().density);
                 }
                 if(child instanceof Switch) { switches++;((Switch)child).setChecked(!((Switch)child).isChecked()); }
             }
             assertEquals(2,switches);assertFalse(updates.autoCheck());assertTrue(updates.autoDownload());
-            assertTrue(updates.message().contains("尚未接入"));assertFalse(updates.busy());
+            assertNull(updates.available());assertFalse(updates.ready());assertFalse(updates.busy());
         }
     }
     @Test public void originalSignerIsRequiredIncludingMultiSignerPackages() {

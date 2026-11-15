@@ -41,17 +41,17 @@ public partial class MainWindow
             using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("StreamHub.UpdateTrust.json") ?? throw new IOException();
             _updateTrust = JsonSerializer.Deserialize<UpdateTrust>(resource, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? throw new IOException();
             if (!UpdatePolicy.QueryConfigured(_updateTrust))
-                UpdateStateText.Text = "更新发布源尚未接入，当前使用手动安装；接入后将按以下偏好检查更新。";
+                UpdateStateText.Text = "更新源未配置";
             else
             {
                 var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(10) };
                 Closed += (_, _) => http.Dispose();
                 _updates = new UpdateClient(_updateTrust, http, AuthenticodeVerifier.VerifyAsync);
-                UpdateStateText.Text = _updatePreferences.LastCheckedAt is { } last ? "上次成功检查：" + last.ToLocalTime().ToString("MM-dd HH:mm") : "尚未检查更新。";
-                if (!UpdatePolicy.Configured(_updateTrust)) UpdateStateText.Text += "\n可检查新版本；Windows 安装签名尚未接入。";
+                UpdateStateText.Text = _updatePreferences.LastCheckedAt is { } last ? "上次检查 " + last.ToLocalTime().ToString("MM-dd HH:mm") : "尚未检查";
+                if (!UpdatePolicy.Configured(_updateTrust)) UpdateStateText.Text += "\nWindows 签名未接入";
             }
         }
-        catch { UpdateStateText.Text = "更新配置不可用，当前使用手动安装。"; }
+        catch { UpdateStateText.Text = "更新配置不可用"; }
         _previousUpdateOutcome = UpdateInstallAttempt.Describe(UpdateAttemptPath, ProductVersion.Code,
             ProductVersion.IsInternal ? "internal" : "stable", DateTimeOffset.UtcNow);
         UpdateVersionText.Text = CurrentUpdateVersion;

@@ -9,9 +9,12 @@ param(
     [string]$AndroidCertificateSha256='',
     [int]$MinimumInstalledCode=131,
     [ValidateRange(1,90)][int]$ValidDays=14,
-    [switch]$WindowsQueryOnly
+    [switch]$WindowsQueryOnly,
+    [string]$PackageBaseUrl='',
+    [switch]$AndroidOnlyHosting
 )
 $ErrorActionPreference='Stop'
+if($AndroidOnlyHosting -and -not $WindowsQueryOnly){throw '仅托管Android时，Windows必须保持查询模式。'}
 $candidate=(Resolve-Path -LiteralPath $CandidateRoot).Path.TrimEnd('\')
 $source=(Resolve-Path -LiteralPath $SourceRoot).Path.TrimEnd('\')
 $output=[IO.Path]::GetFullPath($OutputRoot).TrimEnd('\')
@@ -84,13 +87,17 @@ $packages=@();$feeds=@()
 foreach($platform in @('windows','android')){
     $entry=@($catalog.files|Where-Object {$_.file -eq $(if($platform -eq 'windows'){'windows/我控制-电脑端安装.exe'}else{'android/我控制-安卓端.apk'})})[0]
     $extension=if($platform -eq 'windows'){'exe'}else{'apk'}
-    $relative="packages/$($version.Channel)/$($version.Name)-$($version.Code)/$($entry.sha256.ToLowerInvariant())/$platform.$extension"
+    $packageRoot=if($PackageBaseUrl){$PackageBaseUrl.TrimEnd('/')}else{([Uri]$windows.feed).GetLeftPart([UriPartial]::Authority)+'/packages'}
+    $packageOrigin=[Uri]$packageRoot
+    if($packageOrigin.Scheme -ne 'https' -or -not $packageOrigin.IsDefaultPort -or $packageOrigin.Query -or $packageOrigin.Fragment -or $packageOrigin.UserInfo -or
+       $packageOrigin.GetLeftPart([UriPartial]::Authority) -cne ([Uri]$windows.feed).GetLeftPart([UriPartial]::Authority)){throw '安装包根地址必须为更新源同源的HTTPS目录。'}
+    $url="$packageRoot/$($version.Channel)/$($version.Name)-$($version.Code)/$($entry.sha256.ToLowerInvariant())/$platform.$extension"
+    $relative=Site-Path $url
     $destination=Join-Path $site $relative
     New-Item -ItemType Directory -Force -Path (Split-Path $destination -Parent)|Out-Null
     Copy-Item -LiteralPath (Join-Path $candidate $entry.file) -Destination $destination
     if((Get-FileHash -LiteralPath $destination).Hash -ne $entry.sha256){throw '交付目录中的包与冻结候选不符。'}
     $feed=if($platform -eq 'windows'){$windows.feed}else{$android.feed}
-    $url=([Uri]$feed).GetLeftPart([UriPartial]::Authority)+'/'+$relative
     $feedPath=Site-Path $feed
     $feedFile=Join-Path $site $feedPath
     New-Item -ItemType Directory -Force -Path (Split-Path $feedFile -Parent)|Out-Null
@@ -98,12 +105,13 @@ foreach($platform in @('windows','android')){
         MinimumInstalledCode=$MinimumInstalledCode;ValidDays=$ValidDays;SourceRoot=$source}
     if($platform -eq 'windows'){$parameters.QueryOnly=$WindowsQueryOnly}else{$parameters.AndroidCertificateSha256=$AndroidCertificateSha256}
     & (Join-Path $PSScriptRoot 'Create-UpdateManifest.ps1') @parameters|Out-Null
-    $packages+=[ordered]@{path=$relative;url=$url;sha256=$entry.sha256;size=$entry.size}
+    $packages+=[ordered]@{path=$relative;url=$url;sha256=$entry.sha256;size=$entry.size;hosted=(-not($AndroidOnlyHosting -and $platform -eq 'windows'))}
     $feeds+=[ordered]@{path=$feedPath;url=$feed;sha256=(Get-FileHash -LiteralPath $feedFile).Hash}
 }
 $plan.readyToUpload=$true;$plan.packages=$packages;$plan.feeds=$feeds
+$plan.androidOnlyHosting=[bool]$AndroidOnlyHosting
 $plan.missing=@($missing|Where-Object { -not ($WindowsQueryOnly -and $_ -like 'Windows 受信*') })
-$plan.uploadOrder=@('先上传全部packages不可变文件，直接GET核对大小与哈希','再原子替换两个清单；清单不能长缓存','最后从140或更早支持更新的版本做真实双端升级与失败恢复验收')
+$plan.uploadOrder=@('先上传hosted=true的不可变安装包，直接GET核对大小与哈希','再原子替换两个签名清单；清单不能长缓存','以已内置同一信任根的引导版完成真实升级；Windows查询模式不下载、不安装')
 $plan|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $work 'publication.json') -Encoding utf8NoBOM
 Move-Item -LiteralPath $work -Destination (Join-Path $output 'ready')
 Write-Output ('本机待审交付目录：'+(Join-Path $output 'ready')+'；未上传、未安装。')

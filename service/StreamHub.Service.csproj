@@ -22,6 +22,7 @@
     <Compile Include="../host/Runtime/ClipboardApi.cs" Link="Runtime/ClipboardApi.cs" />
     <Compile Include="../host/Runtime/LiveSessionState.cs" Link="Runtime/LiveSessionState.cs" />
     <Compile Include="../host/Runtime/RemoteWarmupPolicy.cs" Link="Runtime/RemoteWarmupPolicy.cs" />
+    <Compile Include="../host/Runtime/EncoderProbePlan.cs" Link="Runtime/EncoderProbePlan.cs" />
     <Compile Include="../host/Runtime/CaptureReadinessPolicy.cs" Link="Runtime/CaptureReadinessPolicy.cs" />
     <Compile Include="../host/Runtime/RemoteDisplaySelection.cs" Link="Runtime/RemoteDisplaySelection.cs" />
     <Compile Include="../host/Runtime/RuntimeClient.cs" Link="Runtime/RuntimeClient.cs" />

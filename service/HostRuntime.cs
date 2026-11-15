@@ -575,6 +575,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                     if (!await StopExpiredPrivacyStreamAsync(cancellationToken))
                         throw new InvalidOperationException("正在安全结束上一条隐私保护连接，请稍后重试。");
                     _remoteSession.Prepare(request.LeaseId, request.ClientId, DateTimeOffset.UtcNow);
+                    await PrepareEncoderProbeAsync(_remote, request.EncoderProbe, cancellationToken);
                     _remoteController = Controller(request, controllerPrincipal);
                     if (_privacySuppressedLease != request.LeaseId) _privacySuppressedLease = null;
                     _loginInputUsed.RemoveWhere(lease => lease != request.LeaseId);
@@ -952,6 +953,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             throw new InvalidOperationException("副屏正在使用，请先断开当前会话。");
         if (_tabletLeaseId is not null && !reusingLease)
             throw new InvalidOperationException("已有设备正在连接副屏，请取消或等待本次连接结束。");
+
+        if (!reusingLease) await PrepareEncoderProbeAsync(_tablet, request.EncoderProbe, cancellationToken);
 
         var requested = new TabletDisplayMode(request.Width.Value, request.Height.Value,
             request.RefreshRate.Value, request.Orientation.Value);
@@ -1519,6 +1522,22 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             throw new InvalidOperationException("副屏显示助手未能停用虚拟显示器，请确认电脑已登录且实体屏处于打开状态。");
         if (!_interactive && helper.SessionId != SessionLauncher.ActiveSession)
             throw new InvalidOperationException("电脑登录会话已切换，请重新停用副屏连接。");
+    }
+
+    private async Task PrepareEncoderProbeAsync(Engine engine, string? hint, CancellationToken token)
+    {
+        string requested = EncoderProbePlan.Validate(hint);
+        string current = await _profiles.ReadEncoderProbeAsync(engine.Profile, token);
+        if (engine.Process?.Running == true && EncoderProbePlan.Covers(current, requested)) return;
+        if (engine.Process?.Running == true)
+        {
+            var state = await GetEngineStatusAsync(engine, token);
+            if (state.Streaming || state.BackendBusy)
+                throw new InvalidOperationException("串流尚未结束，未更改编码设置，请稍后重新连接。");
+            await StopEngineAsync(engine, token);
+            if (engine.Process?.Running == true) throw new InvalidOperationException("编码引擎仍在退出，请稍后重试。");
+        }
+        await _profiles.ConfigureEncoderProbeAsync(engine.Profile, requested, token);
     }
 
     private async Task TryStartEngineAsync(Engine engine, CancellationToken cancellationToken,

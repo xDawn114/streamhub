@@ -70,6 +70,21 @@ public final class HubStreamUi {
         LinearLayout content = new LinearLayout(source);
         content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+        try {
+            JSONObject diagnostic = new JSONObject(HubSessionDiagnostics.read(source));
+            JSONObject phases = diagnostic.optJSONObject("phases");
+            long firstFrame = phases == null ? -1 : phases.optLong("first-frame", -1);
+            if (firstFrame >= 0) {
+                TextView exact = text(source, "首帧 " + firstFrame + " ms", 14, text);
+                exact.setContentDescription("首帧耗时 " + firstFrame + " 毫秒");
+                content.addView(exact, spaced(density, 0, 4, 4));
+                String trace = diagnostic.optString("traceId");
+                TextView identifier = text(source, "Trace " + trace, 12, muted);
+                identifier.setTextIsSelectable(true);
+                identifier.setContentDescription("诊断编号 " + trace);
+                content.addView(identifier, spaced(density, 0, 0, 4));
+            }
+        } catch (org.json.JSONException ignored) { }
         addSectionTitle(source, content, "连接阶段", text, density);
         JSONArray timeline = HubSessionDiagnostics.timeline(source);
         if (timeline.length() == 0) {

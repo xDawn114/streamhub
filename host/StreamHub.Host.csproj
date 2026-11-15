@@ -15,6 +15,7 @@
     <RootNamespace>StreamHub.Host</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Resource Include="Assets/我控制.png" />
     <Compile Include="../common/Updates/*.cs" Link="Updates/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../common/Updates/update-trust.json" LogicalName="StreamHub.UpdateTrust.json" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

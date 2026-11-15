@@ -4,7 +4,7 @@
 
 Windows remote desktop and extended display for Android phones and tablets, with file transfer and manual clipboard sync.
 
-> **当前开发版本为 0.8.19 / 161 / internal，实装基线仍是 160。** 电脑和平板已有160安装及定向验收记录，手机尚未同步。161包含首帧缓存复核、安全整改和发布工具修正，尚未安装验收。这是内测源码，不是正式二进制发布；当前没有公开的预编译安装包。Windows可信签名申请待审核，生产更新源尚未接入。
+> **当前源码为 0.8.26 / 168 / internal。** 本轮恢复安卓首页顶部对齐、统一地址名称，加入按需 SDR 编码探测，并接入 Android 内测更新源；实装与验证边界见[源码与实装基线](docs/公开源码基线.md)。Windows 可信签名申请仍待审核，应用内更新保持版本查询模式。
 
 ## 可以做什么
 
@@ -22,16 +22,16 @@ Windows remote desktop and extended display for Android phones and tablets, with
 
 - **平台**：当前维护 Windows 被控端和 Android 控制端，没有 iOS、macOS、Linux 或 Web 版本。
 - **发现与网络**：局域网发现受设备、Wi-Fi 隔离和防火墙影响；可用“地址 + 六位短码”绑定，但电脑地址必须可达。异地直连、中继和速度取决于 Tailscale 与实际网络。
-- **性能**：160现场取样的主屏热连首帧中位2.347秒，明确停引擎后冷连中位7.537秒；这是单次现场的有限样本，161改动后尚未实测。见[取样与改动边界](docs/首帧测量-2026-11-15.md)。请求帧率、面板刷新率和实际串流帧率是不同指标，不承诺稳定90 FPS。
+- **性能**：本轮以同一路径、同一预设分别取三次热连和停引擎冷连，原生引擎改为只探测本次所需的 SDR 能力，HDR 保留完整检查。数值、达标条件及异常样本见[首帧测量](docs/首帧测量-2026-11-15.md)。环境未隔离，不能与其他轮次算加速比，也不承诺跨设备冷连时间或稳定 90 FPS。
 - **隐私与输入**：隐私屏支持 `Ctrl+Alt+F12` 紧急恢复；显示器热插拔、Windows 用户切换及所有安卓机型的系统键行为仍需专项验证。连接提示会自动收起，设备授权和托盘断开入口保留。
 - **签名**：Windows 内测包尚无本项目的可信 Authenticode 签名。SignPath 申请已经提交，申请和源码公开都不等于已获批或已签名。
-- **更新**：已有 HTTPS、RSA-PSS 清单、包哈希、Android 原签名及 Windows 发布者校验；生产 feed 和内置信任根尚未配置，当前不能依靠应用内更新获取新版。
+- **更新**：Android 内测源已配置 HTTPS、内置 RSA-PSS 公钥、包大小/哈希和原签名校验；首次需手动安装带真实信任配置的版本。Windows 可验证清单并查询版本，因尚无可信发布者而禁止下载、安装。见[更新交付操作](docs/更新交付操作.md)。
 
 自动填写 Windows 密码默认关闭，不支持 PIN、Windows Hello 或 UAC。新版电脑只在本机保存该用户的密码，以 DPAPI 和受保护目录保存，不向安卓回传；旧版兼容入口见 [隐私说明](PRIVACY.md)。不要在 Issue、日志或代码中提交密码、绑定令牌或私钥。
 
 ## 获取与构建
 
-[Releases](https://github.com/xDawn114/streamhub/releases) 中现有 `source` 预发布仅是源码存档，不包含 APK 或 Windows 安装器。最新维护源码以默认分支为准；160 的来源和验证边界见 [公开源码基线](docs/公开源码基线.md)。
+[Releases](https://github.com/xDawn114/streamhub/releases) 中现有 `source` 预发布仅是源码存档。Android 内测 APK 可从[更新站点](https://xdawn114.github.io/streamhub/)获取；Windows 暂无公开安装器。默认分支为 `main`，版本源码另以 `source` 标签固定；来源和验证边界见[公开源码基线](docs/公开源码基线.md)。
 
 ### Windows
 

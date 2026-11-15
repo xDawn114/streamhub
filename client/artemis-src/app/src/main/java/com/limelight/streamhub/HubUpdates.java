@@ -6,6 +6,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
@@ -273,8 +274,13 @@ public final class HubUpdates {
                     try {
                         if (activity.isDestroyed() || activity.isFinishing() || !idle.getAsBoolean() || deviceBusy()) throw new IOException("当前仍有连接或文件操作，请空闲后重试安装。");
                         Uri uri = FileProvider.getUriForFile(context, context.getPackageName() + ".updates", target);
+                        try (android.os.ParcelFileDescriptor descriptor = context.getContentResolver().openFileDescriptor(uri, "r")) {
+                            if (descriptor == null || descriptor.getStatSize() != manifest.size)
+                                throw new IOException("无法向系统提供完整更新包，请重试。");
+                        }
                         Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE).setDataAndType(uri, "application/vnd.android.package-archive")
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+                        install.setClipData(ClipData.newRawUri("更新安装包", uri));
                         if (!preferences.edit().putInt("installPrevious", BuildConfig.VERSION_CODE).putInt("installTarget", manifest.code)
                                 .putString("installChannel", BuildConfig.STREAMHUB_INTERNAL ? "internal" : "stable")
                                 .putLong("installStarted", System.currentTimeMillis()).commit()) throw new IOException("安装记录未能保存，请重试。");

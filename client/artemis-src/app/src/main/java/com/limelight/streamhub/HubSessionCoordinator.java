@@ -203,6 +203,9 @@ public final class HubSessionCoordinator {
         String capabilityRoute = "tablet".equals(mode) ? resolvedRoute : "usb";
         JSONObject prepare = HubDisplayCapabilities.describe(activity, orientation, capabilityRoute).put("mode", mode).put("orientation", orientation)
                 .put("codecs", HubDisplayCapabilities.codecs()).put("clientId", store.clientId()).put("leaseId", leaseId);
+        JSONObject probeCapabilities = selectedInfo.optJSONObject("capabilities");
+        if (probeCapabilities != null && probeCapabilities.optBoolean("selectiveEncoderProbe"))
+            prepare.put("encoderProbe", HubEncoderProbe.forSession(activity, "remote".equals(mode), resolvedRoute));
         if (targetWidth > 0 || targetHeight > 0 || targetFps > 0) {
             if (!reusingLease || !HubStreamResolution.valid(targetWidth, targetHeight, targetFps)) throw new IOException("当前分辨率调整参数无效，请重新连接。");
             JSONObject capabilities = selectedInfo.optJSONObject("capabilities");

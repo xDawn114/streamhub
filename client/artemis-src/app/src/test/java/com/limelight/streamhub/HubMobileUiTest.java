@@ -110,13 +110,17 @@ public class HubMobileUiTest {
                 assertNotNull(remote);assertNotNull(extended);
                 View first=(View)remote.getParent(),second=(View)extended.getParent();
                 assertTrue(second.getTop()>=first.getBottom()+8);readable(root);
+                assertEquals(first.getHeight(),second.getHeight());
+                assertEquals(remote.getTextSize(),extended.getTextSize(),.01f);
+                assertEquals(remote.getTypeface().getStyle(),extended.getTypeface().getStyle());
+                assertTrue(first.isEnabled() && second.isEnabled());
                 assertNotEquals(((android.graphics.drawable.GradientDrawable)((android.graphics.drawable.RippleDrawable)first.getBackground()).getDrawable(0)).getColor(),((android.graphics.drawable.GradientDrawable)((android.graphics.drawable.RippleDrawable)second.getBackground()).getDrawable(0)).getColor());
                 assertNotNull(text(root,"全部设备"));
                 snapshot(root,"phone-home-"+size[0]+"-"+(theme==HubTheme.LIGHT?"light":"dark")+"-font150.png");
             }finally{HubTheme.setMode(RuntimeEnvironment.getApplication(),HubTheme.SYSTEM);}
         }
     }
-    @Test public void wideTabletKeepsFullRailAndSideBySideHomeActions() {
+    @Test public void wideTabletKeepsFullRailAndSideBySideHomeActions() throws Exception {
         window(1280,800,1f);
         try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {
             View root=content(c.get());layout(root,1280,800);
@@ -124,7 +128,29 @@ public class HubMobileUiTest {
             assertEquals(132,nav.getChildAt(0).getWidth());
             View first=(View)text(root,"远程控制").getParent(),second=(View)text(root,"用作扩展屏").getParent();
             assertEquals(first.getTop(),second.getTop());assertTrue(second.getLeft()>=first.getRight()+8);readable(root);
+            java.lang.reflect.Field slotField=HubActivity.class.getDeclaredField("pageSlot");slotField.setAccessible(true);
+            ScrollView home=(ScrollView)((FrameLayout)slotField.get(c.get())).getChildAt(0);
+            View page=((FrameLayout)home.getChildAt(0)).getChildAt(0);
+            View viewport=(View)page.getParent();
+            assertEquals("home starts at the top of the viewport",0,page.getTop());
+            assertEquals(24,page.getPaddingTop());
+            assertEquals((viewport.getWidth()-page.getWidth())/2,page.getLeft(),1);
+            assertNull(text(root,"使用提示"));assertNull(text(root,"连接历史"));
             snapshot(root,"tablet-home-landscape.png");
+        }
+    }
+    @Test public void portraitTabletTopAlignsHomeWithoutAddingFillerCards() throws Exception {
+        window(800,1200,1f);
+        try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {
+            View root=content(c.get());layout(root,800,1200);
+            java.lang.reflect.Field slotField=HubActivity.class.getDeclaredField("pageSlot");slotField.setAccessible(true);
+            ScrollView home=(ScrollView)((FrameLayout)slotField.get(c.get())).getChildAt(0);
+            View page=((FrameLayout)home.getChildAt(0)).getChildAt(0),viewport=(View)page.getParent();
+            assertEquals(640,page.getWidth());assertEquals(0,page.getTop());
+            assertEquals(24,page.getPaddingTop());
+            assertEquals((viewport.getWidth()-page.getWidth())/2,page.getLeft(),1);
+            assertNull(text(root,"使用提示"));assertNull(text(root,"连接历史"));readable(root);
+            snapshot(root,"tablet-home-portrait.png");
         }
     }
     @Test public void shortCodeFormScrollsAndDoesNotClipTheSixDigitsOnPhone() throws Exception {
@@ -157,10 +183,27 @@ public class HubMobileUiTest {
         window(320,640,1.5f);
         try(org.robolectric.android.controller.ActivityController<HubFilesActivity> c=Robolectric.buildActivity(HubFilesActivity.class).setup()) {
             View root=content(c.get());layout(root,320,640);readable(root);
-            assertNotNull(text(root,"文件"));assertTrue(text(root,"发送文件").isShown());
+            assertNotNull(text(root,"文件"));Button send=button(root,"发送文件");assertNotNull(send);assertTrue(send.isShown());
+            assertEquals(1,send.getLayout().getLineCount());
+            assertTrue(send.getLayout().getLineWidth(0)<=send.getWidth()-send.getCompoundPaddingLeft()-send.getCompoundPaddingRight());
             text(root,"传输任务").performClick();layout(root,320,640);
-            assertFalse(button(root,"发送文件")!=null);readable(root);
+            assertNull(button(root,"发送文件"));readable(root);
             snapshot(root,"phone-files-font150.png");
+        }
+    }
+    @Test public void settingsSeparateInputCompatibilityAndHelpWithoutChangingPreferenceActions() throws Exception {
+        window(800,1200,1f);
+        try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {
+            java.lang.reflect.Method show=HubActivity.class.getDeclaredMethod("showPage",int.class);show.setAccessible(true);show.invoke(c.get(),2);
+            View root=content(c.get());layout(root,800,1200);
+            View input=(View)text(root,"系统快捷键").getParent().getParent().getParent();
+            View help=(View)text(root,"使用手册").getParent().getParent().getParent();
+            View compatible=(View)text(root,"兼容主机列表").getParent().getParent().getParent();
+            assertNotNull(text(input,"输入"));assertNotNull(text(help,"帮助"));assertNotNull(text(compatible,"高级与兼容"));
+            assertNull(text(compatible,"系统快捷键"));assertNull(text(compatible,"使用手册"));
+            ((View)text(root,"使用手册").getParent().getParent()).performClick();
+            AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();assertTrue(dialog.isShowing());dialog.dismiss();
+            snapshot(root,"tablet-settings-groups.png");
         }
     }
     @Test public void settingsChoicesPreserveThemeAudioAndOrientationInCenteredTabletColumn() throws Exception {

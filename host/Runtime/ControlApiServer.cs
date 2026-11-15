@@ -67,7 +67,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         int? Height = null,
         int? RefreshRate = null,
         string[]? Codecs = null, string? ClientId = null, string? LeaseId = null, string? RequestId = null, int? DisplayIndex = null,
-        bool StreamSizeOverride = false)
+        bool StreamSizeOverride = false, string? EncoderProbe = null)
     {
         [JsonIgnore] public ControlPrincipal? Principal { get; init; }
         [JsonIgnore] public string? Channel { get; init; }
@@ -339,7 +339,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                     addresses = advertisedAddresses is null ? LocalAddresses() : advertisedAddresses(LocalAddresses()),
                     ports = new { remote = 48989, tablet = 49089, control = Port },
                     capabilities = new { remote = true, tablet = true, pair = true, orientations = new[] { 0, 90, 180, 270 }, automaticOrientationDuringStream = true, integratedVpn = true,
-                        prepareJobs = true, receiverRequests = true, dynamicDisplay = true, sessionLease = true, liveSessionState = true, fastPrivacyHeartbeat = true, boundedPrivacyHeartbeat = true,
+                        prepareJobs = true, receiverRequests = true, dynamicDisplay = true, sessionLease = true, liveSessionState = true, fastPrivacyHeartbeat = true, boundedPrivacyHeartbeat = true, selectiveEncoderProbe = true,
                         fileTransfer = _fileApi is not null, fileBrowse = _fileApi is not null, fileRoots = _fileApi is not null, fileRecycle = _fileApi is not null, remoteDesktopLock = true,
                         remotePrivacy = true, streamResolution = true, desktopInputState = true, loginPasswordFill = true,
                         hostManagedPolicy = true, hostAutomaticLogin = status.HostPolicy?.AutomaticLoginAvailable == true,
@@ -588,6 +588,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
     private PrepareRequest Normalize(PrepareRequest request)
     {
         ValidateMode(request.Mode);
+        try { EncoderProbePlan.Validate(request.EncoderProbe); }
+        catch (ArgumentException error) { throw new ApiError(400, error.Message); }
         try { RemoteDisplaySelection.ValidateRequest(request.Mode, request.DisplayIndex); }
         catch (ArgumentException error) { throw new ApiError(400, error.Message); }
         catch (NotSupportedException error) { throw new ApiError(409, error.Message); }
@@ -723,7 +725,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             ValidateId(request.ClientId, "接收设备");
             if (request.StreamSizeOverride)
                 await PrepareCommandAsync(request, new("remote-reconfigure", "remote", LeaseId: request.LeaseId, ClientId: request.ClientId), cancellationToken).ConfigureAwait(false);
-            await PrepareCommandAsync(request, new("remote-prepare", "remote", LeaseId: request.LeaseId, ClientId: request.ClientId), cancellationToken)
+            await PrepareCommandAsync(request, new("remote-prepare", "remote", LeaseId: request.LeaseId, ClientId: request.ClientId, EncoderProbe: request.EncoderProbe), cancellationToken)
                 .ConfigureAwait(false);
         }
         var initial = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -746,7 +748,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             var response = await runtime.SendAsync(new("tablet-prepare", "tablet", Orientation: request.Orientation,
                 Width: request.Width, Height: request.Height, RefreshRate: request.RefreshRate,
                 LeaseId: request.LeaseId, ClientId: request.ClientId, RequestId: request.RequestId, ControllerCredentialId: request.Principal?.Id,
-                ControllerName: request.Principal?.Name, ControllerChannel: request.Channel), cancellationToken).ConfigureAwait(false);
+                ControllerName: request.Principal?.Name, ControllerChannel: request.Channel, EncoderProbe: request.EncoderProbe), cancellationToken).ConfigureAwait(false);
             if (!response.Success) throw new ApiError(409, response.Message);
             if (response.TimingsMs is not null)
                 foreach (var (name, duration) in response.TimingsMs)

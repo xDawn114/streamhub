@@ -9,6 +9,7 @@ $ErrorActionPreference='Stop'
 $root=(Resolve-Path -LiteralPath $PublicationRoot).Path
 $plan=Get-Content -LiteralPath (Join-Path $root 'publication.json') -Raw|ConvertFrom-Json
 if($plan.schema -ne 1 -or -not $plan.readyToUpload -or @($plan.packages).Count -ne 2 -or @($plan.feeds).Count -ne 2){throw '需要Prepare-UpdatePublication生成的完整待审目录。'}
+if($plan.androidOnlyHosting -and -not $plan.windowsQueryOnly){throw '仅托管Android必须同时声明Windows查询模式。'}
 $handler=[Net.Http.HttpClientHandler]::new();$handler.AllowAutoRedirect=$false
 $http=[Net.Http.HttpClient]::new($handler);$http.Timeout=[TimeSpan]::FromMinutes(10)
 function Local-File([string]$Relative){
@@ -70,11 +71,13 @@ try{
             [DateTimeOffset]$manifest.expiresAt -gt ([DateTimeOffset]$manifest.publishedAt).AddDays(90)){throw '待审清单版本、身份或有效期无效。'}
         $package=@($plan.packages|Where-Object {$_.url -ceq $manifest.url -and $_.sha256 -ieq $manifest.sha256 -and $_.size -eq $manifest.size})
         if($package.Count -ne 1 -or ([Uri]$manifest.url).GetLeftPart([UriPartial]::Authority) -cne ([Uri]$trust.feed).GetLeftPart([UriPartial]::Authority)){throw '待审清单未绑定同源的唯一冻结包。'}
+        $hosted=$package[0].PSObject.Properties.Name -notcontains 'hosted' -or [bool]$package[0].hosted
+        if(-not $hosted -and ($platform -ne 'windows' -or -not $plan.androidOnlyHosting -or -not $plan.windowsQueryOnly -or @($trust.publisherSha256).Count -ne 0)){throw '只有缺少可信发布者的Windows查询模式可以不托管安装包。'}
         if($Online){
             Remote-Hash $feed[0].url (Get-Item -LiteralPath $feedFile).Length $feed[0].sha256 $true
-            Remote-Hash $package[0].url $package[0].size $package[0].sha256 $false
+            if($hosted){Remote-Hash $package[0].url $package[0].size $package[0].sha256 $false}
         }
-        $checks+=[ordered]@{platform=$platform;signatureVerified=$true;packageHashMatches=$true;onlineBytesVerified=[bool]$Online}
+        $checks+=[ordered]@{platform=$platform;signatureVerified=$true;packageHashMatches=$true;feedOnlineVerified=[bool]$Online;packageHosted=$hosted;onlineBytesVerified=([bool]$Online -and $hosted);queryOnly=($platform -eq 'windows' -and [bool]$plan.windowsQueryOnly)}
     }
 }finally{$http.Dispose()}
 $result=[ordered]@{checkedAt=[DateTimeOffset]::UtcNow.ToString('o');passed=$true;online=[bool]$Online;checks=$checks;

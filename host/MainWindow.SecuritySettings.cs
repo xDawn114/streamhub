@@ -10,7 +10,6 @@ public partial class MainWindow
     private Wpf.StackPanel? _hostPolicyPanel;
     private Wpf.CheckBox? _hostPolicyLock, _hostPolicyLogin, _hostPolicySubmit;
     private Wpf.PasswordBox? _hostPolicyPassword;
-    private Wpf.TextBlock? _hostPolicyMessage;
     private HostPolicySnapshot? _hostPolicySnapshot;
     private bool _renderingHostPolicy, _hostPolicyDirty, _savingHostPolicy;
 
@@ -25,12 +24,6 @@ public partial class MainWindow
     {
         if (_hostPolicyPanel is not null) return _hostPolicyPanel;
         var panel = _hostPolicyPanel = new Wpf.StackPanel();
-        void Note(string text)
-        {
-            var label = new Wpf.TextBlock { Text = text, TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 12), FontSize = 13 };
-            label.SetResourceReference(Wpf.TextBlock.ForegroundProperty, "Muted"); panel.Children.Add(new Wpf.Expander { Header = "支持范围", Content = label, Margin = new Thickness(0, 8, 0, 8) });
-        }
         Wpf.CheckBox Choice(string text, string description, string icon)
         {
             var choice = new Wpf.CheckBox { MinHeight = 40 };
@@ -43,9 +36,9 @@ public partial class MainWindow
 
         _hostPolicyLogin = Choice("连接后自动填写密码", "仅使用本机加密保存的 Windows 密码", "\uE8D7");
         _hostPolicySubmit = Choice("填写后自动确认登录", "自动按 Enter 提交；仅限受信任设备", "\uE73E");
-        Note("仅支持当前授权 Windows 用户的密码框，不支持 PIN、Hello、切换用户或 UAC。密码只加密保存在本机，不发送到手机或平板，也不导入安卓保存的密码。");
+        panel.Children.Add(new Wpf.TextBlock { Text = "Windows 密码", Margin = new Thickness(0, 12, 0, 4) });
         _hostPolicyPassword = new Wpf.PasswordBox { MaxLength = 256, MinHeight = 40, Width = 320, HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
-            Margin = new Thickness(0, 4, 0, 12), ToolTip = "重新输入 Windows 密码；不会回显已保存的密码" };
+            Margin = new Thickness(0, 4, 0, 12), ToolTip = "仅支持当前授权 Windows 用户的密码，不支持 PIN、Hello、切换用户或 UAC。密码在本机加密保存，不发送到手机或平板；不会回显已保存的密码。" };
         System.Windows.Automation.AutomationProperties.SetName(_hostPolicyPassword, "在电脑本机设置 Windows 密码");
         panel.Children.Add(_hostPolicyPassword);
         var buttons = new Wpf.WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
@@ -58,9 +51,6 @@ public partial class MainWindow
         Action("保存策略", SaveHostPolicySettingsAsync);
         Action("重新读取", async () => { _hostPolicyDirty = false; await ReadHostPolicySettingsAsync(); });
         panel.Children.Add(buttons);
-        _hostPolicyMessage = new Wpf.TextBlock { Text = "正在读取电脑策略…", TextWrapping = TextWrapping.Wrap };
-        _hostPolicyMessage.SetResourceReference(Wpf.TextBlock.ForegroundProperty, "Muted"); panel.Children.Add(_hostPolicyMessage);
-        System.Windows.Automation.AutomationProperties.SetLiveSetting(_hostPolicyMessage, System.Windows.Automation.AutomationLiveSetting.Polite);
         if (_status?.HostPolicy is {} policy) RefreshHostPolicySettings(policy);
         return panel;
     }
@@ -75,7 +65,6 @@ public partial class MainWindow
             _hostPolicyLogin!.IsChecked = policy.AutomaticLoginEnabled;
             _hostPolicySubmit!.IsChecked = policy.AutomaticLoginSubmit;
             _hostPolicyLogin.IsEnabled = _hostPolicySubmit.IsEnabled = _hostPolicyPassword!.IsEnabled = policy.AutomaticLoginAvailable;
-            _hostPolicyMessage!.Text = policy.PasswordConfigured ? "Windows 密码已在电脑加密保存。" : "尚未在电脑保存密码；未启用自动填写。";
         }
         finally { _renderingHostPolicy = false; }
     }
@@ -87,10 +76,10 @@ public partial class MainWindow
             var result = await _runtime.SendAsync(new("host-policy-status"), _closing.Token);
             if (result.Success && result.PayloadJson is not null)
                 RefreshHostPolicySettings(JsonSerializer.Deserialize<HostPolicySnapshot>(result.PayloadJson, RuntimeProtocol.JsonOptions));
-            else if (_hostPolicyMessage is not null) _hostPolicyMessage.Text = result.Message;
+            else ShowFeedback(result.Message, error: true);
         }
         catch (OperationCanceledException) { }
-        catch (JsonException) { if (_hostPolicyMessage is not null) _hostPolicyMessage.Text = "电脑设置状态无法读取，请确认后台版本。"; }
+        catch (JsonException) { ShowFeedback("电脑设置状态读取失败", error: true); }
     }
 
     private async Task SendHostPolicySettingsAsync(RuntimeRequest request)
@@ -110,10 +99,10 @@ public partial class MainWindow
                 if (preserveEdits && result.Success) _hostPolicySnapshot = policy;
                 else RefreshHostPolicySettings(policy);
             }
-            if (_hostPolicyMessage is not null) _hostPolicyMessage.Text = result.Message;
+            ShowFeedback(result.Message, error: !result.Success);
         }
         catch (OperationCanceledException) { }
-        catch (JsonException) { if (_hostPolicyMessage is not null) _hostPolicyMessage.Text = "未能确认保存结果，请重新读取电脑设置。"; }
+        catch (JsonException) { ShowFeedback("未能确认保存结果，请重新读取", error: true); }
         finally { _savingHostPolicy = false; if (_hostPolicyPanel is not null) _hostPolicyPanel.IsEnabled = true; }
     }
 
@@ -132,7 +121,7 @@ public partial class MainWindow
         if (_hostPolicyPassword is null) return;
         string password = _hostPolicyPassword.Password; _hostPolicyPassword.Clear();
         try { DesktopInputPolicy.ValidatePassword(password); }
-        catch (ArgumentException error) { if (_hostPolicyMessage is not null) _hostPolicyMessage.Text = error.Message; return; }
+        catch (ArgumentException error) { ShowFeedback(error.Message, error: true); return; }
         await SendHostPolicySettingsAsync(new("host-policy-password-save", LoginSecret: password));
     }
 

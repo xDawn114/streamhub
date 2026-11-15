@@ -18,11 +18,19 @@ public partial class MainWindow
     {
         _networkAccess = access;
         if (!_networkAccessDirty) PublicLanAccessCheck.IsChecked = access.AllowPublicLan;
-        NetworkAccessStateText.Text = access.Message +
-            (access.LastError is { Length: > 0 } error ? "\n" + error : "") +
-            (access.VpnReady ? "\n异地连接通过已核实的安全隧道放行。" : "\n安全隧道就绪后会自动应用异地连接规则。");
+        SetNetworkAccessStatus(access.LastError is { Length: > 0 } error ? error :
+            !access.ConfigurationValid ? "网络策略不可用" :
+            !access.FirewallApplied ? "网络策略未应用" :
+            access.MigrationNoticePending ? "公共网络访问待确认" : null,
+            warning: true);
+    }
+
+    private void SetNetworkAccessStatus(string? message, bool warning = false)
+    {
+        NetworkAccessStateText.Text = message ?? "";
+        NetworkAccessStateText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
         NetworkAccessStateText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty,
-            access.LastError is not null || access.MigrationNoticePending ? "WarningText" : "Muted");
+            warning ? "WarningText" : "Muted");
     }
 
     private async Task ReadNetworkAccessAsync()
@@ -37,10 +45,10 @@ public partial class MainWindow
             if (response.Success && response.PayloadJson is not null &&
                 JsonSerializer.Deserialize<NetworkAccessState>(response.PayloadJson, RuntimeProtocol.JsonOptions) is {} access)
                 RenderNetworkAccess(access);
-            else NetworkAccessStateText.Text = response.Message;
+            else SetNetworkAccessStatus(response.Message, warning: true);
         }
         catch (OperationCanceledException) { }
-        catch (JsonException) { NetworkAccessStateText.Text = "网络访问状态无法读取，请确认电脑后台版本。"; }
+        catch (JsonException) { SetNetworkAccessStatus("网络访问状态读取失败", warning: true); }
         finally { _readingNetworkAccess = false; }
     }
 
@@ -64,7 +72,7 @@ public partial class MainWindow
             ShowFeedback(response.Message, error: !response.Success);
         }
         catch (OperationCanceledException) { }
-        catch (JsonException) { NetworkAccessStateText.Text = "未能确认网络访问保存结果，请重新读取状态。"; }
+        catch (JsonException) { SetNetworkAccessStatus("未能确认保存结果，请重试", warning: true); }
         finally { _savingNetworkAccess = false; SaveNetworkAccessButton.IsEnabled = true; }
     }
 }

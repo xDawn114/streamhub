@@ -9,6 +9,7 @@ param(
     [switch]$QueryOnly,
     [string]$AndroidCertificateSha256='',
     [string]$AndroidTools='C:\Android\Sdk\build-tools\36.0.0',
+    [string]$JavaHome='C:\Program Files\Microsoft\jdk-21.0.13.21-hotspot',
     [int]$MinimumInstalledCode=131,
     [ValidateRange(1,90)][int]$ValidDays=14,
     [string]$SourceRoot=(Split-Path $PSScriptRoot -Parent)
@@ -32,7 +33,7 @@ if($Platform -eq 'windows') {
     }
 }else{
     if($QueryOnly -or $AndroidCertificateSha256 -notmatch '^[a-fA-F0-9]{64}$'){throw 'Android清单必须指定原发布证书SHA256，不使用QueryOnly。'}
-    $certs=& (Join-Path $AndroidTools 'apksigner.bat') verify --print-certs $Installer 2>&1
+    $certs=& (Join-Path $JavaHome 'bin/java.exe') -jar (Join-Path $AndroidTools 'lib/apksigner.jar') verify --print-certs $Installer 2>&1
     if($LASTEXITCODE -ne 0){throw 'Android安装包签名验证失败。'}
     $fingerprints=@($certs | ForEach-Object { if($_ -match '^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})$'){$Matches[1]} })
     if($fingerprints.Count -ne 1 -or $fingerprints[0] -ne $AndroidCertificateSha256){throw 'Android安装包不是原发布签名。'}
