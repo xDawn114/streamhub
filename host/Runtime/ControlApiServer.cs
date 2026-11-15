@@ -26,7 +26,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
     Func<CancellationToken, Task<HostDisplayMode>>? readHostMode = null,
     FileTransferVault? files = null, Func<string, string, string, string, ClipboardPayload?, CancellationToken, Task<ClipboardPayload?>>? clipboard = null,
     Func<string[], string[]>? advertisedAddresses = null, string? discoveryDeviceId = null,
-    MaintenanceWindow? maintenance = null) : IAsyncDisposable
+    MaintenanceWindow? maintenance = null, ControlDeviceRegistry? deviceRegistry = null) : IAsyncDisposable
 {
     public const int Port = 49199;
     private const int MaximumBodyBytes = 8192;
@@ -35,8 +35,13 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
     private readonly Dictionary<string, (DateTimeOffset Since, int Count)> _rates = new(), _anonymousRates = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly CaptureReadinessPolicy _captureReadiness = new();
+    private readonly ControlDeviceRegistry _devices = deviceRegistry ?? new();
     private readonly TabletRequestRegistry _receivers = new();
-    private readonly FileTransferApi? _fileApi = files is null ? null : new(files);
+    private readonly FileTransferApi? _fileApi = files is null ? null : new(files, (context, clientId) =>
+    {
+        if (context.Items.TryGetValue("control-principal", out var authenticated) && authenticated is ControlPrincipal principal)
+            ControlDeviceRegistry.EnsureClient(principal, clientId);
+    });
     private readonly object _jobGate = new();
     private readonly Dictionary<string, PrepareJob> _jobs = new();
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -53,6 +58,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
     public LanDiscoveryStatus? DiscoveryStatus => _discovery?.Status;
     public bool IsRunning { get; private set; }
     public string? LastError { get; private set; }
+    public bool LegacyBindingAllowed => _devices.Snapshot().LegacyAllowed;
 
     private sealed record PrepareRequest(
         string Mode,
@@ -61,8 +67,12 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         int? Height = null,
         int? RefreshRate = null,
         string[]? Codecs = null, string? ClientId = null, string? LeaseId = null, string? RequestId = null, int? DisplayIndex = null,
-        bool StreamSizeOverride = false);
-    private sealed record ReceiverPoll(string ClientId, string Name, int Width, int Height, int RefreshRate, int[]? Orientations = null);
+        bool StreamSizeOverride = false)
+    {
+        [JsonIgnore] public ControlPrincipal? Principal { get; init; }
+        [JsonIgnore] public string? Channel { get; init; }
+    }
+    private sealed record ReceiverPoll(string ClientId, string Name, int Width, int Height, int RefreshRate, int[]? Orientations = null, string? DeviceType = null);
     private sealed record RequestAnswer(string ClientId, string Action, string? Message = null);
     private sealed record SessionRequest(string LeaseId, string Mode = "tablet", string? ClientId = null, string? RequestId = null,
         bool StreamReady = false, bool FastPrivacyHeartbeat = false, bool BoundedPrivacyHeartbeat = false, bool LockOnExit = false, string? ExitReason = null);
@@ -89,8 +99,44 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         public int Status { get; } = status;
     }
 
-    public string GetInvitation() => IsRunning && _invitation is not null ? _invitation :
+    public string GetInvitation() => !LegacyBindingAllowed
+        ? throw new InvalidOperationException("旧版共享绑定已关闭，请使用附近电脑或地址＋短码绑定。")
+        : IsRunning && _invitation is not null ? _invitation :
         throw new InvalidOperationException(LastError ?? "设备绑定接口尚未启动。");
+
+    public string DeviceCommand(RuntimeRequest request)
+    {
+        switch (request.Command)
+        {
+            case "control-device-revoke": _devices.Revoke(request.RequestId ?? ""); break;
+            case "control-device-scope": _devices.SetScope(request.RequestId ?? "", (ControlScope)(request.DeviceScope ?? 0)); break;
+            case "control-device-rename": _devices.Rename(request.RequestId ?? "", request.Name ?? ""); break;
+            case "control-legacy-policy": _devices.SetLegacyAllowed(request.LegacyBindingAllowed == true); break;
+            case "control-device-list": break;
+            default: throw new InvalidOperationException("设备授权操作无效。");
+        }
+        PrepareJob[] jobs;
+        lock (_jobGate) jobs = _jobs.Values.Where(j => j.Request.Principal is not null && j.State is "queued" or "running").ToArray();
+        foreach (var job in jobs)
+        {
+            try { AuthorizePrepare(job.Request); }
+            catch (UnauthorizedAccessException) { job.Cancellation.Cancel(); }
+        }
+        return JsonSerializer.Serialize(_devices.Snapshot(), RuntimeProtocol.JsonOptions);
+    }
+
+    private string IssueDeviceInvitation(LocalBindingRequest request)
+    {
+        var issued = _devices.Issue(request.ClientId, request.Name);
+        try
+        {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new { v = 1, port = Port,
+                pin = Convert.ToHexString(SHA256.HashData(_certificate!.RawData)), token = Convert.ToHexString(issued.Token) });
+            try { return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_'); }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
+        }
+        finally { CryptographicOperations.ZeroMemory(issued.Token); }
+    }
 
     public string BindingCommand(RuntimeRequest request)
     {
@@ -227,7 +273,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         try
         {
             bool fileRequest = context.Request.Path.StartsWithSegments("/v1/files");
-            bool authorized = Authorized(context.Request.Headers.Authorization.ToString());
+            var principal = _token is null ? null : _devices.Authenticate(context.Request.Headers.Authorization.ToString(), _token);
+            bool authorized = principal is not null;
             if (!AllowRequest(context.Connection.RemoteIpAddress, fileRequest, fileRequest && IsFileDataRequest(context.Request), authorized))
                 throw new ApiError(429, "操作过于频繁，请稍后重试。");
             if (context.Request.Path.StartsWithSegments("/v1/binding"))
@@ -257,13 +304,25 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                 else if (context.Request.Path == "/v1/binding/poll")
                 {
                     var request = await ReadJsonAsync<BindingPoll>(context, lifetime.Token).ConfigureAwait(false);
-                    result = _localBinding.Poll(request.RequestId, request.Nonce, GetInvitation);
+                    result = _localBinding.Poll(request.RequestId, request.Nonce, IssueDeviceInvitation);
                 }
                 else throw new ApiError(404, "找不到此设备确认接口。");
                 await WriteAsync(context, 200, new { success = true, result }, lifetime.Token).ConfigureAwait(false);
                 return;
             }
             if (!authorized) throw new ApiError(401, "此设备尚未绑定，请从电脑端导入邀请码。");
+            context.Items["control-principal"] = principal!;
+            _devices.Seen(principal!);
+            var requestPath = context.Request.Path.Value ?? "";
+            if (fileRequest)
+            {
+                ControlDeviceRegistry.EnsureScope(principal!, ControlScope.Files);
+                ControlDeviceRegistry.EnsureClient(principal!, context.Request.Headers["X-StreamHub-Client"].ToString());
+            }
+            else if (requestPath == "/v1/clipboard") ControlDeviceRegistry.EnsureScope(principal!, ControlScope.Clipboard);
+            else if (requestPath is "/v1/session/desktop" or "/v1/session/privacy" || requestPath.StartsWith("/v1/remote-", StringComparison.Ordinal)) ControlDeviceRegistry.EnsureScope(principal!, ControlScope.Remote);
+            else if (requestPath.StartsWith("/v1/receiver/", StringComparison.Ordinal) || requestPath.StartsWith("/v1/requests/", StringComparison.Ordinal))
+                ControlDeviceRegistry.EnsureScope(principal!, ControlScope.Tablet);
             if (context.Request.QueryString.HasValue) throw new ApiError(400, "请求参数必须放在 JSON 正文中。");
             if (fileRequest)
             {
@@ -282,11 +341,23 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                     capabilities = new { remote = true, tablet = true, pair = true, orientations = new[] { 0, 90, 180, 270 }, automaticOrientationDuringStream = true, integratedVpn = true,
                         prepareJobs = true, receiverRequests = true, dynamicDisplay = true, sessionLease = true, liveSessionState = true, fastPrivacyHeartbeat = true, boundedPrivacyHeartbeat = true,
                         fileTransfer = _fileApi is not null, fileBrowse = _fileApi is not null, fileRoots = _fileApi is not null, fileRecycle = _fileApi is not null, remoteDesktopLock = true,
-                        remotePrivacy = true, streamResolution = true, desktopInputState = true, loginPasswordFill = true },
+                        remotePrivacy = true, streamResolution = true, desktopInputState = true, loginPasswordFill = true,
+                        hostManagedPolicy = true, hostAutomaticLogin = status.HostPolicy?.AutomaticLoginAvailable == true,
+                        individualDeviceCredentials = true, deviceMetadata = true },
+                    connectionsPaused = status.ConnectionsPaused,
+                    policy = status.HostPolicy,
                     remote = new { status.Remote.Running, status.Remote.Healthy, status.Remote.Streaming, status.Remote.BackendBusy },
                     tablet = new { status.Tablet.Running, status.Tablet.Healthy, status.Tablet.Streaming, status.Tablet.BackendBusy,
                         status.Tablet.DesktopCleanupPending }
                 }, lifetime.Token).ConfigureAwait(false);
+                return;
+            }
+            if (context.Request.Method == "GET" && context.Request.Path == "/v1/policy")
+            {
+                var response = await runtime.SendAsync(new("host-policy-status"), lifetime.Token).ConfigureAwait(false);
+                if (!response.Success) throw new ApiError(503, "电脑策略暂时无法读取。");
+                var policy = JsonSerializer.Deserialize<HostPolicySnapshot>(response.PayloadJson ?? "null", RuntimeProtocol.JsonOptions);
+                await WriteAsync(context, 200, new { success = true, policy }, lifetime.Token).ConfigureAwait(false);
                 return;
             }
             var path = context.Request.Path.Value ?? "";
@@ -294,6 +365,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             if (context.Request.Method == "GET" && segments is ["v1", "jobs", var jobId])
             {
                 var job = FindJob(jobId);
+                AuthorizeJob(principal!, job);
                 object snapshot;
                 lock (_jobGate)
                 {
@@ -315,11 +387,11 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                 var request=await ReadJsonAsync<DesktopRequest>(context,lifetime.Token);
                 ValidateId(request.LeaseId,"会话");ValidateId(request.ClientId,"接收设备");
                 if(request.Action is not ("status" or "lock" or "configure" or "login-fill"))throw new ApiError(400,"桌面操作无效。");
-                if(request.Action=="login-fill")DesktopInputPolicy.ValidatePassword(request.Password);
-                else if(request.Password is not null || request.Submit)throw new ApiError(400,"此桌面操作不接受密码。");
+                if(request.Password is not null || request.Submit)
+                    throw new ApiError(403,"密码只能在电脑本机配置；不接收控制端保存的密码。");
                 var response=await runtime.SendAsync(new("remote-desktop","remote",LeaseId:request.LeaseId,
-                    ClientId:request.ClientId,ClipboardAction:request.Action,LockOnExit:request.Enabled,
-                    LoginSecret:request.Password,LoginSubmit:request.Submit),lifetime.Token);
+                    ClientId:request.ClientId,ClipboardAction:request.Action,
+                    ControllerCredentialId:principal!.Id),lifetime.Token);
                 if(!response.Success)throw new ApiError(409,response.Message);
                 object? state=response.PayloadJson is null?null:JsonSerializer.Deserialize<JsonElement>(response.PayloadJson);
                 await WriteAsync(context,200,new {success=true,message=response.Message,state},lifetime.Token);return;
@@ -329,12 +401,13 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                 var request = await ReadJsonAsync<PrivacyRequest>(context, lifetime.Token).ConfigureAwait(false);
                 ValidateId(request.LeaseId, "会话"); ValidateId(request.ClientId, "接收设备");
                 if (request.Mode != "remote") throw new ApiError(400, "隐私保护仅适用于主屏远控。");
-                var response = await runtime.SendAsync(new("remote-privacy", "remote", LeaseId: request.LeaseId,
-                    ClientId: request.ClientId, PrivacyEnabled: request.Enabled), lifetime.Token).ConfigureAwait(false);
+                if (request.Enabled == true) throw new ApiError(403, "隐私屏策略只能在电脑设置中修改。");
+                var response = await runtime.SendAsync(new(request.Enabled == false ? "remote-privacy-recover" : "remote-privacy", "remote", LeaseId: request.LeaseId,
+                    ClientId: request.ClientId, ControllerCredentialId: principal!.Id), lifetime.Token).ConfigureAwait(false);
                 if (!response.Success) throw new ApiError(409, response.Message);
                 await WriteAsync(context, 200, new { success = true,
                     enabled = response.Status?.PrivacyScreenEnabled == true,
-                    active = response.Status?.PrivacyScreenActive == true, message = response.Message }, lifetime.Token).ConfigureAwait(false);
+                    active = response.Status?.PrivacyScreenActive == true, managedByHost = true, message = response.Message }, lifetime.Token).ConfigureAwait(false);
                 return;
             }
             if (path == "/v1/clipboard")
@@ -342,7 +415,9 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                 if (clipboard is null) throw new ApiError(503, "电脑剪贴板暂不可用。");
                 var api = new ClipboardApi(async (mode, leaseId, clientId, token) =>
                 {
-                    var authorized = await runtime.SendAsync(new("clipboard-authorize", mode, LeaseId: leaseId, ClientId: clientId), token).ConfigureAwait(false);
+                    _devices.EnsureCurrent(principal!, clientId, ControlScope.Clipboard | ScopeFor(mode));
+                    var authorized = await runtime.SendAsync(new("clipboard-authorize", mode, LeaseId: leaseId, ClientId: clientId,
+                        ControllerCredentialId:principal!.Id), token).ConfigureAwait(false);
                     if (!authorized.Success) throw new InvalidOperationException(authorized.Message);
                 }, clipboard);
                 await api.HandleAsync(context, lifetime.Token).ConfigureAwait(false);
@@ -350,7 +425,9 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             }
             if (path == "/v1/prepare-jobs")
             {
-                var request = Normalize(await ReadJsonAsync<PrepareRequest>(context, lifetime.Token).ConfigureAwait(false));
+                var request = Normalize(await ReadJsonAsync<PrepareRequest>(context, lifetime.Token).ConfigureAwait(false))
+                    with { Principal = principal, Channel = Channel(context) };
+                AuthorizePrepare(request);
                 PrepareJob job;
                 lock (_jobGate)
                 {
@@ -371,6 +448,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             if (segments is ["v1", "jobs", var cancelId, "cancel"])
             {
                 var job = FindJob(cancelId);
+                AuthorizeJob(principal!, job);
                 job.Cancellation.Cancel();
                 // Release unconditionally: cancellation may race the final
                 // running->succeeded transition. Runtime matches the exact lease.
@@ -384,6 +462,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                 ValidateId(poll.ClientId, "接收设备");
                 if (string.IsNullOrWhiteSpace(poll.Name) || poll.Name.Length > 80 || poll.Name.Any(char.IsControl)) throw new ApiError(400, "接收设备名称无效。");
                 ValidateDimensions(poll.Width, poll.Height, poll.RefreshRate);
+                if (poll.DeviceType is not (null or "android" or "phone" or "tablet")) throw new ApiError(400, "设备类型无效。");
+                _devices.Seen(principal!, poll.DeviceType);
                 var angles = poll.Orientations ?? [0, 90, 180, 270];
                 if (angles.Length is < 1 or > 4 || angles.Any(x => x is not (0 or 90 or 180 or 270))) throw new ApiError(400, "接收设备方向无效。");
                 var request = _receivers.Poll(new(poll.ClientId, poll.Name, poll.Width, poll.Height, poll.RefreshRate, angles, DateTimeOffset.UtcNow));
@@ -402,12 +482,15 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             {
                 var session = await ReadJsonAsync<SessionRequest>(context, lifetime.Token).ConfigureAwait(false);
                 ValidateMode(session.Mode); ValidateId(session.LeaseId, "会话");
+                _devices.EnsureCurrent(principal!, session.ClientId, ScopeFor(session.Mode));
                 if (session.Mode == "tablet")
                 {
                     ValidateId(session.ClientId, "接收设备");
                     var ended = path.EndsWith("/end", StringComparison.Ordinal);
                     var response = await runtime.SendAsync(new(ended ? "tablet-release" : "tablet-heartbeat", "tablet",
-                        LeaseId: session.LeaseId, ClientId: session.ClientId), lifetime.Token).ConfigureAwait(false);
+                        LeaseId: session.LeaseId, ClientId: session.ClientId,
+                        ControllerName: principal!.Name, ControllerCredentialId: principal.Id,
+                        ControllerChannel: Channel(context)), lifetime.Token).ConfigureAwait(false);
                     if (!response.Success) throw new ApiError(409, response.Message);
                     _receivers.Session(session.ClientId!, session.LeaseId, ended);
                 }
@@ -418,7 +501,9 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                         ? "remote-release" : "remote-heartbeat", "remote", LeaseId: session.LeaseId,
                         ClientId: session.ClientId, StreamReady: session.StreamReady,
                         FastPrivacyHeartbeat: session.FastPrivacyHeartbeat,
-                        BoundedPrivacyHeartbeat: session.BoundedPrivacyHeartbeat,LockOnExit:session.LockOnExit,ExitReason:session.ExitReason), lifetime.Token).ConfigureAwait(false);
+                        BoundedPrivacyHeartbeat: session.BoundedPrivacyHeartbeat,ExitReason:session.ExitReason,
+                        ControllerName: principal!.Name, ControllerCredentialId: principal.Id,
+                        ControllerChannel: Channel(context)), lifetime.Token).ConfigureAwait(false);
                     if (!response.Success) throw new ApiError(409, response.Message);
                 }
                 await WriteAsync(context, 200, new { success = true }, lifetime.Token).ConfigureAwait(false);
@@ -426,7 +511,9 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             }
             if (context.Request.Path == "/v1/prepare")
             {
-                var request = Normalize(await ReadJsonAsync<PrepareRequest>(context, lifetime.Token).ConfigureAwait(false));
+                var request = Normalize(await ReadJsonAsync<PrepareRequest>(context, lifetime.Token).ConfigureAwait(false))
+                    with { Principal = principal, Channel = Channel(context) };
+                AuthorizePrepare(request);
                 if (request.RequestId is not null) throw new ApiError(400, "电脑发起的副屏请求需要使用新版连接流程。");
                 if (!await _operationGate.WaitAsync(0, lifetime.Token).ConfigureAwait(false)) throw new ApiError(409, "电脑正在处理另一项绑定或副屏操作，请稍后重试。");
                 try { await WriteAsync(context, 200, await PrepareAsync(request, (_, _) => { }, lifetime.Token).ConfigureAwait(false), lifetime.Token).ConfigureAwait(false); }
@@ -439,12 +526,14 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                 var request = await ReadJsonAsync<MediaIdentityRequest>(context, lifetime.Token).ConfigureAwait(false);
                 try { _ = MediaIdentityPolicy.ParseCertificate(request.Mode, request.ClientCertificate); }
                 catch (ArgumentException error) { throw new ApiError(400, error.Message); }
+                _devices.BindMedia(principal!.Id, request.Mode, request.ClientCertificate);
                 if (!await _operationGate.WaitAsync(0, lifetime.Token).ConfigureAwait(false))
                     throw new ApiError(409, "电脑正在准备串流，请完成后重试媒体身份预检。");
                 try
                 {
                     var response = await runtime.SendAsync(new("media-identity", request.Mode,
-                        ClientCertificate: request.ClientCertificate), lifetime.Token).ConfigureAwait(false);
+                        ClientCertificate: request.ClientCertificate, ClientId:principal!.ClientId,
+                        ControllerCredentialId: principal.Id), lifetime.Token).ConfigureAwait(false);
                     if (!response.Success) throw new ApiError(response.ErrorStatus is 400 or 403 or 409 or 503 or 504
                         ? response.ErrorStatus.Value : 503, response.Message);
                     MediaIdentityResult result;
@@ -467,6 +556,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             {
                 var request = await ReadJsonAsync<PairRequest>(context, lifetime.Token).ConfigureAwait(false);
                 ValidateMode(request.Mode);
+                _devices.EnsureMediaBound(principal!.Id, request.Mode);
                 if (request.Pin is not { Length: 4 } || request.Pin.Any(character => character < '0' || character > '9')) throw new ApiError(400, "配对码必须为四位数字。");
                 if (request.Name is not null && (Encoding.UTF8.GetByteCount(request.Name) > 128 || request.Name.Any(char.IsControl))) throw new ApiError(400, "设备名称过长或包含无效字符。");
                 if (!await _operationGate.WaitAsync(0, lifetime.Token).ConfigureAwait(false)) throw new ApiError(409, "电脑正在准备串流，请完成后重试配对。");
@@ -475,7 +565,9 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                     var status = await GetStatusAsync(lifetime.Token).ConfigureAwait(false);
                     var engine = request.Mode == "tablet" ? status.Tablet : status.Remote;
                     if (!engine.Healthy) throw new ApiError(409, "所选串流模式尚未就绪，请先准备连接。");
-                    await CommandAsync(new("pair", request.Mode, request.Pin, request.Name ?? "安卓设备"), lifetime.Token).ConfigureAwait(false);
+                    _devices.EnsureCurrent(principal!, principal!.ClientId, ScopeFor(request.Mode));
+                    await CommandAsync(new("pair", request.Mode, request.Pin, principal.Name,
+                        ClientId:principal.ClientId, ControllerCredentialId:principal.Id), lifetime.Token).ConfigureAwait(false);
                     await WriteAsync(context, 200, new { success = true, mode = request.Mode, message = "已确认配对，请等待安卓端完成连接。" }, lifetime.Token).ConfigureAwait(false);
                 }
                 finally { _operationGate.Release(); }
@@ -484,6 +576,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             throw new ApiError(404, "找不到此设备接口。");
         }
         catch (ApiError error) { await WriteErrorAsync(context, error.Status, error.Message).ConfigureAwait(false); }
+        catch (UnauthorizedAccessException) { await WriteErrorAsync(context, 403, "此设备未获该功能或会话的授权，请在电脑设置检查。").ConfigureAwait(false); }
         catch (JsonException) { await WriteErrorAsync(context, 400, "JSON 请求格式无效或包含不支持的字段。").ConfigureAwait(false); }
         catch (Microsoft.AspNetCore.Http.BadHttpRequestException error) { await WriteErrorAsync(context, error.StatusCode, "请求正文过大或格式无效。").ConfigureAwait(false); }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested || _stopping.IsCancellationRequested) { }
@@ -621,6 +714,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
 
     private async Task<object> PrepareAsync(PrepareRequest request, Action<string, string> progress, CancellationToken cancellationToken)
     {
+        AuthorizePrepare(request);
         progress("checking", "正在检查电脑会话");
         // Reserve the lease before checking readiness so the warmup supervisor
         // cannot restart an engine while a receiver is connecting.
@@ -628,8 +722,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         {
             ValidateId(request.ClientId, "接收设备");
             if (request.StreamSizeOverride)
-                await CommandAsync(new("remote-reconfigure", "remote", LeaseId: request.LeaseId, ClientId: request.ClientId), cancellationToken).ConfigureAwait(false);
-            await CommandAsync(new("remote-prepare", "remote", LeaseId: request.LeaseId, ClientId: request.ClientId), cancellationToken)
+                await PrepareCommandAsync(request, new("remote-reconfigure", "remote", LeaseId: request.LeaseId, ClientId: request.ClientId), cancellationToken).ConfigureAwait(false);
+            await PrepareCommandAsync(request, new("remote-prepare", "remote", LeaseId: request.LeaseId, ClientId: request.ClientId), cancellationToken)
                 .ConfigureAwait(false);
         }
         var initial = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -651,7 +745,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             progress("display", "正在匹配副屏分辨率和方向");
             var response = await runtime.SendAsync(new("tablet-prepare", "tablet", Orientation: request.Orientation,
                 Width: request.Width, Height: request.Height, RefreshRate: request.RefreshRate,
-                LeaseId: request.LeaseId, ClientId: request.ClientId, RequestId: request.RequestId), cancellationToken).ConfigureAwait(false);
+                LeaseId: request.LeaseId, ClientId: request.ClientId, RequestId: request.RequestId, ControllerCredentialId: request.Principal?.Id,
+                ControllerName: request.Principal?.Name, ControllerChannel: request.Channel), cancellationToken).ConfigureAwait(false);
             if (!response.Success) throw new ApiError(409, response.Message);
             if (response.TimingsMs is not null)
                 foreach (var (name, duration) in response.TimingsMs)
@@ -666,7 +761,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         else if (!initial.Remote.Healthy)
         {
             progress("engine", "正在启动主屏串流");
-            await CommandAsync(new("start", "remote"), cancellationToken).ConfigureAwait(false);
+            await PrepareCommandAsync(request, new("start", "remote"), cancellationToken).ConfigureAwait(false);
         }
         if (RemoteWarmupPolicy.NeedsHealthWait(request.Mode, initial.Remote.Healthy))
         {
@@ -734,12 +829,39 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
 
     private bool Authorized(string authorization)
     {
-        if (_token is null || authorization.Length != 71 || !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return false;
-        byte[] candidate;
-        try { candidate = Convert.FromHexString(authorization[7..]); }
-        catch (FormatException) { return false; }
-        try { return CryptographicOperations.FixedTimeEquals(candidate, _token); }
-        finally { CryptographicOperations.ZeroMemory(candidate); }
+        return _token is not null && _devices.Authenticate(authorization, _token) is not null;
+    }
+
+    private static ControlScope ScopeFor(string mode)
+    { ValidateMode(mode); return mode == "tablet" ? ControlScope.Tablet : ControlScope.Remote; }
+
+    private void AuthorizePrepare(PrepareRequest request)
+    {
+        if (request.Principal is { } principal)
+            _devices.EnsureCurrent(principal, request.ClientId, ScopeFor(request.Mode));
+    }
+
+    private void AuthorizeJob(ControlPrincipal principal, PrepareJob job)
+    {
+        if (job.Request.Principal?.Id != principal.Id) throw new UnauthorizedAccessException();
+        _devices.EnsureCurrent(principal, job.Request.ClientId, ScopeFor(job.Request.Mode));
+    }
+
+    private Task PrepareCommandAsync(PrepareRequest preparation, RuntimeRequest request, CancellationToken token)
+    {
+        AuthorizePrepare(preparation);
+        return CommandAsync(request with { ClientId = preparation.ClientId,
+            ControllerCredentialId = preparation.Principal?.Id, ControllerName = preparation.Principal?.Name,
+            ControllerChannel = preparation.Channel }, token);
+    }
+
+    private static string Channel(HttpContext context)
+    {
+        var address = context.Connection.RemoteIpAddress;
+        if (address?.IsIPv4MappedToIPv6 == true) address = address.MapToIPv4();
+        var bytes = address?.GetAddressBytes();
+        return bytes is { Length: 4 } && bytes[0] == 100 && bytes[1] is >= 64 and <= 127
+            ? "异地安全隧道" : "局域网 / USB";
     }
 
     private static bool IsFileDataRequest(HttpRequest request)
@@ -791,6 +913,20 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             if (count == 0) break;
             if (body.Length + count > maximumBodyBytes) throw new ApiError(413, $"请求正文不能超过 {limitText} KB。");
             body.Write(buffer, 0, count);
+        }
+        ControlJsonPolicy.Validate(body.GetBuffer().AsSpan(0, checked((int)body.Length)));
+        if (context.Items.TryGetValue("control-principal", out var current) && current is ControlPrincipal principal)
+        {
+            using var document = JsonDocument.Parse(body.GetBuffer().AsMemory(0, checked((int)body.Length)));
+            var root = document.RootElement;
+            // JsonSerializerDefaults.Web also accepts property-name case variants.
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.Name.Equals("clientId", StringComparison.OrdinalIgnoreCase))
+                    ControlDeviceRegistry.EnsureClient(principal, property.Value.GetString());
+                if (property.Name.Equals("mode", StringComparison.OrdinalIgnoreCase))
+                    ControlDeviceRegistry.EnsureScope(principal, ScopeFor(property.Value.GetString() ?? ""));
+            }
         }
         return JsonSerializer.Deserialize<T>(body.GetBuffer().AsSpan(0, checked((int)body.Length)), Json) ?? throw new ApiError(400, "JSON 请求不能为空。");
     }

@@ -56,6 +56,9 @@ public final class RtInputToolbar {
         default void rotateScreen() { }
         default void toggleZoom() { }
         default boolean zoomEnabled() { return false; }
+        default float zoomScale() { return 1f; }
+        default void resetZoom() { }
+        default void scaleZoom(float factor) { }
         default void sendClipboard() { }
         default void fetchClipboard() { }
         default void showWarningSettings() { }
@@ -73,7 +76,11 @@ public final class RtInputToolbar {
     private final LinearLayout panel, pages, fixed, footer, tabRow;
     private final FrameLayout handleArea;
     private final ScrollView body;
-    private final Button entry, quickDisconnect, statsButton, zoomButton, keyboardEntry, compactClose;
+    private final Button entry, quickDisconnect, statsButton, keyboardEntry, compactClose;
+    private final android.widget.Switch viewportSwitch;
+    private final LinearLayout viewportControls;
+    private final TextView viewportLabel, viewportHint;
+    private final Button viewportSmaller, viewportLarger, viewportReset, viewportDone, resetView;
     private final Button[] tabs = new Button[3];
     private final LinearLayout[] sections = new LinearLayout[3];
     private final TextView sessionTitle, sessionDetail;
@@ -84,6 +91,8 @@ public final class RtInputToolbar {
     private AlertDialog textDialog, disconnectDialog;
     private String textDraft = "";
     private boolean pictureInPicture, disposed, keyboardVisible;
+    private boolean adjustingViewport, updatingViewport;
+    private float viewportScale = 1f;
     private final SharedPreferences positionPrefs;
     private boolean customPosition;
     private float toolbarX = Float.NaN, toolbarY = Float.NaN;
@@ -194,9 +203,12 @@ public final class RtInputToolbar {
         // Shortcuts have their own first page; input options no longer push them below the fold.
         LinearLayout shortcuts = sections[0];
         sectionHeading(shortcuts, "常用组合");
-        addHint(shortcuts, "长按任意组合键可置顶或取消置顶。", 0);
+        addHint(shortcuts, "以下组合键发送到远端 Windows；键盘开关与控制菜单仅操作本机。", 0);
+        addHint(shortcuts, "外接键盘可用 Ctrl+Alt+Tab；Alt+Tab / Win+Tab 可在“系统快捷键”中启用。", 0);
+        addHint(shortcuts, "长按任意组合键可置顶或取消置顶。", 6);
         AdaptiveGrid combinations = grid(shortcuts, 128, 2, 0);
         shortcut(combinations, "切换窗口 · Alt+Tab", KeyboardTranslator.VK_LMENU, KeyboardTranslator.VK_TAB);
+        shortcut(combinations, "窗口列表 · Ctrl+Alt+Tab", KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LMENU, KeyboardTranslator.VK_TAB);
         shortcut(combinations, "任务视图 · Win+Tab", KeyboardTranslator.VK_LWIN, KeyboardTranslator.VK_TAB);
         shortcut(combinations, "复制 · Ctrl+C", KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_C);
         shortcut(combinations, "粘贴 · Ctrl+V", KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_V);
@@ -248,8 +260,19 @@ public final class RtInputToolbar {
         sectionHeading(settings, "当前画面");
         AdaptiveGrid display = grid(settings, 128, 2, 0);
         display.addView(action("旋转屏幕", () -> { collapse(); callbacks.rotateScreen(); }, false));
-        zoomButton = action("开启平移缩放", () -> { collapse(); callbacks.toggleZoom(); }, false);
-        display.addView(zoomButton);
+        viewportSwitch = new android.widget.Switch(activity);
+        viewportSwitch.setText("调整视图（暂停触控）");
+        viewportSwitch.setTextColor(TEXT); viewportSwitch.setTextSize(14); viewportSwitch.setMinHeight(dp(48));
+        viewportSwitch.setOnCheckedChangeListener((view, enabled) -> {
+            if (!updatingViewport && enabled != callbacks.zoomEnabled()) {
+                collapse(); callbacks.toggleZoom();
+                setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale());
+            }
+        });
+        addWide(settings, viewportSwitch, 8);
+        addHint(settings, "开启后单指拖动、双指缩放，触屏不操作电脑。点“完成”保留放大位置并恢复点击。", 6);
+        resetView = action("还原画面 · 100%", () -> { callbacks.resetZoom(); setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale()); }, false);
+        addWide(settings, resetView, 8);
         addWide(settings, action("当前分辨率", () -> { collapse(); callbacks.showResolutionSettings(); }, false), 8);
         if (callbacks.privacyAvailable()) addWide(settings, action("本机隐私屏", () -> { collapse(); callbacks.showPrivacySettings(); }, false), 8);
         sectionHeading(settings, "性能与声音");
@@ -299,6 +322,36 @@ public final class RtInputToolbar {
         entry.setBackground(new RippleDrawable(ColorStateList.valueOf(0x336F9DFF), shape(SURFACE, BORDER, 24), null));
         entry.setOnTouchListener(this::handleDrag);
         parent.addView(entry, new FrameLayout.LayoutParams(dp(88), dp(48), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+
+        viewportControls = column();
+        HubStreamUi.keepColors(viewportControls);
+        viewportControls.setPadding(dp(12), dp(8), dp(12), dp(12));
+        viewportControls.setBackground(shape(SURFACE, BORDER, 16));
+        viewportControls.setElevation(dp(20)); viewportControls.setClickable(true);
+        viewportControls.setVisibility(View.GONE);
+        LinearLayout viewportHeader = column();
+        viewportHeader.setMinimumHeight(dp(48));
+        viewportHeader.setGravity(Gravity.CENTER_VERTICAL);
+        viewportHeader.setContentDescription("拖动缩放调整条");
+        viewportHeader.setOnTouchListener(this::handleDrag);
+        viewportLabel = text("调整视图 · 100%", 14, TEXT);
+        viewportLabel.setTypeface(null, Typeface.BOLD);
+        viewportHeader.addView(viewportLabel);
+        viewportHint = text("单指拖动 · 双指缩放 · 不操作电脑", 12, MUTED);
+        viewportHeader.addView(viewportHint);
+        viewportControls.addView(viewportHeader, new LinearLayout.LayoutParams(-1, -2));
+        AdaptiveGrid viewportActions = grid(viewportControls, 48, 4, 8);
+        viewportSmaller = action("−", () -> changeViewportScale(0.8f), false);
+        viewportSmaller.setContentDescription("缩小本机画面");
+        viewportLarger = action("＋", () -> changeViewportScale(1.25f), false);
+        viewportLarger.setContentDescription("放大本机画面，最大四倍");
+        viewportReset = action("还原", () -> { callbacks.resetZoom(); setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale()); }, false);
+        viewportReset.setContentDescription("还原画面至100%，继续调整");
+        viewportDone = action("完成", () -> { callbacks.toggleZoom(); setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale()); }, true);
+        viewportDone.setContentDescription("保留当前缩放，恢复触屏控制电脑");
+        for (Button button : new Button[] {viewportSmaller, viewportLarger, viewportReset, viewportDone}) viewportActions.addView(button);
+        parent.addView(viewportControls, new FrameLayout.LayoutParams(dp(400), -2, Gravity.TOP | Gravity.LEFT));
+        setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale());
         selectTab(0);
         parent.getViewTreeObserver().addOnGlobalLayoutListener(layoutListener);
         // A tap on the surrounding root closes the expanded controls while the
@@ -382,6 +435,7 @@ public final class RtInputToolbar {
             for (int i = 0; i < codes.length; i++) chord[i] = (short) codes[i];
             callbacks.sendKeys(chord);
             clearModifiers();
+            if (codes[codes.length - 1] == KeyboardTranslator.VK_TAB) collapse();
         }, false);
         button.setTextSize(13);
         if(positionPrefs.getBoolean("pinned_"+label,false))button.setText("★ "+label);
@@ -431,7 +485,8 @@ public final class RtInputToolbar {
                 dragDownX=event.getRawX();dragDownY=event.getRawY();
                 // Start a new drag from the visible anchor, which may currently
                 // be clamped by the keyboard or a different orientation.
-                FrameLayout.LayoutParams anchor=(FrameLayout.LayoutParams)entry.getLayoutParams();
+                FrameLayout.LayoutParams anchor=(FrameLayout.LayoutParams)
+                        (view.getParent() == viewportControls ? viewportControls : entry).getLayoutParams();
                 dragOriginX=anchor.leftMargin;
                 dragOriginY=anchor.topMargin;
                 dragging=false;return true;
@@ -464,7 +519,8 @@ public final class RtInputToolbar {
 
     public void show() {
         if (disposed || pictureInPicture) return;
-        zoomButton.setText(callbacks.zoomEnabled() ? "关闭平移缩放" : "开启平移缩放");
+        setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale());
+        if (adjustingViewport) return;
         refreshLayout();
         panel.setVisibility(View.VISIBLE);
         entry.setVisibility(View.GONE);
@@ -473,7 +529,7 @@ public final class RtInputToolbar {
     }
     private void collapse() {
         panel.setVisibility(View.GONE);
-        entry.setVisibility(pictureInPicture || disposed ? View.GONE : View.VISIBLE);
+        entry.setVisibility(pictureInPicture || disposed || adjustingViewport ? View.GONE : View.VISIBLE);
         quickDisconnect.setVisibility(View.GONE);
         clearModifiers();
     }
@@ -481,6 +537,9 @@ public final class RtInputToolbar {
     public boolean collapseOrConsumeBack() {
         if (textDialog != null && textDialog.isShowing()) { textDialog.dismiss(); return true; }
         if (disconnectDialog != null && disconnectDialog.isShowing()) { disconnectDialog.dismiss(); return true; }
+        if (adjustingViewport) {
+            callbacks.toggleZoom(); setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale()); return true;
+        }
         if (panel.getVisibility() == View.VISIBLE) { collapse(); return true; }
         return false;
     }
@@ -496,6 +555,30 @@ public final class RtInputToolbar {
         statsButton.setText(visible ? "隐藏性能信息" : "显示性能信息");
         statsButton.setSelected(visible);
         statsButton.setBackground(buttonBackground(visible ? SELECTED : CARD, visible ? ACCENT : BORDER));
+    }
+
+    private void changeViewportScale(float factor) {
+        callbacks.scaleZoom(factor);
+        setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale());
+    }
+    public void setViewportState(boolean adjusting, float scale) {
+        boolean modeChanged = adjustingViewport != adjusting;
+        adjustingViewport = adjusting;
+        viewportScale = Float.isNaN(scale) || Float.isInfinite(scale) ? 1f : Math.max(1f, Math.min(4f, scale));
+        updatingViewport = true;
+        try { viewportSwitch.setChecked(adjusting); } finally { updatingViewport = false; }
+        String label = "调整视图 · " + Math.round(viewportScale * 100) + "%";
+        if (!label.contentEquals(viewportLabel.getText())) viewportLabel.setText(label);
+        String resetLabel = "还原画面 · 当前 " + Math.round(viewportScale * 100) + "%";
+        if (!resetLabel.contentEquals(resetView.getText())) resetView.setText(resetLabel);
+        viewportSmaller.setEnabled(viewportScale > 1.005f);
+        viewportLarger.setEnabled(viewportScale < 3.995f);
+        viewportReset.setEnabled(viewportScale > 1.005f);
+        resetView.setEnabled(viewportScale > 1.005f);
+        viewportControls.setVisibility(adjusting && !pictureInPicture && !disposed ? View.VISIBLE : View.GONE);
+        if (adjusting) { panel.setVisibility(View.GONE); quickDisconnect.setVisibility(View.GONE); }
+        entry.setVisibility(!adjusting && !pictureInPicture && !disposed && panel.getVisibility() != View.VISIBLE ? View.VISIBLE : View.GONE);
+        if (modeChanged) refreshLayout();
     }
 
     public void refreshLayout() {
@@ -553,6 +636,12 @@ public final class RtInputToolbar {
         // Keep the user's preferred position. A temporary IME/rotation clamp
         // must not permanently move the floating control button.
         place(entry,anchor);
+        int viewportWidth = Math.min(dp(400), safe.width);
+        viewportControls.measure(View.MeasureSpec.makeMeasureSpec(viewportWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        HubOverlayPlacement.Box viewportBounds = HubOverlayPlacement.anchor(anchor.x, anchor.y,
+                viewportWidth, viewportControls.getMeasuredHeight(), safe);
+        place(viewportControls, viewportBounds);
         HubOverlayPlacement.Box menu=HubOverlayPlacement.menu(anchor,dp(420),dp(minimalWindow ? 104 : 620),safe,dp(8),
                 positionPrefs.getBoolean("adaptive_expand",true));
         place(panel,menu);
@@ -560,7 +649,8 @@ public final class RtInputToolbar {
     public void setPictureInPicture(boolean active) {
         pictureInPicture = active;
         if (active) collapse();
-        else if (panel.getVisibility() != View.VISIBLE) entry.setVisibility(View.VISIBLE);
+        else if (panel.getVisibility() != View.VISIBLE && !adjustingViewport) entry.setVisibility(View.VISIBLE);
+        viewportControls.setVisibility(!active && adjustingViewport && !disposed ? View.VISIBLE : View.GONE);
         if (!active && panel.getVisibility() == View.VISIBLE) quickDisconnect.setVisibility(View.VISIBLE);
     }
 
@@ -689,6 +779,7 @@ public final class RtInputToolbar {
     }
     public void dispose() {
         disposed = true;
+        viewportControls.setVisibility(View.GONE);
         if (parent.getViewTreeObserver().isAlive()) parent.getViewTreeObserver().removeOnGlobalLayoutListener(layoutListener);
         if (textDialog != null) textDialog.dismiss();
         if (disconnectDialog != null) disconnectDialog.dismiss();

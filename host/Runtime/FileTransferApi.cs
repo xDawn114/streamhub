@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http.Features;
 namespace StreamHub.Host.Runtime;
 
 /// <summary>Runs behind the product's existing bearer authorization and pinned HTTPS listener.</summary>
-public sealed class FileTransferApi(FileTransferVault vault)
+public sealed class FileTransferApi(FileTransferVault vault, Action<HttpContext, string>? authorizeRegistration = null)
 {
     private sealed record Registration(string ClientId, string Name, string Key);
     private sealed record Upload(string Name, long Size, string Sha256);
@@ -27,8 +27,9 @@ public sealed class FileTransferApi(FileTransferVault vault)
             if (context.Request.Method == "POST" && context.Request.Path == "/v1/files/register")
             {
                 var registration = await JsonAsync<Registration>(context, token).ConfigureAwait(false);
+                authorizeRegistration?.Invoke(context, registration.ClientId);
                 var device = vault.Register(registration.ClientId, registration.Name, registration.Key);
-                await Reply(context, new { success = true, device.Allowed, device.UploadAllowed, device.DeleteAllowed, code = device.KeyHash[..8], enabled = vault.Snapshot().Settings.Enabled }, token); return;
+                await Reply(context, new { success = true, device.Allowed, device.UploadAllowed, device.DeleteAllowed, device.UsesDevicePermissions, code = device.KeyHash[..8], enabled = vault.Snapshot().Settings.Enabled }, token); return;
             }
             string clientId = context.Request.Headers["X-StreamHub-Client"].ToString(), key = context.Request.Headers["X-StreamHub-Key"].ToString();
             vault.Authorize(clientId, key);

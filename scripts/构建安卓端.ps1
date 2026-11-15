@@ -34,7 +34,7 @@ $env:ANDROID_HOME = $SdkRoot
 $env:ANDROID_SDK_ROOT = $SdkRoot
 $env:PATH = "$JavaHome\bin;$env:PATH"
 $tools = Join-Path $SdkRoot 'build-tools\36.0.0'
-foreach ($file in @((Join-Path $JavaHome 'bin\java.exe'),(Join-Path $JavaHome 'bin\keytool.exe'),(Join-Path $tools 'apksigner.bat'),(Join-Path $tools 'zipalign.exe'),(Join-Path $SdkRoot 'ndk\27.0.12077973\ndk-build.cmd'))) {
+foreach ($file in @((Join-Path $JavaHome 'bin\java.exe'),(Join-Path $JavaHome 'bin\keytool.exe'),(Join-Path $tools 'lib\apksigner.jar'),(Join-Path $tools 'zipalign.exe'),(Join-Path $SdkRoot 'ndk\27.0.12077973\ndk-build.cmd'))) {
     if (-not (Test-Path -LiteralPath $file)) { throw "缺少构建工具：$file" }
 }
 
@@ -57,7 +57,11 @@ if (-not (Test-Path -LiteralPath $keyStore) -or -not (Test-Path -LiteralPath $se
 try {
     Push-Location $buildSource
     try {
-        & .\gradlew.bat :app:assembleNonRoot_gameRelease --no-daemon --console=plain
+        # Use the validated JDK directly; a machine's cmd.exe/batch association
+        # must not decide which Java installation signs a release build.
+        & (Join-Path $JavaHome 'bin\java.exe') '-Xmx64m' '-Xms64m' '-Dorg.gradle.appname=gradlew' `
+            -classpath (Join-Path $buildSource 'gradle\wrapper\gradle-wrapper.jar') `
+            org.gradle.wrapper.GradleWrapperMain :app:assembleNonRoot_gameRelease --no-daemon --console=plain
         if ($LASTEXITCODE -ne 0) { throw '安卓 Release 构建失败。' }
     } finally { Pop-Location }
     $unsigned = Join-Path $buildSource 'app\build\outputs\apk\nonRoot_game\release\app-nonRoot_game-release-unsigned.apk'
@@ -72,10 +76,10 @@ try {
     $secure = ConvertTo-SecureString -String ([IO.File]::ReadAllText($secretFile).Trim())
     $env:STREAMHUB_RELEASE_PASSWORD = [Net.NetworkCredential]::new('', $secure).Password
     try {
-        & "$tools\apksigner.bat" sign --ks $keyStore --ks-key-alias streamhub-release --ks-pass env:STREAMHUB_RELEASE_PASSWORD --out $signed $aligned
+        & (Join-Path $JavaHome 'bin\java.exe') -jar (Join-Path $tools 'lib\apksigner.jar') sign --ks $keyStore --ks-key-alias streamhub-release --ks-pass env:STREAMHUB_RELEASE_PASSWORD --out $signed $aligned
     } finally { $env:STREAMHUB_RELEASE_PASSWORD = $null; $secure = $null }
     if ($LASTEXITCODE -ne 0) { throw 'APK 签名失败。' }
-    $verification = & "$tools\apksigner.bat" verify --verbose --print-certs $signed 2>&1
+    $verification = & (Join-Path $JavaHome 'bin\java.exe') -jar (Join-Path $tools 'lib\apksigner.jar') verify --verbose --print-certs $signed 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'APK 签名验证失败。' }
     $certificate = ($verification | Select-String 'Signer #1 certificate SHA-256 digest:').Line
     if (-not $certificate) { throw 'APK 缺少可验证的发布证书指纹。' }

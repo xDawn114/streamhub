@@ -15,7 +15,7 @@ public final class HubDesktopInput implements AutoCloseable {
     private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor();
     private final String host,lease,deviceId;
     private final AtomicBoolean fillQueued=new AtomicBoolean();
-    private volatile boolean closed,connected,filled,unsupported;
+    private volatile boolean closed,connected,filled,unsupported,hostManagedPolicy;
     private volatile HubControlClient client;
     private volatile Snapshot snapshot=Snapshot.UNKNOWN;
     private String lastObservation="";
@@ -30,7 +30,9 @@ public final class HubDesktopInput implements AutoCloseable {
     private HubControlClient client()throws Exception {
         if(client==null) {
             HubControlClient candidate=new HubControlClient(host,new HubStore(activity).invitation());
-            JSONObject caps=candidate.probeInfo().optJSONObject("capabilities");
+            JSONObject info=candidate.probeInfo();new HubStore(activity).rememberHostPolicy(info);
+            JSONObject caps=info.optJSONObject("capabilities");
+            hostManagedPolicy=caps!=null && caps.optBoolean("hostManagedPolicy");
             if(caps==null || !caps.optBoolean("desktopInputState")){unsupported=true;candidate.cancel();throw new java.io.IOException("unsupported");}
             if(closed){candidate.cancel();throw new java.io.IOException("closed");}client=candidate;
         }
@@ -44,7 +46,7 @@ public final class HubDesktopInput implements AutoCloseable {
             JSONObject state=result.optJSONObject("state"),desktop=state==null?null:state.optJSONObject("desktop");
             snapshot=Snapshot.parse(desktop,SystemClock.elapsedRealtime());
             observation("known="+snapshot.known+" locked="+snapshot.isLocked+" regions="+snapshot.captions.length);
-            if(snapshot.locked(SystemClock.elapsedRealtime()) && desktop!=null && desktop.optBoolean("passwordFocused"))fillPassword();
+            if(!hostManagedPolicy && snapshot.locked(SystemClock.elapsedRealtime()) && desktop!=null && desktop.optBoolean("passwordFocused"))fillPassword();
         }catch(Exception error){snapshot=Snapshot.UNKNOWN;observation("query-failed="+error.getClass().getSimpleName());}
     }
     private void observation(String value) {
@@ -65,11 +67,12 @@ public final class HubDesktopInput implements AutoCloseable {
     public boolean captionButton(float x,float y){return current() && snapshot.captionButton(x,y,SystemClock.elapsedRealtime());}
     /** Native-touch release gives LogonUI a moment to focus the selected password control. */
     public void touchedLoginField() {
-        if(!locked() || !fillQueued.compareAndSet(false,true))return;
+        if(hostManagedPolicy || !locked() || !fillQueued.compareAndSet(false,true))return;
         try {worker.schedule(()->{try{fillPassword();}finally{fillQueued.set(false);}},250,TimeUnit.MILLISECONDS);}
         catch(java.util.concurrent.RejectedExecutionException ignored){fillQueued.set(false);}
     }
     private void fillPassword() {
+        if(hostManagedPolicy)return;
         HubLoginSecrets secrets=new HubLoginSecrets(activity);
         if(!current() || filled || !locked() || !secrets.enabled())return;
         try {

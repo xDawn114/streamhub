@@ -83,6 +83,7 @@ public final class HubSessionCoordinator {
                 store.mergeAddresses(selectedInfo.optJSONArray("addresses"), selectedHost);
                 store.put("lastHost", selectedHost); store.put("deviceId", selectedInfo.optString("deviceId", expected));
                 store.put("deviceName", selectedInfo.optString("deviceName", selectedInfo.optString("name", "我的电脑")));
+                store.rememberHostPolicy(selectedInfo);
             }
             return winner;
         } finally {

@@ -52,7 +52,7 @@ internal static class SessionLauncher
     public static uint ActiveSession => WTSGetActiveConsoleSessionId();
 
     public static OwnedProcess Start(string executable, IEnumerable<string> arguments, string workingDirectory, bool interactive,
-        string? ownerSid = null)
+        string? ownerSid = null, bool showWithoutActivation = false)
     {
         if (interactive)
         {
@@ -97,7 +97,7 @@ internal static class SessionLauncher
             var startup = new StartupInfo
             {
                 cb = Marshal.SizeOf<StartupInfo>(), lpDesktop = @"winsta0\default",
-                dwFlags = STARTF_USESHOWWINDOW, wShowWindow = 0 // SW_HIDE
+                dwFlags = STARTF_USESHOWWINDOW, wShowWindow = (short)(showWithoutActivation ? 4 : 0) // SHOWNOACTIVATE / HIDE
             };
             var commandLine = new StringBuilder(Quote(executable) + " " + string.Join(" ", arguments.Select(Quote)));
             if (!CreateProcessAsUser(primaryToken, executable, commandLine, IntPtr.Zero, IntPtr.Zero, false,

@@ -73,11 +73,14 @@ Signing scope: our Windows app, service, uninstaller and installer. Third-party 
 retain their own signatures and attribution. We request no permission to re-sign upstream
 components. Our modified Sunshine build requires separate review under the Foundation's fork rules.
 
-The new password-fill feature is off by default and opt-in per bound PC. Passwords are
-encrypted using Android Keystore and sent only over certificate-pinned, bound-device HTTPS.
+The password-fill feature is off by default and configured locally on the Windows PC.
+The service protects its password using machine DPAPI and a SYSTEM/admin-only directory.
+Receivers cannot upload or retrieve this password or change the computer-owned policy.
 Windows requires the matching active console user, an active remote lease, the Winlogon
 input desktop and a focused password control owned by System32 LogonUI. It does not bypass
-Windows authentication, Hello, PIN or UAC. Credentials are not written to PC storage or logs.
+Windows authentication, Hello, PIN or UAC. Plaintext credentials are not written to logs
+or returned over the control API. Legacy Android-to-old-host settings remain compatible;
+Android secrets are never automatically migrated to the PC.
 
 Each release must be reviewed and manually approved. Artifact origin, version metadata,
 Authenticode trust, the approved publisher fingerprint and trusted timestamp must be verified.

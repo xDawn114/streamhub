@@ -22,7 +22,10 @@ public sealed record RuntimeRequest(string Command, string? Profile = null, stri
     string? ClientCertificate = null, string? Provider = null, string? ServerUrl = null, string? ManualAddresses = null,
     bool? PrivacyEnabled = null, bool? BrowseEnabled = null, bool? BoundedPrivacyHeartbeat = null, string? BrowseRootId = null, bool? UploadAllowed = null,
     bool? DeleteAllowed = null, bool? LockOnExit = null, string? ExitReason = null,
-    string? LoginSecret = null, bool? LoginSubmit = null);
+    string? LoginSecret = null, bool? LoginSubmit = null, string? PreventSleepMode = null,
+    bool? AutomaticLoginEnabled = null, long? PolicyRevision = null, bool? AllowPublicLan = null,
+    int? DeviceScope = null, bool? LegacyBindingAllowed = null,
+    string? ControllerName = null, string? ControllerCredentialId = null, string? ControllerChannel = null);
 
 public sealed record MediaIdentityRequest(string Mode, string ClientCertificate);
 public sealed record MediaIdentityResult([property: JsonRequired] bool Paired, [property: JsonRequired] string? ServerCertificate);
@@ -79,4 +82,8 @@ public sealed record NetworkEngineStatus(bool Running, bool Desired, int? Proces
 public sealed record RuntimeStatus(string DeviceId, string DeviceName, EngineStatus Remote, EngineStatus Tablet,
     NetworkEngineStatus Network, string Version, string DataDirectory, DateTimeOffset StartedAt,
     bool PrivacyScreenEnabled = false, bool PrivacyScreenActive = false,
-    string PrivacyScreenMessage = "远控隐私保护已关闭");
+    string PrivacyScreenMessage = "远控隐私保护已关闭", string PreventSleepMode = "streaming",
+    bool SleepPreventionActive = false, string SleepPreventionMessage = "", HostPolicySnapshot? HostPolicy = null,
+    ControllerSession? Controller = null, bool ConnectionsPaused = false);
+
+public sealed record ControllerSession(string CredentialId, string Name, string Channel, bool IndividuallyAuthenticated);

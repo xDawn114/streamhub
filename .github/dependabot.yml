@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # All current product PackageReference declarations live in these projects.
+  # Do not pretend an upstream-go.mod or a pinned engine JSON is a NuGet package.
+  - package-ecosystem: nuget
+    directories:
+      - /host
+      - /service
+      - /installer
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # The exported Android tree includes settings.gradle, build.gradle and app/build.gradle.
+  # Dependabot follows the declared Gradle app subproject; a local .aar is not covered.
+  - package-ecosystem: gradle
+    directory: /client/artemis-src
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

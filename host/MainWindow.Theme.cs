@@ -69,7 +69,7 @@ public partial class MainWindow
             if (_uiPreferences.ReduceMotion) ResetPageTransition();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        { FeedbackText.Text = "外观设置未能保存：" + error.Message; }
+        { ShowFeedback("外观设置未能保存：" + error.Message, error: true); }
     }
 
     private void OpenSettings_Click(object sender, RoutedEventArgs e) => Pages.SelectedItem = SettingsPage;
@@ -77,6 +77,7 @@ public partial class MainWindow
     private void Pages_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!ReferenceEquals(e.Source, Pages) || !IsLoaded) return;
+        CloseTransientPopovers();
         ResetPageTransition();
         if (_uiPreferences.ReduceMotion || !SystemParameters.ClientAreaAnimation || !SystemParameters.MenuAnimation) return;
         if (Pages.Template.FindName("PageViewport", Pages) is not FrameworkElement viewport) return;
@@ -100,6 +101,7 @@ public partial class MainWindow
     private void ApplyDesktopTheme()
     {
         bool light = _uiPreferences.Theme != "dark";
+        ScrollActivity.SetReduceMotion(this, _uiPreferences.ReduceMotion || !SystemParameters.ClientAreaAnimation);
         if (_uiPreferences.Theme == "system")
         {
             try

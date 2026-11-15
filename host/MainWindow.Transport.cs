@@ -77,7 +77,7 @@ public partial class MainWindow
             ClearLoginUrl();
             var response = await _runtime.SendAsync(new("network-provider", Provider: settings.Provider,
                 ServerUrl: settings.ServerUrl, ManualAddresses: settings.ManualAddresses), _closing.Token);
-            ProviderMessage.Text = FeedbackText.Text = response.Message;
+            ProviderMessage.Text = response.Message; ShowFeedback(response.Message, error: !response.Success);
             if (!response.Success) return;
             _providerEditing = false;
             RenderTransport(settings);

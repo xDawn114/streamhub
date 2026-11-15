@@ -1,0 +1,5 @@
+name: iControl Windows source
+queries:
+  - uses: security-extended
+# Manual compilation scopes extraction to host/service/installer and their linked
+# common code. paths-ignore cannot filter a manually compiled C# database.

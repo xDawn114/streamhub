@@ -1,0 +1,89 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Threading;
+using StreamHub.Host.Runtime;
+using Button = System.Windows.Controls.Button;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+
+namespace StreamHub.Host;
+
+public partial class MainWindow
+{
+    private void CloseTransientPopovers()
+    {
+        if (TabletPopover is null) return;
+        TabletPopover.IsOpen = DeviceDetailsPopover.IsOpen = FeedbackHistoryPopover.IsOpen = false;
+        if (AccountPopover is not null) AccountPopover.IsOpen = AcceptancePopover.IsOpen = false;
+        if (BoundDeviceDetailsPopover is not null) BoundDeviceDetailsPopover.IsOpen = false;
+    }
+    private void OpenTabletPopover_Click(object sender, RoutedEventArgs args)
+    {
+        bool open = !TabletPopover.IsOpen;
+        if (open) _ = RefreshReceiversAsync();
+        CloseTransientPopovers(); TabletPopover.IsOpen = open;
+    }
+    private void OpenDeviceDetails_Click(object sender, RoutedEventArgs args)
+    {
+        bool open = !DeviceDetailsPopover.IsOpen;
+        CloseTransientPopovers(); DeviceDetailsPopover.IsOpen = open;
+    }
+    private void OpenAccount_Click(object sender, RoutedEventArgs args) { CloseTransientPopovers(); Pages.SelectedItem = AccountPage; }
+    private async void OpenDevices_Click(object sender, RoutedEventArgs args) => await OpenBindingAsync();
+    private void OpenDiagnostics_Click(object sender, RoutedEventArgs args) { CloseTransientPopovers(); Pages.SelectedItem = DiagnosticsPage; }
+    private void OpenUpdates_Click(object sender, RoutedEventArgs args)
+    {
+        CloseTransientPopovers(); Pages.SelectedItem = SettingsPage; SettingsCategories.SelectedIndex = 4;
+        CheckUpdate_Click(sender, args);
+    }
+    private void OpenHeaderMenu_Click(object sender, RoutedEventArgs args) => OpenMenu((Button)sender);
+    private void OpenBindingMenu_Click(object sender, RoutedEventArgs args) => OpenMenu((Button)sender);
+    private void TransientPopover_Opened(object? sender, EventArgs args)
+    {
+        if (sender is Popup { Child: UIElement content })
+        {
+            FocusInput.SetKeyboardMode(content, FocusInput.GetKeyboardMode(this));
+            if (!content.MoveFocus(new TraversalRequest(FocusNavigationDirection.First))) content.Focus();
+        }
+    }
+    private void TransientPopover_KeyDown(object sender, KeyEventArgs args)
+    {
+        if (args.Key != Key.Escape || sender is not Popup popup) return;
+        popup.IsOpen = false;
+        popup.PlacementTarget?.Focus();
+        args.Handled = true;
+    }
+    private static void OpenMenu(Button button)
+    {
+        if (button.ContextMenu is not { } menu) return;
+        FocusInput.SetKeyboardMode(menu, FocusInput.GetKeyboardMode(button));
+        menu.PlacementTarget = button; menu.IsOpen = true;
+    }
+    private void OpenLegacyPairing_Click(object sender, RoutedEventArgs args)
+    {
+        BindingDialog.Visibility = Visibility.Visible; BindingAdvanced.IsExpanded = true; LegacyPairingDetails.IsExpanded = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => LegacyPairingDetails.BringIntoView()));
+    }
+
+    private void RefreshServiceControls()
+    {
+        if (HomeSummaryText is null) return;
+        RefreshUnifiedStatus();
+        RenderUnifiedDevices();
+        RenderReceiverChoices();
+    }
+    private async void BoundDevicesPage_Loaded(object sender, RoutedEventArgs args) => await ReadControlDevicesAsync();
+    private void RenderBoundDevicesSummary() => RenderUnifiedDevices();
+    private void OpenDevicePermissions_Click(object sender, RoutedEventArgs args)
+    {
+        ShowDevicePermissionsDialog();
+        if (sender is FrameworkElement { Tag: string id }) {
+            ControlDeviceBox.SelectedValue = id;
+            var device = _controlDeviceList?.Devices.FirstOrDefault(d => d.Id == id);
+            if (device is not null) FileDeviceBox.SelectedValue = device.ClientId;
+        }
+        FileAccessDetails.IsExpanded = true;
+
+    }
+}

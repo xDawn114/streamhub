@@ -77,6 +77,8 @@ public final class HubReceiverService extends Service {
             if (!expected.isEmpty() && !expected.equals(info.optString("deviceId"))) { candidate.cancel(); return null; }
             if (!revision.equals(store.get("transportRevision", ""))) throw new java.util.concurrent.CancellationException("连接通道已改变。");
             store.mergeAddresses(info.optJSONArray("addresses"), host);
+            JSONObject capabilities = info.optJSONObject("capabilities");
+            store.put("hostDeviceMetadata", capabilities != null && capabilities.optBoolean("deviceMetadata") ? "true" : "false");
             return candidate;
         } catch (Exception error) { candidate.cancel(); throw error; }
     }
@@ -132,6 +134,9 @@ public final class HubReceiverService extends Service {
             HubControlClient client = connect(); if (client == null) return;
             JSONObject body = HubDisplayCapabilities.describe(this, 0).put("clientId", store.clientId())
                     .put("name", Build.MODEL).put("orientations", new JSONArray(new int[]{0, 90, 180, 270}));
+            // Older hosts reject unknown JSON fields. Only newer hosts advertise this field.
+            if (store.get("hostDeviceMetadata", "false").equals("true"))
+                body.put("deviceType", getResources().getConfiguration().smallestScreenWidthDp >= 600 ? "tablet" : "phone");
             JSONObject request = client.request("receiver/poll", body).optJSONObject("request");
             if (stopped || !transportRevision.equals(store.get("transportRevision", ""))) return;
             if (request != null && !"waiting".equals(request.optString("state"))) request = null;

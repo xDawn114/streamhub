@@ -1,19 +1,28 @@
-# Local build, device evidence and secrets never belong in the public repository.
+# Product repository only. Do not export the parent workspace or local user data.
 **/bin/
 **/obj/
 **/build/
 **/.gradle/
 **/.cxx/
+**/node_modules/
+**/.vs/
+**/.idea/
 local.properties
+signing.properties
+keystore.properties
 *.p12
 *.pfx
 *.jks
 *.keystore
 *.dpapi
+*.key
 *.apk
+*.aab
+*.exe
+*.pdb
 *.log
-reports/
-release/
-build/
 .env
 .env.*
+reports/
+release/
+backups/

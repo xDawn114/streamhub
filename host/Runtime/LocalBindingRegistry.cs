@@ -85,6 +85,9 @@ public sealed class LocalBindingRegistry(string certificatePin, TimeProvider? cl
     }
 
     public LocalBindingResult Poll(string id, string nonce, Func<string> invitation)
+        => Poll(id, nonce, _ => invitation());
+
+    public LocalBindingResult Poll(string id, string nonce, Func<LocalBindingRequest, string> invitation)
     {
         lock (_gate)
         {
@@ -93,7 +96,7 @@ public sealed class LocalBindingRegistry(string certificatePin, TimeProvider? cl
                 !CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(nonce), Encoding.ASCII.GetBytes(_nonce)))
                 throw new InvalidOperationException("设备确认无效，请重新绑定。");
             if (request.State != "approved") return new(request.Id, request.State, request.Comparison);
-            var credential = invitation();
+            var credential = invitation(request);
             _request = request with { State = "delivered" };
             _nonce = null;
             return new(request.Id, "approved", request.Comparison, credential);

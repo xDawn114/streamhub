@@ -1,0 +1,10 @@
+name: iControl Android Java source
+queries:
+  - uses: security-extended
+paths:
+  - client/artemis-src/app/src/main/java
+paths-ignore:
+  - client/artemis-src/app/src/test
+  - client/artemis-src/app/src/androidTest
+# build-mode:none covers Java source, not the bundled AAR/JNI/Go binaries or Kotlin.
+# Receiver code includes upstream Artemis/Moonlight files as well as our changes.

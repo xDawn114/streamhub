@@ -244,9 +244,9 @@ public partial class MainWindow
             if (!File.Exists(pointer)) throw new IOException("尚无可用的升级备份。首次安装不能恢复上版。");
             if (MessageBox.Show(this, "恢复上次升级前的程序？\n绑定和个人设置保留。请先结束串流和当前文件操作。", "恢复上个版本", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
             using var recovery = LaunchUpdate(Path.Combine(AppContext.BaseDirectory, "卸载串流中心.exe"), "--rollback --require-idle");
-            FeedbackText.Text = "已打开恢复向导，请完成 Windows 管理员确认。";
+            ShowFeedback("已打开恢复向导，请完成 Windows 管理员确认。");
         }
-        catch (Exception error) { FeedbackText.Text = "未启动恢复：" + error.Message; }
+        catch (Exception error) { ShowFeedback("未启动恢复：" + error.Message, error: true); }
     }
     private static Process LaunchUpdate(string executable, string arguments)
     {

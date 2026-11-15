@@ -28,7 +28,9 @@ internal sealed class Engine(string profile, bool desired)
 }
 
 internal sealed record DesiredState(bool Remote = true, bool Tablet = false, bool Network = false,
-    bool PrivacyScreen = false);
+    bool PrivacyScreen = false, string PreventSleepMode = PowerAwakePolicy.Streaming,
+    bool LockOnExit = false, bool AutomaticLoginEnabled = false, bool AutomaticLoginSubmit = false,
+    long PolicyRevision = 0, bool ConnectionsPaused = false);
 internal sealed record TabletPreparationResult(TabletDisplayMode Mode, Dictionary<string, long> TimingsMs, TabletDisplayMode[] SupportedModes);
 
 internal sealed partial class HostRuntime : IAsyncDisposable
@@ -47,7 +49,6 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     private int _remoteWarmupFailures;
     private readonly FileTransferVault? _files;
     private readonly ClipboardBroker _clipboard = new();
-    private readonly HashSet<string> _lockOnExit = new();
     private readonly HashSet<string> _loginInputUsed = new();
     private DesktopInputState _desktopInputState = new();
     private DateTimeOffset _desktopInputReadAt;
@@ -63,6 +64,9 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     private Task[] _networkDrains = [];
     private volatile bool _networkDesired;
     private bool _privacyScreenEnabled;
+    private bool _connectionsPaused;
+    private string _preventSleepMode = PowerAwakePolicy.Streaming;
+    private readonly PowerAwakeGuard _powerAwake = new();
     private DateTimeOffset _privacyScreenRetryAt;
     private int _privacyScreenFailures;
     private string _privacyScreenMessage = "远控隐私保护已关闭";
@@ -109,7 +113,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         _handover = new(_data);
         try { _files = new(Path.Combine(_data, "file-transfer"), () => _remoteSession.IsStreaming(DateTimeOffset.UtcNow) ||
             _tabletLeaseId is not null && DateTimeOffset.UtcNow < _tabletHeartbeatExpiresAt);
-            _files.UserFiles=new OwnerFileAccess(()=>_ownerSid?.Value,_interactive,_root); }
+            _files.UserFiles=new OwnerFileAccess(()=>_ownerSid?.Value,_interactive,_root);
+            _files.DeviceFilePermission = clientId => (_controlDevices ?? throw new TransferError(503, "正在读取设备权限，请稍后重试。")).FilePermission(clientId); }
         catch { _files = null; } // A broken optional queue cannot stop remote control.
     }
 
@@ -118,6 +123,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         Directory.CreateDirectory(_data);
         Directory.CreateDirectory(Path.Combine(_data, "logs"));
         _ownerSid = ReadOwnerSid();
+        if (!_interactive && WindowsIdentity.GetCurrent().IsSystem)
+            _hostLoginSecrets = new HostLoginSecretStore(_data, _ownerSid.Value);
         var identityPath = Path.Combine(_data, "device-id.txt");
         if (!File.Exists(identityPath)) await File.WriteAllTextAsync(identityPath, Guid.NewGuid().ToString("D"), cancellationToken);
         _deviceId = (await File.ReadAllTextAsync(identityPath, cancellationToken)).Trim();
@@ -134,22 +141,31 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 {
                     (_remote.Desired, _networkDesired, _privacyScreenEnabled) =
                         (desired.Remote, desired.Network, desired.PrivacyScreen);
+                    _preventSleepMode = PowerAwakePolicy.Normalize(desired.PreventSleepMode);
+                    _lockOnExitEnabled = desired.LockOnExit;
+                    _automaticLoginEnabled = desired.AutomaticLoginEnabled;
+                    _automaticLoginSubmit = desired.AutomaticLoginSubmit;
+                    _policyRevision = Math.Max(0, desired.PolicyRevision);
+                    _connectionsPaused = desired.ConnectionsPaused;
+                    if (_connectionsPaused) _remote.Desired = false;
                     _privacyScreenFailures = 0;
                     _privacyScreenMessage = PrivacyScreenPolicy.Message(_privacyScreenEnabled, false, false, false);
                 }
             }
             catch (JsonException) { Log("期望状态配置损坏，按默认安全设置启动。"); }
         }
+        await InitializeNetworkAccessAsync(cancellationToken);
         Log("后台服务已启动。");
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var supervisor = SuperviseAsync(lifetime.Token);
         var listener = ListenAsync(lifetime.Token);
         var networkSupervisor = SuperviseNetworkAsync(lifetime.Token);
+        var firewallSupervisor = SuperviseFirewallAsync(lifetime.Token);
         try
         {
             // WhenAll alone would wait forever for the pipe listener after a supervisor
             // fault, leaving SCM reporting a running host that can never recover engines.
-            var completed = await Task.WhenAny(supervisor, listener, networkSupervisor);
+            var completed = await Task.WhenAny(supervisor, listener, networkSupervisor, firewallSupervisor);
             await completed;
             if (!cancellationToken.IsCancellationRequested)
                 throw new InvalidOperationException("后台监督任务意外结束，服务将自动重新启动。");
@@ -158,6 +174,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         finally
         {
             lifetime.Cancel();
+            _powerAwake.Dispose();
+            _sessionNotice?.Dispose(); _sessionNotice = null;
             // Cancel incoming API work before draining the engine/IPC supervisors.
             // API handlers use the same local IPC path as the owner UI, never a
             // nested call while this runtime holds _gate.
@@ -166,7 +184,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 await _controlApi.DisposeAsync();
                 _controlApi = null;
             }
-            try { await Task.WhenAll(supervisor, listener, networkSupervisor); }
+            try { await Task.WhenAll(supervisor, listener, networkSupervisor, firewallSupervisor); }
             catch (Exception) when (lifetime.IsCancellationRequested) { /* Preserve the first failure. */ }
             await _gate.WaitAsync(CancellationToken.None);
             try
@@ -195,6 +213,9 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             {
                 await StopExpiredPrivacyStreamAsync(cancellationToken);
                 await EnsureControlApiAsync(cancellationToken);
+                try { await ReconcileDeviceGrantsAsync(cancellationToken); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                { Log("设备媒体撤权尚未完成，将自动重试；相关引擎启动前仍会核对授权。"); }
                 var now = DateTimeOffset.UtcNow;
                 if (_tablet.Desired && TabletLeaseExpired(now))
                     await EndTabletSessionAsync("副屏连接已超时，已回收桌面。", cancellationToken);
@@ -263,6 +284,9 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 // scoped helper, including after startup, resume and logon changes.
                 if (!_tablet.Desired && DateTimeOffset.UtcNow >= _displayCleanupRetryAt)
                     await TryCleanupDisplayAsync(cancellationToken);
+
+                ReconcilePowerAwake();
+                ReconcileSessionNotice();
 
             }
             finally { _gate.Release(); }
@@ -391,6 +415,15 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     private async Task<RuntimeResponse> HandleAsync(RuntimeRequest request, CancellationToken cancellationToken)
     {
         var networkCommand = request.Command?.ToLowerInvariant();
+        if (networkCommand == "network-access-status")
+        {
+            var access = ReadNetworkAccessState();
+            return new(true, access.Message, PayloadJson: JsonSerializer.Serialize(access, RuntimeProtocol.JsonOptions));
+        }
+        if (networkCommand == "network-access-save")
+            return request.AllowPublicLan is bool allowPublicLan ? await SaveNetworkAccessAsync(allowPublicLan, cancellationToken)
+                : new(false, "请选择公共网络局域网访问策略。");
+        if (networkCommand == "network-access-refresh") return await RefreshNetworkAccessAsync(cancellationToken);
         if (networkCommand?.StartsWith("network-", StringComparison.Ordinal) == true && networkCommand != "network-provider")
             return await HandleNetworkAsync(request, cancellationToken);
         if (networkCommand == "remote-heartbeat")
@@ -402,13 +435,16 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             {
                 if (string.IsNullOrWhiteSpace(request.LeaseId) || string.IsNullOrWhiteSpace(request.ClientId))
                     throw new InvalidOperationException("会话或接收设备标识缺失。");
+                var principal = ValidateController(request);
                 var lifetime = Volatile.Read(ref _privacyScreenStop);
                 var generation = _remoteSession.Heartbeat(request.LeaseId, request.ClientId, request.StreamReady == true,
                     DateTimeOffset.UtcNow, request.FastPrivacyHeartbeat == true, request.BoundedPrivacyHeartbeat == true,
                     lifetime?.Generation == _remoteSession.Generation);
+                if (principal is not null) _remoteController = Controller(request, principal);
                 if (request.StreamReady == true && lifetime?.Generation == generation) lifetime.Heartbeat();
                 return new(true, "会话状态已更新。");
             }
+            catch (UnauthorizedAccessException) { return new(false, "设备接口授权已撤销或权限不足。", ErrorStatus: 403); }
             catch (InvalidOperationException ex) { return new(false, ex.Message, ErrorStatus: 409); }
         }
         var mediaIdentity = string.Equals(request.Command, "media-identity", StringComparison.OrdinalIgnoreCase);
@@ -428,12 +464,53 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         try
         {
             var command = request.Command?.ToLowerInvariant();
+            var controllerPrincipal = ValidateController(request);
             if (_maintenance.Active && command is "remote-prepare" or "tablet-prepare" or "start" or "restart" or "pair" or "tablet-request" or "remote-reconfigure" or "tablet-configure" or "configure")
                 throw new InvalidOperationException("电脑正在安装更新，请稍后重试。");
             string message;
             string? payload = null;
             Dictionary<string, long>? timings = null;
-            if (command == "status") message = "状态已更新。";
+            if (command?.StartsWith("host-policy-", StringComparison.Ordinal) == true)
+                return await HandleHostPolicyAsync(request, cancellationToken);
+            if (_connectionsPaused && command is "remote-prepare" or "tablet-prepare" or "start" or "restart" or "pair" or "tablet-request" or "media-identity")
+                throw new InvalidOperationException("电脑已暂停接受连接，请在电脑顶栏恢复后重试。");
+            if (command is "connections-pause" or "connections-resume")
+            {
+                bool pause = command == "connections-pause";
+                bool previous = _connectionsPaused;
+                _connectionsPaused = pause;
+                try { await SaveDesiredAsync(cancellationToken); }
+                catch { _connectionsPaused = previous; throw; }
+                if (pause)
+                {
+                    _remote.Desired = false;
+                    _remoteSession.Reset();
+                    if (_controlApi is not null)
+                    {
+                        var snapshot = JsonSerializer.Deserialize<ReceiverSnapshot>(_controlApi.ReceiverCommand("receiver-list", new("receiver-list")), RuntimeProtocol.JsonOptions);
+                        if (snapshot?.Request is { } pending && TabletRequestRegistry.Active(pending.State))
+                            _controlApi.ReceiverCommand("tablet-request-cancel", new("tablet-request-cancel", RequestId: pending.Id));
+                    }
+                    await ReconcilePrivacyScreenAsync(cancellationToken);
+                    await EndTabletSessionAsync("电脑已暂停接受连接。", cancellationToken, allowWarm: false);
+                    await StopEngineAsync(_remote, cancellationToken);
+                }
+                else { _remote.Desired = true; await TryStartEngineAsync(_remote, cancellationToken); }
+                await SaveDesiredAsync(cancellationToken);
+                message = pause ? "已暂停接受连接，并断开主屏和副屏；异地网络设置保留。" : "已恢复接受连接。";
+            }
+            else if (command is "control-device-list" or "control-device-revoke" or "control-device-scope" or "control-device-rename" or "control-legacy-policy")
+            {
+                payload = await DeviceCommandAsync(request, cancellationToken);
+                message = "控制接口设备授权已更新。";
+            }
+            else if (command == "session-disconnect")
+            {
+                await DisconnectRemoteAsync(cancellationToken);
+                await EndTabletSessionAsync("本机已断开远控连接。", cancellationToken, allowWarm: false);
+                message = "已断开当前远控连接。";
+            }
+            else if (command == "status") message = "状态已更新。";
             else if (command == "lan-discovery-status")
                 return new(true, "附近发现状态已读取。", PayloadJson: JsonSerializer.Serialize(_controlApi?.DiscoveryStatus, RuntimeProtocol.JsonOptions));
             else if (command == "maintenance-begin")
@@ -467,7 +544,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 var running = _controlApi?.IsRunning == true;
                 payload = JsonSerializer.Serialize(new ControlApiStatus(running,
                     File.Exists(ControlApiIdentity.PathFor(ControlIdentityDirectory)),
-                    running ? _controlApi!.GetInvitation() : null,
+                    running && _controlApi!.LegacyBindingAllowed ? _controlApi.GetInvitation() : null,
                     running ? null : _controlApiError ?? "请先用安装者账号打开一次我控制，完成设备绑定接口初始化。"), RuntimeProtocol.JsonOptions);
                 message = running ? "后台设备接口已就绪，退出电脑界面后仍可连接。" : "设备绑定接口正在等待初始化。";
             }
@@ -498,13 +575,14 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                     if (!await StopExpiredPrivacyStreamAsync(cancellationToken))
                         throw new InvalidOperationException("正在安全结束上一条隐私保护连接，请稍后重试。");
                     _remoteSession.Prepare(request.LeaseId, request.ClientId, DateTimeOffset.UtcNow);
-                    _lockOnExit.RemoveWhere(lease => lease != request.LeaseId);
+                    _remoteController = Controller(request, controllerPrincipal);
+                    if (_privacySuppressedLease != request.LeaseId) _privacySuppressedLease = null;
                     _loginInputUsed.RemoveWhere(lease => lease != request.LeaseId);
                 }
                 else {
                     bool matching=_remoteSession.IsStreaming(request.LeaseId,request.ClientId,DateTimeOffset.UtcNow);
-                    bool shouldLock=SessionExitPolicy.ShouldLock(matching,request.ExitReason,request.LockOnExit);
-                    _remoteSession.End(request.LeaseId,request.ClientId);_lockOnExit.Remove(request.LeaseId);
+                    bool shouldLock=SessionExitPolicy.ShouldLock(matching,request.ExitReason,_lockOnExitEnabled);
+                    _remoteSession.End(request.LeaseId,request.ClientId);
                     await ReconcilePrivacyScreenAsync(cancellationToken);
                     if(shouldLock)await LockDesktopAsync(cancellationToken);
                 }
@@ -533,6 +611,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             else if (command == "tablet-prepare")
             {
                 var prepared = await PrepareTabletSessionAsync(request, cancellationToken);
+                _tabletController = Controller(request, controllerPrincipal);
                 payload = JsonSerializer.Serialize(new { prepared.Mode.Width, prepared.Mode.Height, prepared.Mode.RefreshRate,
                     prepared.Mode.Orientation, prepared.Mode.Degraded, prepared.SupportedModes }, RuntimeProtocol.JsonOptions);
                 timings = prepared.TimingsMs;
@@ -544,6 +623,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 if (TabletLeaseExpired(DateTimeOffset.UtcNow))
                     throw new InvalidOperationException("副屏连接租约已过期，请重新连接。");
                 _tabletHeartbeatExpiresAt = DateTimeOffset.UtcNow + TabletHeartbeatGrace;
+                if (controllerPrincipal is not null) _tabletController = Controller(request, controllerPrincipal);
                 message = "副屏连接已保持。";
             }
             else if (command == "tablet-release")
@@ -574,7 +654,29 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 if (command == "pair")
                 {
                     if (engine.Process?.Running != true) throw new InvalidOperationException("请先启动所选模式，再配对设备。");
-                    await _backend.PairAsync(engine.Profile, request.Pin, request.Name, cancellationToken);
+                    var pairing = controllerPrincipal is { Legacy: false }
+                        ? new DeviceMediaPairing(_controlDevices!, _profiles) : null;
+                    if (pairing is not null) await pairing.BeginAsync(controllerPrincipal!.Id, engine.Profile, cancellationToken);
+                    try
+                    {
+                        await _backend.PairAsync(engine.Profile, request.Pin, request.Name, cancellationToken);
+                        if (pairing is not null) await pairing.CompleteAsync(engine.Profile, cancellationToken);
+                    }
+                    catch when (pairing is not null)
+                    {
+                        // Even a lost/cancelled /pin response may have granted media trust.
+                        // Stop before editing its store. A persisted fence survives failures.
+                        using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                        try
+                        {
+                            if (engine == _remote) await DisconnectRemoteAsync(cleanup.Token);
+                            else await EndTabletSessionAsync("媒体配对未完成，副屏已安全断开。", cleanup.Token, allowWarm: false);
+                            if (engine.Process?.Running == true) throw new IOException("串流引擎尚未停止。");
+                            await pairing.RecoverAsync(engine.Profile, cleanup.Token);
+                        }
+                        catch { Log("媒体配对回收尚未完成，已保留恢复记录；再次启动前将重试。"); }
+                        throw;
+                    }
                     message = "已确认配对，请在安卓设备上等待连接完成。";
                 }
                 else
@@ -607,6 +709,17 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                     message = command == "stop" ? "所选串流模式已停止。" : "串流模式已启动，正在检查就绪状态。";
                 }
             }
+            else if (command == "power-settings")
+            {
+                if (!PowerAwakePolicy.IsValid(request.PreventSleepMode))
+                    throw new InvalidOperationException("请选择有效的防休眠策略。");
+                var previousMode = _preventSleepMode;
+                _preventSleepMode = request.PreventSleepMode!;
+                try { await SaveDesiredAsync(cancellationToken); }
+                catch { _preventSleepMode = previousMode; throw; }
+                ReconcilePowerAwake();
+                message = "防休眠设置已保存。";
+            }
             else if (command == "remote-reconfigure")
             {
                 if (request.Profile != "remote" || !_remoteSession.IsStreaming(request.LeaseId ?? "", request.ClientId ?? "", DateTimeOffset.UtcNow))
@@ -618,51 +731,39 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 if(request.Profile != "remote" || !_remoteSession.IsStreaming(request.LeaseId??"",request.ClientId??"",DateTimeOffset.UtcNow))
                     throw new InvalidOperationException("当前远控会话已结束。");
                 if(request.ClipboardAction=="configure") {
-                    if(request.LockOnExit==true)_lockOnExit.Add(request.LeaseId!);else _lockOnExit.Remove(request.LeaseId!);
-                    message=request.LockOnExit==true?"主动退出本次远控后将锁定电脑；内部重连不锁屏。":"已关闭本次退出锁屏。";
+                    message="隐私屏、退出锁屏和自动填密已改为由电脑设置统一管理。";
                 } else if(request.ClipboardAction=="lock") {
                     await LockDesktopAsync(cancellationToken);message="已请求锁定电脑。";
                 } else if(request.ClipboardAction is "status" or "login-fill") {
                     bool fill=request.ClipboardAction=="login-fill";
-                    if(fill) {
-                        DesktopInputPolicy.ValidatePassword(request.LoginSecret);
-                        if(!_loginInputUsed.Add(request.LeaseId!))
-                            throw new InvalidOperationException("本次连接已尝试填写密码，请手动确认；如需重试请重新连接。");
-                    }
-                    LoginInputResult login=new("status");
-                    if(fill || DateTimeOffset.UtcNow-_desktopInputReadAt>TimeSpan.FromMilliseconds(600)) {
-                        var observed=await DesktopInputProbe.RequestAsync(_root,_interactive,
-                            _ownerSid?.Value ?? throw new InvalidOperationException("授权的 Windows 用户不可用。"),
-                            fill?request.LoginSecret:null,request.LoginSubmit==true,cancellationToken);
-                        _desktopInputState=observed.Desktop;login=observed.Login;_desktopInputReadAt=DateTimeOffset.UtcNow;
-                        // A not-ready answer proves zero input was sent. All uncertain/partial
-                        // attempts remain consumed, including a timeout or lost response.
-                        if(fill && login.State=="not-ready")_loginInputUsed.Remove(request.LeaseId!);
-                    }
+                    if(request.LoginSecret is not null || request.LoginSubmit == true)
+                        throw new InvalidOperationException("密码只能在电脑本机配置；不接收控制端保存的密码。");
+                    var observed = await ReadHostDesktopAsync(request.LeaseId!, request.ClientId!, fill, cancellationToken);
+                    var login = observed.Login;
                     payload=JsonSerializer.Serialize(new {desktop=_desktopInputState,login,
-                        lockOnExit=_lockOnExit.Contains(request.LeaseId!)},RuntimeProtocol.JsonOptions);
+                        lockOnExit=_lockOnExitEnabled,policy=HostPolicy()},RuntimeProtocol.JsonOptions);
                     return new(true,fill?login.Filled?"密码已填写，请确认电脑登录结果。":"未填写密码；请点选 Windows 密码框，或改为手动输入。":"桌面输入状态已读取。",PayloadJson:payload);
-                } else message=_lockOnExit.Contains(request.LeaseId!)?"退出锁屏已开启":"退出锁屏已关闭";
+                } else message=_lockOnExitEnabled?"退出锁屏已开启":"退出锁屏已关闭";
             }
-            else if (command == "remote-privacy")
+            else if (command is "remote-privacy" or "remote-privacy-recover")
             {
                 if (request.Profile != "remote" || !_remoteSession.IsStreaming(request.LeaseId ?? "", request.ClientId ?? "", DateTimeOffset.UtcNow))
                     throw new InvalidOperationException("请先连接主屏远控，再调整隐私保护。");
-                if (request.PrivacyEnabled is bool enabled)
+                if (command == "remote-privacy-recover")
                 {
-                    _privacyScreenEnabled = enabled;
-                    _privacyScreenFailures = 0;
-                    _privacyScreenRetryAt = default;
-                    await SaveDesiredAsync(cancellationToken);
+                    _privacySuppressedLease = request.LeaseId;
                     await ReconcilePrivacyScreenAsync(cancellationToken);
                 }
-                message = _privacyScreenMessage;
+                else if (request.PrivacyEnabled is not null)
+                    throw new InvalidOperationException("隐私屏策略只能在电脑设置中修改。");
+                message = command == "remote-privacy-recover" ? "本次远控已恢复本机屏幕；电脑隐私策略未更改。" : _privacyScreenMessage;
             }
             else if (command == "privacy-set")
             {
                 if (request.PrivacyEnabled is not bool enabled)
                     throw new InvalidOperationException("隐私保护设置无效。");
                 _privacyScreenEnabled = enabled;
+                _privacySuppressedLease = null;
                 _privacyScreenFailures = 0;
                 _privacyScreenRetryAt = default;
                 await SaveDesiredAsync(cancellationToken);
@@ -762,7 +863,9 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 return new(false, ex is MediaIdentityException identityError ? identityError.Message : "媒体身份预检未完成，请检查所选模式和公开证书后重试。",
                     ErrorStatus: ex is MediaIdentityException mediaError ? mediaError.Status : ex is ArgumentException ? 400 : 503);
             if (request.Command is "clipboard-authorize" or "clipboard-claim") return new(false, ex.Message);
-            if (request.Command is "remote-privacy" or "remote-reconfigure" or "remote-desktop") return new(false, ex.Message, ErrorStatus: 409);
+            if (request.Command?.StartsWith("host-policy-", StringComparison.Ordinal) == true)
+                return new(false, "电脑设置未能保存，请重新读取后重试；密码不会返回或写入日志。");
+            if (request.Command is "remote-privacy" or "remote-privacy-recover" or "remote-reconfigure" or "remote-desktop") return new(false, ex.Message, ErrorStatus: 409);
             Log($"操作 {request.Command} 失败：{ex.Message}");
             return new(false, ex.Message, await SnapshotAsync(cancellationToken));
         }
@@ -795,6 +898,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
 
     private async Task LockDesktopAsync(CancellationToken token)
     {
+        if (LockDesktopRequest is not null) { await LockDesktopRequest(token); return; }
         var executable=Path.Combine(_root,"service","串流中心后台.exe");
         using var helper=SessionLauncher.Start(executable,["--lock-desktop"],_root,_interactive,
             _ownerSid?.Value ?? throw new InvalidOperationException("授权的 Windows 用户不可用。"));
@@ -1121,7 +1225,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         var now = DateTimeOffset.UtcNow;
         var remoteRunning = _remote.Process?.Running == true;
         var authenticatedStream = _remoteSession.IsStreaming(now);
-        var shouldShow = PrivacyScreenPolicy.ShouldShow(_privacyScreenEnabled, authenticatedStream, remoteRunning);
+        var shouldShow = PrivacyScreenPolicy.ShouldShow(_privacyScreenEnabled && _privacySuppressedLease is null, authenticatedStream, remoteRunning);
 
         if (_privacyScreen is { } exited && !exited.Running)
         {
@@ -1330,11 +1434,12 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         try
         {
             identity = ControlApiIdentity.Read(ControlIdentityDirectory, DataProtectionScope.LocalMachine);
+            _controlDevices ??= ControlDeviceStore.Open(_data);
             var server = new ControlApiServer(new RuntimeClient(), ConfigureDisplayAsync, identity,
                 _interactive ? X509KeyStorageFlags.UserKeySet : X509KeyStorageFlags.MachineKeySet,
                 token => DisplayModeProbe.ReadAsync(_root, _interactive, token), _files, RequestClipboardAsync,
                 addresses => { try { var transport = _transportSettings.Load(); return transport.Transport.Addresses(addresses, transport); } catch { return []; } },
-                discoveryDeviceId: _deviceId, maintenance: _maintenance);
+                discoveryDeviceId: _deviceId, maintenance: _maintenance, deviceRegistry: _controlDevices);
             _controlApi = server;
             await server.StartAsync(cancellationToken);
             _controlApiError = null;
@@ -1429,6 +1534,9 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             engine.Message = "正在初始化内置串流配置";
             Log($"{engine.Profile} 引擎正在初始化。");
             await _profiles.EnsureAsync(engine.Profile, cancellationToken);
+            _controlDevices ??= ControlDeviceStore.Open(_data);
+            await new DeviceMediaPairing(_controlDevices, _profiles).RecoverAsync(engine.Profile, cancellationToken);
+            await _profiles.RemoveMediaTrustAsync(engine.Profile, _controlDevices.BlockedMedia(engine.Profile), cancellationToken);
             if (engine.Profile == "tablet" && !_profiles.HasTabletOutput())
             {
                 var output = DetectTabletOutput();
@@ -1552,10 +1660,21 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         var remote = await GetEngineStatusAsync(_remote, cancellationToken);
         var tablet = await GetEngineStatusAsync(_tablet, cancellationToken);
         var privacyActive = _privacyScreen?.Running == true;
+        ReconcilePowerAwake();
         return new(_deviceId, Environment.MachineName, remote, tablet, Volatile.Read(ref _networkSnapshot),
             ProductVersion.Name, _data, _startedAt, _privacyScreenEnabled, privacyActive,
             privacyActive ? PrivacyScreenPolicy.Message(true, true, _remoteSession.IsStreaming(DateTimeOffset.UtcNow), remote.Running)
-                : _privacyScreenMessage);
+                : _privacyScreenMessage, _preventSleepMode, _powerAwake.Active,
+            PowerAwakePolicy.Describe(_preventSleepMode, _powerAwake.Active, _powerAwake.Failed), HostPolicy(),
+            remote.Streaming ? _remoteController : tablet.Streaming ? _tabletController : null, _connectionsPaused);
+    }
+
+    private void ReconcilePowerAwake()
+    {
+        var now = DateTimeOffset.UtcNow;
+        bool streaming = _remote.Process?.Running == true && _remoteSession.IsStreaming(now) ||
+            _tablet.Process?.Running == true && _tabletStreamingSeen && _tabletLeaseId is not null && now < _tabletHeartbeatExpiresAt;
+        _powerAwake.Update(_preventSleepMode, streaming);
     }
 
     private async Task<EngineStatus> GetEngineStatusAsync(Engine engine, CancellationToken cancellationToken)
@@ -1596,9 +1715,12 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         try
         {
             var temporary = Path.Combine(_data, "desired.json.new");
+            long revision = checked(_policyRevision + 1);
             await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new DesiredState(_remote.Desired, _tablet.Desired,
-                _networkDesired, _privacyScreenEnabled)), cancellationToken);
+                _networkDesired, _privacyScreenEnabled, _preventSleepMode, _lockOnExitEnabled,
+                _automaticLoginEnabled, _automaticLoginSubmit, revision, _connectionsPaused)), cancellationToken);
             File.Move(temporary, Path.Combine(_data, "desired.json"), true);
+            _policyRevision = revision;
         }
         finally { _desiredGate.Release(); }
     }
@@ -1634,6 +1756,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _powerAwake.Dispose();
+        _sessionNotice?.Dispose(); _sessionNotice = null;
         await StopPrivacyScreenAsync(CancellationToken.None);
         _networkClient.Dispose();
         _probe.Dispose();

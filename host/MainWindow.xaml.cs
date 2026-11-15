@@ -46,18 +46,27 @@ public partial class MainWindow : Window
         _runtime = runtime;
         _uiPreferencesPath = uiPreferencesPath ?? DefaultUiPreferencesPath;
         InitializeComponent();
-        if (ProductVersion.IsInternal) Title = $"我控制 {ProductVersion.Name} · 内测版";
+        InitializeDesktopFeedback();
+        Title = $"我控制 · iControl {ProductVersion.Name}" + (ProductVersion.IsInternal ? " · 内测版" : "");
+        BrandVersion.Text = ProductVersion.Name + (ProductVersion.IsInternal ? " · 内测版" : "");
         InitializeUpdates();
         ComputerNameText.Text = Environment.MachineName;
         AutoStartCheck.IsChecked = GetAutoStart();
         _timer.Tick += async (_, _) => { if (IsVisible) await RefreshStatusAsync(); };
-        Loaded += async (_, _) => { _timer.Start(); await RefreshStatusAsync(); };
+        Loaded += async (_, _) => {
+            // Navigation's two-way selection bindings can clear the implicit
+            // first-tab selection during initialization. Establish it explicitly.
+            if (Pages.SelectedItem is null) Pages.SelectedItem = HomePage;
+            _timer.Start(); await RefreshStatusAsync();
+        };
     }
 
     public async void RefreshStatusFromTray() => await RefreshStatusAsync();
     public async void StopServicesFromTray() => await StopAllAsync();
     public async void RecoverPrivacyScreenFromTray() => await RecoverPrivacyScreenAsync();
-    public void DisposeWindow() { _timer.Stop(); _updateTimer.Stop(); _updateOperation?.Cancel(); _closing.Cancel(); _closing.Dispose(); }
+    public async void DisconnectSessionFromTray() => await RunAction(async () =>
+        await CommandAsync(new("session-disconnect")));
+    public void DisposeWindow() { _bindingCountdown.Stop(); _feedbackTimer.Stop(); CloseTransientPopovers(); _timer.Stop(); _updateTimer.Stop(); _updateOperation?.Cancel(); _closing.Cancel(); _closing.Dispose(); }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
@@ -73,6 +82,9 @@ public partial class MainWindow : Window
         {
             var result = await _runtime.GetStatusAsync(_closing.Token);
             _status = result.Success ? result.Status : null;
+            RefreshPowerSettings();
+            RefreshHostPolicySettings(_status?.HostPolicy);
+            if (Pages.SelectedItem == SettingsPage) _ = ReadNetworkAccessAsync();
             var sessionState = SessionNotificationPolicy.State(_status);
             var sessionNotice = SessionNotificationPolicy.Transition(_lastTraySessionState, sessionState);
             _lastTraySessionState = sessionState;
@@ -83,8 +95,6 @@ public partial class MainWindow : Window
             ComputerNameText.Text = _status?.DeviceName ?? Environment.MachineName;
             DeviceIdText.Text = _status is null ? "后台服务未连接" : $"设备标识  {_status.DeviceId}";
             AddressText.Text = _addresses.Length == 0 ? "尚未发现可用的本机 IPv4 地址" : "本机地址  " + string.Join("  /  ", _addresses);
-            RenderEngine(RemoteStateText, RemoteDetailText, _status?.Remote);
-            RenderEngine(TabletStateText, TabletDetailText, _status?.Tablet);
             _renderingPrivacy = true;
             try
             {
@@ -96,8 +106,6 @@ public partial class MainWindow : Window
                     _status?.PrivacyScreenActive == true ? "SuccessText" : "Muted");
             }
             finally { _renderingPrivacy = false; }
-            HeaderState.Text = SessionStatusPresentation.Header(_status);
-            HeaderState.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, _status?.Remote.Healthy == true ? "SuccessText" : "Muted");
             if (_status is null)
             {
                 _network = null;
@@ -116,12 +124,11 @@ public partial class MainWindow : Window
             var first = _addresses.FirstOrDefault() ?? "电脑IPv4地址";
             ConnectionHelpText.Text = $"远程主屏  {first}:48989\n平板副屏  {first}:49089";
             DiagnosticsText.Text = BuildDiagnostics(local, result);
-            LastUpdated.Text = "更新于 " + DateTime.Now.ToString("HH:mm:ss");
-            if (!_busy && (!result.Success || FeedbackText.Text.StartsWith("正在检查"))) FeedbackText.Text = result.Success ? "本机状态已更新。" : result.Message;
+            if (!_busy) UpdateStatusFeedback(result.Success, result.Message);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { FeedbackText.Text = "读取状态失败，请重试：" + ex.Message; }
-        finally { _refreshing = false; }
+        catch (Exception ex) { ShowFeedback("读取状态失败，请重试：" + ex.Message, error: true); }
+        finally { _refreshing = false; RefreshServiceControls(); }
     }
 
 
@@ -133,6 +140,7 @@ public partial class MainWindow : Window
         {
             if (_status is not null)
             {
+                await ReadControlDevicesAsync();
                 var configResult = await _runtime.SendAsync(new("network-config"), _closing.Token);
                 if (configResult.Success && configResult.PayloadJson is not null)
                     RenderTransport(JsonSerializer.Deserialize<TransportSettings>(configResult.PayloadJson, RuntimeProtocol.JsonOptions));
@@ -171,6 +179,7 @@ public partial class MainWindow : Window
         NetworkDetailText.Text = string.Join(Environment.NewLine, lines);
         PeerList.ItemsSource = _network?.Peers.Select(p => new { p.Name, Address = string.Join(" / ", UsableIpv4.Filter(p.Addresses)), State = p.Online ? "在线 · " + p.RouteText : "离线" }).ToArray();
         PeerEmptyText.Visibility = _network?.Peers.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
+        RefreshServiceControls();
         ClearLoginUrl();
         if (!string.IsNullOrWhiteSpace(_network?.BrowseUrl)) SetLoginUrl(_network.BrowseUrl);
     }
@@ -180,25 +189,24 @@ public partial class MainWindow : Window
         if (_busy) return;
         _busy = true;
         Pages.IsEnabled = false;
-        FeedbackText.Text = "正在处理，请稍候…";
+        ShowFeedback("正在处理，请稍候…", persistent: true, remember: false);
+        RefreshServiceControls();
         try { await action(); }
-        catch (Exception ex) { FeedbackText.Text = "操作未完成：" + ex.Message; }
-        finally { _busy = false; Pages.IsEnabled = true; await RefreshStatusAsync(true); }
+        catch (Exception ex) { ShowFeedback("操作未完成：" + ex.Message, error: true); }
+        finally { _busy = false; Pages.IsEnabled = true; if (FeedbackText.Text == "正在处理，请稍候…") DismissFeedback(); await RefreshStatusAsync(true); }
     }
 
     private async Task CommandAsync(RuntimeRequest request)
     {
         var result = await _runtime.SendAsync(request, _closing.Token);
-        FeedbackText.Text = result.Message;
-        if (!result.Success) FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "DangerText");
-        else FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "FeedbackTextBrush");
+        ShowFeedback(result.Message, error: !result.Success);
     }
 
-    private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await RefreshStatusAsync();
+    private async void RefreshButton_Click(object sender, RoutedEventArgs e) { await RefreshStatusAsync(); if (_status is not null) ShowFeedback("本机状态已更新。"); }
     private async void StartEngine_Click(object sender, RoutedEventArgs e)
     {
         var profile = (string)((Button)sender).Tag;
-        if (profile == "tablet") { TabletTab.IsSelected = true; await RefreshStatusAsync(); return; }
+        if (profile == "tablet") { OpenTabletPopover_Click(sender, e); await RefreshStatusAsync(); return; }
         await RunAction(async () =>
         {
             await CommandAsync(new("start", profile));
@@ -221,23 +229,21 @@ public partial class MainWindow : Window
     }
     private async void PrivacyRecoverButton_Click(object sender, RoutedEventArgs e) => await RecoverPrivacyScreenAsync();
     private async Task RecoverPrivacyScreenAsync() => await RunAction(() => CommandAsync(new("privacy-recover")));
-    private async void StopEngine_Click(object sender, RoutedEventArgs e)
+    private async void StopEngine_Click(object sender, RoutedEventArgs e) => await StopProfileAsync((string)((Button)sender).Tag);
+    private async Task StopProfileAsync(string profile)
     {
-        var profile = (string)((Button)sender).Tag;
         var engine = profile == "remote" ? _status?.Remote : _status?.Tablet;
-        if (engine?.Streaming == true && MessageBox.Show("这会中断正在进行的串流，确认停止？", "停止串流", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (engine?.Streaming == true && MessageBox.Show("这会中断正在进行的串流，确认停止？", "停止串流", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) { RefreshServiceControls(); return; }
         await RunAction(async () =>
         {
             if (profile == "tablet" && _tabletRequest is { } request && TabletRequestRegistry.Active(request.State))
                 await _runtime.SendAsync(new("tablet-request-cancel", RequestId: request.Id), _closing.Token);
             var result = await _runtime.SendAsync(new("stop", profile), _closing.Token);
-            FeedbackText.Text = result.Message;
+            ShowFeedback(result.Message, error: !result.Success);
             if (!result.Success)
             {
-                FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "DangerText");
                 return;
             }
-            FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "FeedbackTextBrush");
             // The service owns shutdown and verifies the virtual display is detached.
         });
     }
@@ -245,11 +251,11 @@ public partial class MainWindow : Window
     private async void Pair_Click(object sender, RoutedEventArgs e)
     {
         var pin = PairPin.Text.Trim();
-        if (pin.Length != 4 || pin.Any(c => c < '0' || c > '9')) { FeedbackText.Text = "请输入接收端显示的四位数字。"; PairPin.Focus(); return; }
+        if (pin.Length != 4 || pin.Any(c => c < '0' || c > '9')) { ShowFeedback("请输入接收端显示的四位数字。", error: true); PairPin.Focus(); return; }
         var profile = (string)((ComboBoxItem)PairMode.SelectedItem).Tag;
         await RunAction(async () => {
             var result = await _runtime.SendAsync(new("pair", profile, pin, PairName.Text.Trim()), _closing.Token);
-            FeedbackText.Text = result.Message;
+            ShowFeedback(result.Message, error: !result.Success);
             if (result.Success) PairPin.Clear();
         });
     }
@@ -260,7 +266,7 @@ public partial class MainWindow : Window
             var control = (System.Windows.Application.Current as App)?.ControlApi ?? throw new InvalidOperationException("设备绑定接口尚未启动。");
             CopyText(control.GetInvitation(), "设备绑定码已复制");
         }
-        catch (Exception ex) { FeedbackText.Text = ex.Message; }
+        catch (Exception ex) { ShowFeedback(ex.Message, error: true); }
     }
 
     private async void NetworkStart_Click(object sender, RoutedEventArgs e)
@@ -272,15 +278,15 @@ public partial class MainWindow : Window
     private async void NetworkLogin_Click(object sender, RoutedEventArgs e) => await RunAction(async () =>
     {
         var response = await _runtime.SendAsync(new("network-login"), _closing.Token);
-        FeedbackText.Text = response.Message;
+        ShowFeedback(response.Message, error: !response.Success);
         if (!response.Success || string.IsNullOrWhiteSpace(response.PayloadJson)) return;
         var status = JsonSerializer.Deserialize<NetworkStatus>(response.PayloadJson, RuntimeProtocol.JsonOptions);
-        if (status?.LoggedIn == true) { FeedbackText.Text = "当前账号已登录。"; return; }
+        if (status?.LoggedIn == true) { ShowFeedback("当前账号已登录。"); return; }
         var url = status?.BrowseUrl;
-        if (string.IsNullOrWhiteSpace(url)) { FeedbackText.Text = "授权地址尚未就绪，请稍后再点登录账号。"; return; }
-        if (!SetLoginUrl(url)) { FeedbackText.Text = "授权地址与已保存的连接通道不一致。"; return; }
+        if (string.IsNullOrWhiteSpace(url)) { ShowFeedback("授权地址尚未就绪，请稍后再点登录账号。", error: true); return; }
+        if (!SetLoginUrl(url)) { ShowFeedback("授权地址与已保存的连接通道不一致。", error: true); return; }
         OpenTarget(LoginUrlBox.Text);
-        FeedbackText.Text = "已打开浏览器授权页。完成授权后，登录状态会自动更新。";
+        ShowFeedback("已打开浏览器授权页。完成授权后，登录状态会自动更新。");
     });
     private bool SetLoginUrl(string url)
     {
@@ -296,9 +302,9 @@ public partial class MainWindow : Window
     private void CopyAddress_Click(object sender, RoutedEventArgs e) => CopyText(string.Join(Environment.NewLine, _addresses.Select(x => x + ":48989")), "远程主屏连接地址已复制。");
     private void CopyText(string value, string message)
     {
-        if (string.IsNullOrWhiteSpace(value)) { FeedbackText.Text = "暂无可复制内容"; return; }
-        try { System.Windows.Clipboard.SetText(value); FeedbackText.Text = message; }
-        catch (Exception ex) { FeedbackText.Text = "无法访问剪贴板：" + ex.Message; }
+        if (string.IsNullOrWhiteSpace(value)) { ShowFeedback("暂无可复制内容"); return; }
+        try { System.Windows.Clipboard.SetText(value); ShowFeedback(message); }
+        catch (Exception ex) { ShowFeedback("无法访问剪贴板：" + ex.Message, error: true); }
     }
 
     private async Task RefreshReceiversAsync()
@@ -311,28 +317,33 @@ public partial class MainWindow : Window
     private void RenderReceivers(ReceiverSnapshot? snapshot)
     {
         if (snapshot is null) return;
+        _receiverSnapshot = snapshot;
         var selected = ReceiverBox.SelectedValue as string;
         ReceiverBox.ItemsSource = snapshot.Receivers;
-        ReceiverBox.SelectedValue = selected;
+        ReceiverBox.SelectedValue = snapshot.Receivers.Any(receiver => receiver.ClientId == selected) ? selected : null;
         if (ReceiverBox.SelectedIndex < 0 && snapshot.Receivers.Length > 0) ReceiverBox.SelectedIndex = 0;
         ReceiverEmptyText.Text = snapshot.Receivers.Length == 0 ? "请在平板开启“接收电脑副屏请求”" : "分辨率和刷新率将按接收设备自动匹配";
         _tabletRequest = snapshot.Request;
         var active = _tabletRequest is not null && TabletRequestRegistry.Active(_tabletRequest.State);
         SendTabletRequestButton.IsEnabled = snapshot.Receivers.Length > 0 && !active;
         CancelTabletRequestButton.IsEnabled = active;
+        CancelTabletRequestButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         CancelTabletRequestButton.Content = _tabletRequest?.State == "connected" ? "断开连接" : "取消请求";
         TabletRequestStateText.Text = _tabletRequest is null ? "尚未发起连接" : _tabletRequest.Message;
+        RefreshServiceControls();
         TabletRequestStateText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, _tabletRequest?.State is "failed" or "rejected" or "expired" ? "DangerText" : "AccentText");
     }
 
-    private async void SendTabletRequest_Click(object sender, RoutedEventArgs e)
+    private async void SendTabletRequest_Click(object sender, RoutedEventArgs e) => await SendTabletRequestAsync();
+    private async Task SendTabletRequestAsync()
     {
-        if (ReceiverBox.SelectedValue is not string clientId) return;
+        if (ReceiverBox.SelectedItem is not TabletReceiver receiver) return;
+        var clientId = receiver.ClientId;
         var rotation = int.Parse((string)((ComboBoxItem)OrientationBox.SelectedItem).Tag);
         var link = (string)((ComboBoxItem)RequestLinkBox.SelectedItem).Tag;
         await RunAction(async () => {
             var response = await _runtime.SendAsync(new("tablet-request", Profile: link, Orientation: rotation, ClientId: clientId), _closing.Token);
-            FeedbackText.Text = response.Message;
+            ShowFeedback(response.Message, error: !response.Success);
             if (response.Success && response.PayloadJson is not null)
                 RenderReceivers(JsonSerializer.Deserialize<ReceiverSnapshot>(response.PayloadJson, RuntimeProtocol.JsonOptions));
         });
@@ -360,9 +371,9 @@ public partial class MainWindow : Window
             key.DeleteValue("梨子控制", false);
             if (AutoStartCheck.IsChecked == true) key.SetValue("我控制", "\"" + Environment.ProcessPath + "\" --background");
             else key.DeleteValue("我控制", false);
-            FeedbackText.Text = AutoStartCheck.IsChecked == true ? "下次登录 Windows 后将显示托盘入口。" : "已关闭托盘自启，后台服务仍随系统启动。";
+            ShowFeedback(AutoStartCheck.IsChecked == true ? "下次登录 Windows 后将显示托盘入口。" : "已关闭托盘自启，后台服务仍随系统启动。");
         }
-        catch (Exception ex) { AutoStartCheck.IsChecked = GetAutoStart(); FeedbackText.Text = "无法保存启动设置：" + ex.Message; }
+        catch (Exception ex) { AutoStartCheck.IsChecked = GetAutoStart(); ShowFeedback("无法保存启动设置：" + ex.Message, error: true); }
     }
     private async void StopAll_Click(object sender, RoutedEventArgs e) => await StopAllAsync();
     private async Task StopAllAsync()
@@ -374,18 +385,16 @@ public partial class MainWindow : Window
             if (!remote.Success) failures.Add("主屏：" + remote.Message);
             var tablet = await _runtime.SendAsync(new("stop", "tablet"), _closing.Token);
             if (!tablet.Success) failures.Add("副屏：" + tablet.Message);
-            else FeedbackText.Text = DisplayController.DisableExtended();
+            else ShowFeedback(DisplayController.DisableExtended());
             var network = await _runtime.SendAsync(new("network-restore"), _closing.Token);
             if (!network.Success) failures.Add("异地连接：" + network.Message);
             if (failures.Count > 0)
             {
-                FeedbackText.Text = "部分停止操作未完成：" + string.Join("；", failures);
-                FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "DangerText");
+                ShowFeedback("部分停止操作未完成：" + string.Join("；", failures), error: true);
             }
             else
             {
-                FeedbackText.Text = "已停止主屏、副屏和异地连接，副屏显示已停用。";
-                FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "FeedbackTextBrush");
+                ShowFeedback("已停止主屏、副屏和异地连接，副屏显示已停用。");
             }
         });
     }
@@ -408,15 +417,15 @@ public partial class MainWindow : Window
     {
         var dialog = new SaveFileDialog { Title = "保存诊断摘要", FileName = "我控制-诊断-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt", Filter = "文本文件|*.txt" };
         if (dialog.ShowDialog(this) != true) return;
-        try { File.WriteAllText(dialog.FileName, DiagnosticsText.Text, new UTF8Encoding(true)); FeedbackText.Text = "诊断摘要已保存到所选位置。"; }
-        catch (Exception ex) { FeedbackText.Text = "保存失败：" + ex.Message; }
+        try { File.WriteAllText(dialog.FileName, DiagnosticsText.Text, new UTF8Encoding(true)); ShowFeedback("诊断摘要已保存到所选位置。"); }
+        catch (Exception ex) { ShowFeedback("保存失败：" + ex.Message, error: true); }
     }
     private void OpenLogs_Click(object sender, RoutedEventArgs e) => OpenTarget(Path.Combine(DataRoot, "logs"));
     private void OpenLicenses_Click(object sender, RoutedEventArgs e) => OpenTarget(Path.Combine(InstallRoot, "许可与来源.txt"));
     private void OpenTarget(string target)
     {
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
-        catch (Exception ex) { FeedbackText.Text = "无法打开：" + ex.Message; }
+        catch (Exception ex) { ShowFeedback("无法打开：" + ex.Message, error: true); }
     }
     private sealed record LocalLink(string Name, bool Usb, string[] Addresses);
     private static LocalLink[] GetLocalLinks() => NetworkInterface.GetAllNetworkInterfaces()

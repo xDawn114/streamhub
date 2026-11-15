@@ -90,7 +90,7 @@ public class HubMobileUiTest {
                 HubNavigation nav=new HubNavigation(activity,new FrameLayout(activity),0,index->selected[0]=index);
                 activity.setContentView(nav.view);layout(nav.view,size[0],size[1]);
                 if(size[0]>size[1])assertEquals(80,nav.view.getChildAt(0).getWidth());
-                for(String name:new String[]{"设备","连接","设置","文件"}) {
+                for(String name:new String[]{"全部设备","设置","文件"}) {
                     TextView label=text(nav.view,name);assertNotNull(label);
                     View target=(View)label.getParent();Rect bounds=new Rect();
                     assertTrue(target.getGlobalVisibleRect(bounds));assertTrue(bounds.width()>=48);assertTrue(bounds.height()>=48);
@@ -110,7 +110,8 @@ public class HubMobileUiTest {
                 assertNotNull(remote);assertNotNull(extended);
                 View first=(View)remote.getParent(),second=(View)extended.getParent();
                 assertTrue(second.getTop()>=first.getBottom()+8);readable(root);
-                assertNotNull(text(root,"文件传输"));
+                assertNotEquals(((android.graphics.drawable.GradientDrawable)((android.graphics.drawable.RippleDrawable)first.getBackground()).getDrawable(0)).getColor(),((android.graphics.drawable.GradientDrawable)((android.graphics.drawable.RippleDrawable)second.getBackground()).getDrawable(0)).getColor());
+                assertNotNull(text(root,"全部设备"));
                 snapshot(root,"phone-home-"+size[0]+"-"+(theme==HubTheme.LIGHT?"light":"dark")+"-font150.png");
             }finally{HubTheme.setMode(RuntimeEnvironment.getApplication(),HubTheme.SYSTEM);}
         }
@@ -156,11 +157,37 @@ public class HubMobileUiTest {
         window(320,640,1.5f);
         try(org.robolectric.android.controller.ActivityController<HubFilesActivity> c=Robolectric.buildActivity(HubFilesActivity.class).setup()) {
             View root=content(c.get());layout(root,320,640);readable(root);
-            assertNotNull(text(root,"远程文件"));text(root,"传输任务").performClick();layout(root,320,640);
-            assertTrue(text(root,"选择文件发到电脑").isShown());readable(root);
+            assertNotNull(text(root,"文件"));assertTrue(text(root,"发送文件").isShown());
+            text(root,"传输任务").performClick();layout(root,320,640);
+            assertFalse(button(root,"发送文件")!=null);readable(root);
             snapshot(root,"phone-files-font150.png");
         }
     }
+    @Test public void settingsChoicesPreserveThemeAudioAndOrientationInCenteredTabletColumn() throws Exception {
+        window(1280,800,1f);
+        HubTheme.setMode(RuntimeEnvironment.getApplication(),HubTheme.LIGHT);
+        try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {
+            HubActivity activity=c.get();java.lang.reflect.Method show=HubActivity.class.getDeclaredMethod("showPage",int.class);show.setAccessible(true);show.invoke(activity,2);
+            View root=content(activity);layout(root,1280,800);
+            java.lang.reflect.Field slotField=HubActivity.class.getDeclaredField("pageSlot");slotField.setAccessible(true);
+            FrameLayout slot=(FrameLayout)slotField.get(activity);ScrollView scroll=(ScrollView)slot.getChildAt(2);
+            View page=((FrameLayout)scroll.getChildAt(0)).getChildAt(0);
+            assertEquals(680,page.getWidth());assertEquals((scroll.getWidth()-page.getWidth())/2,page.getLeft());
+            assertEquals(0,viewsOfType(page,android.widget.Spinner.class));
+            ((View)text(root,"副屏方向").getParent().getParent()).performClick();
+            AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();dialog.getListView().performItemClick(null,2,2);
+            java.lang.reflect.Method degrees=HubActivity.class.getDeclaredMethod("selectedOrientation");degrees.setAccessible(true);assertEquals(90,degrees.invoke(activity));
+            ((View)text(root,"输出设备").getParent().getParent()).performClick();
+            dialog=ShadowAlertDialog.getLatestAlertDialog();dialog.getListView().performItemClick(null,2,2);
+            assertEquals("both",androidx.preference.PreferenceManager.getDefaultSharedPreferences(activity).getString("streamhub_audio_output",""));
+            ((View)text(root,"应用主题").getParent().getParent()).performClick();
+            dialog=ShadowAlertDialog.getLatestAlertDialog();dialog.getListView().performItemClick(null,HubTheme.DARK,HubTheme.DARK);
+            assertEquals(HubTheme.DARK,HubTheme.mode(activity));root=content(activity);layout(root,1280,800);
+            java.lang.reflect.Field selected=HubActivity.class.getDeclaredField("selectedOrientationIndex");selected.setAccessible(true);assertEquals(2,selected.getInt(activity));
+            assertNotNull(text(root,"设置"));snapshot(root,"tablet-settings-centered-dark.png");
+        }finally{HubTheme.setMode(RuntimeEnvironment.getApplication(),HubTheme.SYSTEM);}
+    }
+    private int viewsOfType(View root,Class<?> type){int count=type.isInstance(root)?1:0;if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++)count+=viewsOfType(((ViewGroup)root).getChildAt(i),type);return count;}
     @Test public void settingsAndConnectionStayReadableWithLargePhoneText() {
         window(320,640,1.5f);
         try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {

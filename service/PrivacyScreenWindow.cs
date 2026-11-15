@@ -22,6 +22,7 @@ internal static class PrivacyScreenWindow
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
     private const uint WM_DISPLAYCHANGE = 0x007E;
+    private const uint WM_DPICHANGED = 0x02E0;
     private const uint WM_ERASEBKGND = 0x0014;
     private const uint WM_NCHITTEST = 0x0084;
     private const uint WM_PAINT = 0x000F;
@@ -146,14 +147,20 @@ internal static class PrivacyScreenWindow
             case WM_NCHITTEST: return new IntPtr(HTTRANSPARENT);
             case WM_ERASEBKGND: return new IntPtr(1);
             case WM_DISPLAYCHANGE:
+            case WM_DPICHANGED:
                 var bounds = VirtualScreenBounds();
                 SetWindowPos(hwnd, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                InvalidateRect(hwnd, IntPtr.Zero, false);
                 return IntPtr.Zero;
             case WM_PAINT:
                 if (BeginPaint(hwnd, out var paint) != IntPtr.Zero)
                 {
-                    FillRect(paint.Dc, ref paint.Area, BLACK_BRUSH);
-                    EndPaint(hwnd, ref paint);
+                    try
+                    {
+                        FillRect(paint.Dc, ref paint.Area, BLACK_BRUSH);
+                        PrivacyScreenBrand.Paint(paint.Dc);
+                    }
+                    finally { EndPaint(hwnd, ref paint); }
                 }
                 return IntPtr.Zero;
             case WM_DESTROY: PostQuitMessage(0); return IntPtr.Zero;
@@ -228,6 +235,7 @@ internal static class PrivacyScreenWindow
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] private static extern bool UpdateWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr window, IntPtr area, bool erase);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowDisplayAffinity(IntPtr window, int affinity);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr LoadCursor(IntPtr instance, uint cursor);

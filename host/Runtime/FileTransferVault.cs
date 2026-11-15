@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace StreamHub.Host.Runtime;
 
 public sealed record TransferDevice(string ClientId, string Name, string KeyHash, bool Allowed = false,
-    bool UploadAllowed = true, bool DeleteAllowed = false);
+    bool UploadAllowed = true, bool DeleteAllowed = false, bool UsesDevicePermissions = false);
 public sealed record TransferItem(string Id, string ClientId, string Direction, string Name, long Size,
     string Sha256, long Offset = 0, string State = "receiving", string? PublishedPath = null, string? DestinationTemp = null,
     bool SharedSource = false, string? BrowseRootId = null);
@@ -17,7 +17,7 @@ public sealed record TransferSettings(bool Enabled = false, string ReceiveDirect
 public sealed record TransferSnapshot(TransferSettings Settings, TransferDevice[] Devices, TransferItem[] Items);
 public sealed class TransferError(int status, string message, Exception? inner = null) : IOException(message, inner) { public int Status { get; } = status; }
 
-/// <summary>Private spool, explicit per-device grant, durable acknowledged offsets. No remote paths.</summary>
+/// <summary>Private spool, central device permissions, durable acknowledged offsets. No remote paths.</summary>
 public sealed partial class FileTransferVault
 {
     public const int ChunkBytes = 256 * 1024;
@@ -33,6 +33,12 @@ public sealed partial class FileTransferVault
     private readonly Dictionary<string, TransferDevice> _devices = new();
     private readonly Dictionary<string, TransferItem> _items = new();
     private readonly bool _throttle;
+    // null means a legacy file device. Bound devices use the live central scope,
+    // including during queued I/O, so removing scope does not require reconnecting.
+    public Func<string, bool?>? DeviceFilePermission { private get; set; }
+    private TransferDevice EffectiveDevice(TransferDevice device) => DeviceFilePermission?.Invoke(device.ClientId) is bool allowed
+        ? device with { Allowed = allowed, UsesDevicePermissions = true }
+        : device.UsesDevicePermissions ? device with { Allowed = false } : device;
 
     public static bool IsSizeAllowed(long size) => size >= 0 && size <= MaximumFileBytes;
 
@@ -96,10 +102,17 @@ public sealed partial class FileTransferVault
             if (_devices.TryGetValue(clientId, out var old))
             {
                 if (!Equal(old.KeyHash, hash)) throw new TransferError(403, "文件设备身份不一致，请在电脑端撤销旧授权后重新申请。");
-                return old;
+                var effective = EffectiveDevice(old);
+                if (effective.UsesDevicePermissions && !old.UsesDevicePermissions)
+                {
+                    _devices[clientId] = old with { UsesDevicePermissions = true };
+                    Save("devices.json", _devices.Values.ToArray());
+                }
+                return effective;
             }
             if (_devices.Count >= 16) throw new TransferError(409, "文件设备列表已满，请在电脑端撤销不再使用的设备。");
-            var result = new TransferDevice(clientId, name, hash); _devices[clientId] = result;
+            var result = EffectiveDevice(new TransferDevice(clientId, name, hash));
+            _devices[clientId] = result with { Allowed = false };
             Save("devices.json", _devices.Values.ToArray()); return result;
         }
     }
@@ -112,7 +125,7 @@ public sealed partial class FileTransferVault
     public void Authorize(string clientId, string key) { lock (_gate) { AuthorizeLocked(clientId, KeyHash(key)); } }
     private void AuthorizeLocked(string clientId, string hash)
     {
-        if (!_settings.Enabled || !_devices.TryGetValue(clientId, out var device) || !device.Allowed || !Equal(device.KeyHash, hash))
+        if (!_settings.Enabled || !_devices.TryGetValue(clientId, out var device) || !EffectiveDevice(device).Allowed || !Equal(device.KeyHash, hash))
             throw new TransferError(403, "请先在电脑端开启文件传输并允许此设备。");
     }
     public void Configure(bool enabled, string directory, bool? browseEnabled = null)
@@ -120,8 +133,12 @@ public sealed partial class FileTransferVault
         if (enabled && (!Path.IsPathFullyQualified(directory) || !Directory.Exists(directory))) throw new TransferError(400, "请选择存在的电脑接收文件夹。");
         lock (_gate)
         {
+            // A legacy browse root followed ReceiveDirectory implicitly. Preserve
+            // that existing grant before changing only the upload destination.
+            var roots = _settings.BrowseRoots;
+            if (roots is null && !string.IsNullOrEmpty(_settings.ReceiveDirectory)) roots = RootsLocked();
             var updated = new TransferSettings(enabled, enabled ? Path.GetFullPath(directory) : _settings.ReceiveDirectory,
-                browseEnabled ?? _settings.BrowseEnabled, _settings.BrowseRoots);
+                browseEnabled ?? _settings.BrowseEnabled, roots);
             Save("settings.json", updated); _settings = updated;
         }
     }
@@ -130,12 +147,13 @@ public sealed partial class FileTransferVault
         lock (_gate)
         {
             if (!_devices.TryGetValue(clientId, out var device)) throw new TransferError(404, "请先在平板申请文件授权。");
+            if (EffectiveDevice(device).UsesDevicePermissions) throw new TransferError(409, "请在此设备的权限中修改“文件”开关。");
             var updated = device with { Allowed = allowed }; Save("devices.json", _devices.Values.Select(x => x.ClientId == clientId ? updated : x).ToArray()); _devices[clientId] = updated;
         }
     }
     public void RemoveDevice(string clientId)
     { lock (_gate) { Save("devices.json", _devices.Values.Where(x => x.ClientId != clientId).ToArray()); _devices.Remove(clientId); } }
-    public TransferSnapshot Snapshot() { lock (_gate) return new(_settings, _devices.Values.ToArray(), _items.Values.ToArray()); }
+    public TransferSnapshot Snapshot() { lock (_gate) return new(_settings, _devices.Values.Select(EffectiveDevice).ToArray(), _items.Values.ToArray()); }
     public TransferItem[] List(string clientId, string key)
     { lock (_gate) { AuthorizeLocked(clientId, KeyHash(key)); return _items.Values.Where(x => x.ClientId == clientId).ToArray(); } }
     private TransferItem Find(string id, string clientId, string key)
@@ -295,7 +313,7 @@ public sealed partial class FileTransferVault
         if (!ValidName(name)) throw new TransferError(400, "请选择有效的电脑文件。");
         lock (_gate)
         {
-            if (!_settings.Enabled || !_devices.TryGetValue(clientId, out var device) || !device.Allowed) throw new TransferError(403, "此设备未获文件授权。");
+            if (!_settings.Enabled || !_devices.TryGetValue(clientId, out var device) || !EffectiveDevice(device).Allowed) throw new TransferError(403, "此设备未获文件授权。");
             CheckSpace(size);
             var item = new TransferItem(Guid.NewGuid().ToString("N"), clientId, "download", name, size, "", State: "staging");
             SaveItem(item); _items[item.Id] = item; return item;
@@ -316,7 +334,7 @@ public sealed partial class FileTransferVault
                     lock (_gate)
                     {
                         if (_items[id].State != "staging" || !_settings.Enabled || (item.SharedSource && !_settings.BrowseEnabled) ||
-                            !_devices.TryGetValue(item.ClientId, out var device) || !device.Allowed)
+                            !_devices.TryGetValue(item.ClientId, out var device) || !EffectiveDevice(device).Allowed)
                             throw new OperationCanceledException();
                     }
                     var started = Stopwatch.StartNew(); size += read;

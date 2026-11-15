@@ -32,6 +32,20 @@ jobs:
         run: |
           dotnet run --project tests/desktop-input/DesktopInputChecks.csproj -c Release -- service/bin/Release/net8.0-windows/串流中心后台.dll
           if ($LASTEXITCODE -ne 0) { throw 'Desktop policy checks failed' }
+      - name: Check isolated control boundary, computer policies and firewall rules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($project in @('tests/control-boundary/ControlBoundaryChecks.csproj', 'tests/host-policy/HostPolicyChecks.csproj', 'tests/firewall/FirewallChecks.csproj')) {
+            if (-not (Test-Path -LiteralPath $project -PathType Leaf)) { throw "Missing security check project: $project" }
+            dotnet run --project $project -c Release
+            if ($LASTEXITCODE -ne 0) { throw "Security checks failed: $project" }
+          }
+      - name: Check device grants and exact media revocation with isolated fixtures
+        shell: pwsh
+        run: |
+          dotnet run --project tests/device-grants/DeviceGrantChecks.csproj -c Release -- (Join-Path $env:RUNNER_TEMP 'icontrol-device-grants')
+          if ($LASTEXITCODE -ne 0) { throw 'Device grant checks failed' }
       - name: Archive unsigned app and service build evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

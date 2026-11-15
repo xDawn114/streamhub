@@ -68,13 +68,16 @@ public class HubDesktopInputTest {
             try{HubLoginSecrets.validate(invalid);fail();}catch(IllegalArgumentException expected){}
     }
     @Test public void exitLockIsVisibleBeforeConnectionAndPersistsImmediately() {
-        Activity a=activity();View content=HubLoginSettings.view(a,false,null);
+        Activity a=activity();a.getSharedPreferences("streamhub-device",0).edit().putString("invitation","fixture-legacy")
+                .putString("deviceId","pc-legacy").putString("hostPolicyOwner","pc-legacy").putString("hostPolicyMode","legacy").commit();
+        View content=HubLoginSettings.view(a,false,null);
         Switch lock=(Switch)find(content,"退出远控后自动锁定电脑");assertNotNull(lock);assertFalse(lock.isChecked());lock.setChecked(true);
         assertTrue(a.getSharedPreferences("streamhub_controls",0).getBoolean("lock_on_exit",false));
         assertTrue(((Switch)find(HubLoginSettings.view(a,false,null),"退出远控后自动锁定电脑")).isChecked());
     }
     @Test public void credentialDialogProtectsItsWindowAndDoesNotPrepopulatePassword() {
-        Activity a=activity();a.getSharedPreferences("streamhub-device",0).edit().putString("invitation","test-only").putString("deviceId","pc-A").commit();
+        Activity a=activity();a.getSharedPreferences("streamhub-device",0).edit().putString("invitation","test-only").putString("deviceId","pc-A")
+                .putString("hostPolicyOwner","pc-A").putString("hostPolicyMode","legacy").commit();
         ((Button)find(HubLoginSettings.view(a,false,null),"设置密码")).performClick();AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();
         assertNotNull(dialog);assertTrue((dialog.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_SECURE)!=0);
         assertFalse(((android.widget.CheckBox)find(dialog.getWindow().getDecorView(),"填入后自动按 Enter 确认登录")).isChecked());

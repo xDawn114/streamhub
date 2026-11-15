@@ -3,6 +3,7 @@
  <ItemGroup>
   <Compile Include="../../common/Updates/*.cs" Link="Updates/%(Filename)%(Extension)" />
   <Compile Include="../../installer/RollbackCatalog.cs" Link="RollbackCatalog.cs" />
+  <Compile Include="../../installer/RollbackCatalog.Retention.cs" Link="RollbackCatalog.Retention.cs" />
   <Compile Include="../../installer/RollbackTransaction.cs" Link="RollbackTransaction.cs" />
   <Compile Include="../../host/Runtime/MaintenanceWindow.cs" Link="MaintenanceWindow.cs" />
  </ItemGroup>

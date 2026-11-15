@@ -45,7 +45,7 @@ final class HubNavigation {
         LinearLayout navigation = new LinearLayout(activity);
         navigation.setOrientation(rail ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         navigation.setGravity(rail ? Gravity.TOP : Gravity.CENTER);
-        navigation.setPadding(dp(8), dp(8), dp(8), dp(8)); navigation.setBackgroundColor(HubTheme.surface(activity));
+        navigation.setPadding(dp(8), dp(8), dp(8), dp(8)); navigation.setBackgroundColor(HubTheme.field(activity));
         if (rail) {
             if (!layout.compact()) {
                 TextView brand = new TextView(activity); brand.setText("我控制"); brand.setTextColor(HubTheme.text(activity));
@@ -54,17 +54,18 @@ final class HubNavigation {
             }
             ScrollView railScroll = new ScrollView(activity);
             railScroll.setFillViewport(true); railScroll.setVerticalScrollBarEnabled(false);
-            railScroll.setBackgroundColor(HubTheme.surface(activity)); railScroll.addView(navigation);
+            railScroll.setBackgroundColor(HubTheme.field(activity)); railScroll.addView(navigation);
             view.addView(railScroll, new LinearLayout.LayoutParams(dp(layout.railWidthDp()), -1));
             view.addView(content, new LinearLayout.LayoutParams(0, -1, 1));
         } else {
             view.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
             view.addView(navigation, new LinearLayout.LayoutParams(-1, dp(layout.bottomHeightDp())));
         }
-        String[] labels = {"设备", "连接", "设置", "文件"};
-        int[] icons = {R.drawable.ic_nav_devices, R.drawable.ic_nav_connection, R.drawable.ic_nav_settings, R.drawable.ic_nav_files};
+        String[] labels = {"全部设备", "文件", "设置"};
+        int[] pages = {0, 3, 2};
+        int[] icons = {R.drawable.ic_nav_devices, R.drawable.ic_nav_files, R.drawable.ic_nav_settings};
         for (int i = 0; i < labels.length; i++) {
-            final int page = i;
+            final int page = pages[i];
             LinearLayout item = new LinearLayout(activity); item.setOrientation(LinearLayout.VERTICAL); item.setGravity(Gravity.CENTER);
             item.setMinimumHeight(dp(rail ? 64 : layout.bottomHeightDp() - 16)); item.setPadding(dp(2), dp(2), dp(2), dp(2));
             ImageView icon = new ImageView(activity); icon.setImageResource(icons[i]); icon.setScaleType(ImageView.ScaleType.CENTER);
@@ -81,6 +82,8 @@ final class HubNavigation {
             item.setStateListAnimator(null); item.setElevation(0);
             item.setDefaultFocusHighlightEnabled(false);
             item.setOnClickListener(v -> listener.select(page));
+            item.setTag(page);
+            if (rail && page == 2) { View spacer = new View(activity); navigation.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1)); }
             navigation.addView(item, rail ? new LinearLayout.LayoutParams(-1, -2) : new LinearLayout.LayoutParams(0, -1, 1));
             items.add(item);
         }
@@ -88,7 +91,7 @@ final class HubNavigation {
     }
     void select(int page) {
         for (int i = 0; i < items.size(); i++) {
-            LinearLayout item = items.get(i); boolean selected = i == page;
+            LinearLayout item = items.get(i); boolean selected = ((Integer)item.getTag()) == (page == 1 ? 0 : page);
             ImageView icon = (ImageView)item.getChildAt(0); TextView label = (TextView)item.getChildAt(1);
             int color = selected ? HubTheme.accent(activity) : HubTheme.muted(activity);
             label.setTextColor(color); icon.setImageTintList(android.content.res.ColorStateList.valueOf(color));

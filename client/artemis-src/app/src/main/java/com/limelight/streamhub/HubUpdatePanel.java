@@ -12,7 +12,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 import java.util.function.BooleanSupplier;
 
-/** Reuses the Hub palette and full-width 48dp targets in either orientation. */
+/** Reuses the Hub palette and 48dp action targets in either orientation. */
 public final class HubUpdatePanel extends LinearLayout {
     private final Activity activity;
     private final HubUpdates updates;
@@ -28,8 +28,8 @@ public final class HubUpdatePanel extends LinearLayout {
         version = text(16, HubTheme.text(activity)); version.setTypeface(null, Typeface.BOLD);
         state = text(14, HubTheme.muted(activity)); state.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         lastChecked = text(12, HubTheme.muted(activity)); notes = text(14, HubTheme.text(activity));
-        toggle("自动检查更新（每 12 小时）", updates.autoCheck(), true);
-        toggle("空闲时自动下载（仅非计费网络）", updates.autoDownload(), false);
+        toggle("自动检查更新", updates.autoCheck(), true);
+        toggle("空闲时自动下载", updates.autoDownload(), false);
         progress = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100); progress.setProgressTintList(ColorStateList.valueOf(HubTheme.primary(activity))); progress.setContentDescription("更新下载进度");
         LayoutParams progressSize = new LayoutParams(-1, dp(6)); progressSize.setMargins(0, dp(8), 0, dp(8)); addView(progress, progressSize);
@@ -39,8 +39,7 @@ public final class HubUpdatePanel extends LinearLayout {
                 .setMessage("安装将保留电脑绑定和设置。请先结束串流与文件操作，并完成系统安装确认。")
                 .setNegativeButton("稍后", null).setPositiveButton("继续", (dialog, which) -> updates.install(activity, idle)).show());
         cancel = button("取消", false, v -> updates.cancel());
-        TextView hint = text(12, HubTheme.muted(activity));
-        hint.setText("自动检查和下载不会自动安装。系统安装确认由你操作；更新保留绑定和设置。应用被强制停止时，后台检查会暂停至再次打开。");
+        check.setTooltipText("每12小时检查一次；强制停止应用后暂停，重新打开后恢复。更新保留绑定和设置，安装仍需系统确认。");
         render();
     }
     @Override protected void onAttachedToWindow() { super.onAttachedToWindow(); updates.listen(listener); render(); }
@@ -58,6 +57,7 @@ public final class HubUpdatePanel extends LinearLayout {
     }
     private void toggle(String label, boolean checked, boolean autoCheck) {
         Switch control = new Switch(activity); control.setText(label); control.setTextSize(14); control.setTextColor(HubTheme.text(activity));
+        control.setTooltipText(autoCheck ? "每12小时检查一次" : "仅非计费网络；不会自动安装");
         control.setChecked(checked); control.setMinimumHeight(dp(56)); control.setPadding(0, dp(8), 0, dp(8));
         control.setThumbTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{HubTheme.accent(activity), HubTheme.muted(activity)}));
         control.setTrackTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{HubTheme.primary(activity), HubTheme.border(activity)}));
@@ -74,7 +74,7 @@ public final class HubUpdatePanel extends LinearLayout {
         GradientDrawable shape = new GradientDrawable(); shape.setColor(primary ? HubTheme.primary(activity) : HubTheme.selected(activity)); shape.setCornerRadius(dp(10));
         button.setBackground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(HubTheme.ripple(activity)), shape, null));
         button.setElevation(0); button.setStateListAnimator(null); button.setMinimumHeight(dp(48)); button.setPadding(dp(16), dp(8), dp(16), dp(8));
-        LayoutParams layout = new LayoutParams(-1, -2); layout.topMargin = dp(8); addView(button, layout); button.setOnClickListener(action); return button;
+        LayoutParams layout = new LayoutParams(-2, -2); layout.topMargin = dp(8); addView(button, layout); button.setOnClickListener(action); return button;
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 }

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace StreamHub.Service;
@@ -19,6 +20,37 @@ internal sealed class ProfileStore(string root, string data)
     public string ConfigFor(string profile) => Path.Combine(DirectoryFor(profile), "sunshine.conf");
     public string CertificateFor(string profile) => Path.Combine(DirectoryFor(profile), "credentials", "cacert.pem");
     public static int Port(string profile) => profile == "remote" ? 48989 : 49089;
+
+    // Caller holds the runtime gate and has stopped this product's selected engine.
+    // Remove only exact public certificates associated with revoked device grants.
+    internal async Task RemoveMediaTrustAsync(string profile, string[] blocked, CancellationToken token)
+    {
+        ValidateMediaProfile(profile);
+        if (blocked.Length == 0) return;
+        var targets = blocked.Select(x => Convert.FromBase64String(x)).ToArray();
+        var clients = await ReadMediaTrustAsync(profile, token); // Strict validation before preserving the document.
+        var ids = clients.Where(c => targets.Any(t => t.AsSpan().SequenceEqual(c.Certificate))).Select(c => c.Uuid).ToHashSet();
+        if (ids.Count == 0) return;
+        string path = Path.Combine(DirectoryFor(profile), "state.json");
+        byte[] before = await ReadMediaFileAsync(path, 1048576, token);
+        var node = JsonNode.Parse(before) ?? throw new InvalidDataException("媒体授权记录无效。");
+        var devices = node["root"]?["named_devices"]?.AsArray() ?? throw new InvalidDataException("媒体授权记录无效。");
+        for (int i = devices.Count - 1; i >= 0; i--)
+            if (ids.Contains(devices[i]?["uuid"]?.GetValue<string>() ?? "")) devices.RemoveAt(i);
+        byte[] current = await ReadMediaFileAsync(path, 1048576, token);
+        if (!before.AsSpan().SequenceEqual(current)) throw new IOException("媒体授权记录发生变化，请重试撤销。");
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".new";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, node.ToJsonString(), new UTF8Encoding(false), token);
+            File.Move(temporary, path, true);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(before); CryptographicOperations.ZeroMemory(current);
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
 
     // Service-internal projection only. The running service reads its own selected
     // profile with its normal identity; no ACL changes, impersonation or raw export.
@@ -100,7 +132,7 @@ internal sealed class ProfileStore(string root, string data)
         return value.EnumerateObject().Any(property => !names.Add(property.Name));
     }
 
-    private static async Task<byte[]> ReadMediaFileAsync(string path, int maximumBytes, CancellationToken cancellationToken)
+    internal static async Task<byte[]> ReadMediaFileAsync(string path, int maximumBytes, CancellationToken cancellationToken)
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
             8192, FileOptions.Asynchronous | FileOptions.SequentialScan);

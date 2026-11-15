@@ -1,0 +1,6 @@
+name: iControl modified Sunshine source
+queries:
+  - uses: security-extended
+# Standalone config for a MANUAL build of the complete, hash-verified modified
+# Sunshine source (see docs/源码托管与安全检查.md). A .patch is not a C++ database.
+# Compiled dependencies can enter extraction; paths-ignore would not exclude them.

@@ -29,6 +29,12 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args is ["--session-notice"])
+        {
+            try { new SessionNoticeWindow().Show(); }
+            catch { Shutdown(1); }
+            return;
+        }
         // This mode must precede the single-instance activation path. A quiet
         // install or an exited tray UI must not disable clipboard synchronization.
         if (e.Args.Length > 0 && e.Args[0] == "--clipboard-job")
@@ -75,6 +81,22 @@ public partial class App : System.Windows.Application
             var menu = new Forms.ContextMenuStrip();
             menu.Items.Add("打开我控制", null, (_, _) => ShowWindow());
             menu.Items.Add("刷新状态", null, (_, _) => _window.RefreshStatusFromTray());
+            var connection = menu.Items.Add("当前没有远程连接");
+            connection.Enabled = false;
+            var disconnect = menu.Items.Add("断开当前连接", null, (_, _) => _window.DisconnectSessionFromTray());
+            disconnect.Enabled = false;
+            menu.Opening += async (_, _) =>
+            {
+                connection.Text = "正在读取连接状态…";
+                disconnect.Enabled = false;
+                var response = await new RuntimeClient().GetStatusAsync();
+                var status = response.Status;
+                bool connected = response.Success && status is not null && (status.Remote.Streaming || status.Tablet.Streaming);
+                connection.Text = connected ? "正在连接：" + (status!.Controller?.Name ?? "设备身份待核对") :
+                    response.Success ? "当前没有远程连接" : "暂时无法读取连接状态";
+                disconnect.Enabled = connected;
+                if (_tray is not null) _tray.Text = connected ? "我控制 · 正在被远程控制" : "我控制";
+            };
             menu.Items.Add(new Forms.ToolStripSeparator());
             menu.Items.Add("立即恢复本机屏幕", null, (_, _) => _window.RecoverPrivacyScreenFromTray());
             menu.Items.Add("停止所有远程服务…", null, (_, _) => _window.StopServicesFromTray());

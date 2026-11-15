@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="hub_background">#0F141B</color>
+    <color name="hub_background">#171E28</color>
     <color name="hub_surface">#171E28</color>
     <color name="hub_field">#212A37</color>
     <color name="hub_border">#2E3A4A</color>

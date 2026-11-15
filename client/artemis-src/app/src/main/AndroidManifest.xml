@@ -261,7 +261,7 @@
         <service
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:name="com.limelight.KeyboardAccessibilityService"
-            android:label="@string/keyboard_service_label"
+            android:label="@string/hub_shortcuts_label"
             android:enabled="true"
             android:exported="false">
             <intent-filter>

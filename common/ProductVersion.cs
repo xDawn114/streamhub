@@ -4,6 +4,7 @@ namespace StreamHub;
 
 public static class ProductVersion
 {
+    public const string EnglishName = "iControl";
     private static readonly Assembly ProductAssembly = typeof(ProductVersion).Assembly;
     public static string Name => ProductAssembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
         ?? ProductAssembly.GetName().Version?.ToString(3) ?? "未知版本";

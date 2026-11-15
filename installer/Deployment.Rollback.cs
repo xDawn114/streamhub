@@ -38,6 +38,7 @@ internal sealed partial class Deployment
         var catalog=new RollbackCatalog(Path.Combine(_dataRoot,"installer"),_root);
         var record=catalog.Read();var backup=catalog.Verify(record);
         using var maintenance=AcquireMaintenance();
+        // A restored older uninstaller only understands GUIDs for its reverse-rollback pointer.
         var transaction=Guid.NewGuid().ToString("N");
         var current=Path.Combine(_dataRoot,"installer",transaction,"backup");
         RollbackRecord? forward=null;
@@ -49,6 +50,7 @@ internal sealed partial class Deployment
                 RegisterService(); ConfigureFirewall(true); RegisterShortcuts(); RegisterUninstall(); StartRestoredService();
                 if(restored)catalog.Commit(forward!);
             });
+        catalog.Prune(Log);
         Log("已恢复上个版本，绑定和个人设置保留。");
     }
     private static void StartRestoredService()

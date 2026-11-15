@@ -34,6 +34,21 @@ public final class HubStore {
     }
     public String get(String key, String fallback) { return preferences.getString(key, fallback); }
     public void put(String key, String value) { preferences.edit().putString(key, value).apply(); }
+    /** Only call with authenticated /info metadata for the current binding. Never cache a password. */
+    public void rememberHostPolicy(org.json.JSONObject info) {
+        if (info == null || !bound() || !get("deviceId", "").equals(info.optString("deviceId"))) return;
+        org.json.JSONObject caps = info.optJSONObject("capabilities");
+        boolean managed = caps != null && caps.optBoolean("hostManagedPolicy");
+        SharedPreferences.Editor edit = preferences.edit().putString("hostPolicyOwner", get("deviceId", ""))
+                .putString("hostPolicyMode", managed ? "host" : "legacy");
+        org.json.JSONObject policy = info.optJSONObject("policy");
+        if (managed && policy != null) edit.putString("hostPolicySnapshot", policy.toString());
+        else edit.remove("hostPolicySnapshot");
+        edit.apply();
+    }
+    public String hostPolicyMode() {
+        return bound() && get("deviceId", "").equals(get("hostPolicyOwner", "")) ? get("hostPolicyMode", "unknown") : "unknown";
+    }
     public boolean bound() { return !get("invitation", "").isEmpty(); }
     public HubTransports.Settings transport() {
         synchronized (HubStore.class) {
@@ -155,11 +170,12 @@ public final class HubStore {
                 .putString("deviceName", info.optString("deviceName", info.optString("name", "我的电脑")))
                 .putString("hosts", android.text.TextUtils.join(",", addresses)).putString("lastHost", host)
                 .putString("bindingRevision", java.util.UUID.randomUUID().toString());
-            if (!sameTrust) edit.putString("lastMode", "");
+            if (!sameTrust) edit.putString("lastMode", "").remove("hostPolicyOwner").remove("hostPolicyMode").remove("hostPolicySnapshot");
             long now = System.currentTimeMillis(); String network = HubNetworkStamp.current();
             for (String address : addresses) edit.putLong("seen-" + address, now).putString("network-" + address, network);
             checkBindingCancelled(cancelled);
             if (!edit.commit()) throw new java.io.IOException("绑定保存失败，请重试。");
+            rememberHostPolicy(info);
         }
     }
     private static void checkBindingCancelled(java.util.function.BooleanSupplier cancelled) {
@@ -173,6 +189,7 @@ public final class HubStore {
             for (String name : preferences.getAll().keySet())
                 if (name.startsWith("cert-") || name.startsWith("seen-") || name.startsWith("network-")) edit.remove(name);
             edit.putString("invitation", "").putString("deviceId", "").putString("hosts", "").putString("lastHost", "")
+                .remove("hostPolicyOwner").remove("hostPolicyMode").remove("hostPolicySnapshot")
                 .putString("bindingRevision", java.util.UUID.randomUUID().toString()).apply();
         }
     }

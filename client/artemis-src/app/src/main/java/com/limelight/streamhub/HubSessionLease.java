@@ -26,7 +26,7 @@ public final class HubSessionLease {
     private volatile HubControlClient control;
     private volatile boolean userExit;
     public void userExit(){userExit=true;}
-    private boolean lockConfigured, lockSupported;
+    private boolean lockConfigured, lockSupported, hostManagedPolicy;
     private boolean readyEvidence, fastPrivacyHeartbeat, boundedPrivacyHeartbeat;
     private HubSessionLease(Context context, String host, String leaseId, String mode, String requestId, long started) {
         this.context = context.getApplicationContext(); store = new HubStore(this.context); this.host = host; this.leaseId = leaseId;
@@ -59,7 +59,9 @@ public final class HubSessionLease {
     private synchronized HubControlClient client() throws Exception {
         if (control == null) {
             HubControlClient candidate = new HubControlClient(host, store.invitation());
-            JSONObject caps = candidate.probeInfo().optJSONObject("capabilities");
+            JSONObject info = candidate.probeInfo(); store.rememberHostPolicy(info);
+            JSONObject caps = info.optJSONObject("capabilities");
+            hostManagedPolicy = caps != null && caps.optBoolean("hostManagedPolicy");
             lockSupported=caps!=null && caps.optBoolean("remoteDesktopLock");
             readyEvidence = caps != null && caps.optBoolean("liveSessionState");
             fastPrivacyHeartbeat = caps != null && caps.optBoolean("fastPrivacyHeartbeat");
@@ -80,7 +82,7 @@ public final class HubSessionLease {
         if (closed.get()) return;
         try {
             client().requestHeartbeat(body());
-            if(lockSupported && "remote".equals(mode) && !lockConfigured && timing.mediaConnected()) {
+            if(lockSupported && !hostManagedPolicy && "remote".equals(mode) && !lockConfigured && timing.mediaConnected()) {
                 boolean enabled=context.getSharedPreferences("streamhub_controls",Context.MODE_PRIVATE).getBoolean("lock_on_exit",false);
                 client().request("session/desktop",new JSONObject().put("leaseId",leaseId).put("clientId",store.clientId())
                         .put("action","configure").put("enabled",enabled));lockConfigured=true;
@@ -151,8 +153,10 @@ public final class HubSessionLease {
             for (int attempt = 0; attempt < 2; attempt++) {
                 try {
                     JSONObject end=body();
-                    if(lockSupported)end.put("exitReason",userExit?"user":"internal").put("lockOnExit",
-                            context.getSharedPreferences("streamhub_controls",Context.MODE_PRIVATE).getBoolean("lock_on_exit",false));
+                    if(lockSupported) {
+                        end.put("exitReason",userExit?"user":"internal");
+                        if (!hostManagedPolicy) end.put("lockOnExit",context.getSharedPreferences("streamhub_controls",Context.MODE_PRIVATE).getBoolean("lock_on_exit",false));
+                    }
                     cleanup.request("session/end",end);break;
                 }
                 catch (Exception e) { if (attempt == 1) android.util.Log.w("HubConnection", "Lease cleanup deferred to host expiry"); }

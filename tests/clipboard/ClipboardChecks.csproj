@@ -3,6 +3,7 @@
  <ItemGroup>
   <FrameworkReference Include="Microsoft.AspNetCore.App" />
   <Compile Include="../../host/Runtime/Contracts.cs" Link="Contracts.cs" />
+  <Compile Include="../../host/Runtime/HostPolicySnapshot.cs" Link="HostPolicySnapshot.cs" />
   <Compile Include="../../host/Runtime/ClipboardPolicy.cs" Link="ClipboardPolicy.cs" />
   <Compile Include="../../host/Runtime/ClipboardApi.cs" Link="ClipboardApi.cs" />
   <Compile Include="../../service/ClipboardBroker.cs" Link="ClipboardBroker.cs" />

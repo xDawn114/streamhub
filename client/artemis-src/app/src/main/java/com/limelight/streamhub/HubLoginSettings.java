@@ -18,6 +18,24 @@ public final class HubLoginSettings {
         int muted=streaming?HubStreamUi.MUTED:HubTheme.muted(activity);
         LinearLayout content=new LinearLayout(themed);content.setOrientation(LinearLayout.VERTICAL);
         HubLoginSecrets secrets=new HubLoginSecrets(activity);
+        String policyMode=new HubStore(activity).hostPolicyMode();
+        if(!"legacy".equals(policyMode)) {
+            TextView note=new TextView(themed);note.setTextColor(muted);note.setTextSize(14);
+            note.setText("隐私屏、退出自动锁屏和 Windows 密码已移至电脑端“设置”统一配置。连接后自动遵循电脑策略，分辨率、画质和输入设置仍保留在本机。"+
+                    ("unknown".equals(policyMode)?"\n连接时会核验电脑版本；旧版电脑仍保留原有兼容入口。":"")+
+                    "\n安卓以前保存的密码不会自动上传到电脑。");
+            content.addView(note,new LinearLayout.LayoutParams(-1,-2));
+            if(secrets.saved()) {
+                Button clear=new Button(themed);clear.setText("清除安卓以前保存的密码");styleAction(activity,clear);
+                clear.setOnClickListener(v->{secrets.forget();clear.setEnabled(false);Toast.makeText(activity,"本机旧密码已删除，电脑配置不受影响",Toast.LENGTH_LONG).show();});
+                LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.topMargin=dp(activity,12);content.addView(clear,params);
+            }
+            if(lockNow!=null){Button now=new Button(themed);now.setText("立即锁定电脑");styleAction(activity,now);now.setOnClickListener(v->lockNow.run());
+                LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.topMargin=dp(activity,8);content.addView(now,params);}
+            return content;
+        }
+        TextView legacy=new TextView(themed);legacy.setText("当前电脑为旧版本：以下选项仅用于兼容。更新电脑后，请在电脑设置中统一配置；本机密码不会自动迁移。");
+        legacy.setTextColor(muted);legacy.setTextSize(13);content.addView(legacy);
         android.content.SharedPreferences controls=activity.getSharedPreferences("streamhub_controls",Context.MODE_PRIVATE);
         Switch lock=new Switch(themed);lock.setText("退出远控后自动锁定电脑");lock.setTextColor(text);lock.setTextSize(16);
         lock.setMinHeight(dp(activity,56));lock.setChecked(controls.getBoolean("lock_on_exit",false));

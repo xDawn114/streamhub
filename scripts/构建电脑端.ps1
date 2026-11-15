@@ -145,24 +145,9 @@ Copy-Required $nativeRecordPath "$licenses\Sunshine-StreamHub-build.json"
 Copy-Required (Join-Path $nativeRoot 'sunshine-63d35f7.patch') $licenses
 Copy-Required (Join-Path $nativeRoot 'README.md') "$licenses\Sunshine-StreamHub-构建说明.md"
 
-$localSource = Join-Path $BuildRoot ('source-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
-New-Item -ItemType Directory -Force -Path $localSource | Out-Null
-foreach ($name in @('host','service','installer','scripts','common','native','docs','deployment')) {
-    $origin = Join-Path $sourceRoot $name
-    if (-not (Test-Path -LiteralPath $origin)) { continue }
-    foreach ($file in Get-ChildItem -LiteralPath $origin -File -Recurse | Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' }) {
-        $relative = Get-RelativePath $sourceRoot $file.FullName
-        $destination = Join-Path $localSource $relative
-        New-Item -ItemType Directory -Force -Path (Split-Path $destination -Parent) | Out-Null
-        Copy-Item -LiteralPath $file.FullName -Destination $destination
-    }
-}
-Copy-Required "$sourceRoot\产品集成方案.md" $localSource
-Copy-Required "$sourceRoot\README.md" $localSource
-Copy-Required "$sourceRoot\Directory.Build.props" $localSource
-New-Item -ItemType Directory -Force -Path "$localSource\client\artemis-src" | Out-Null
-Copy-Required "$sourceRoot\client\artemis-src\version.properties" "$localSource\client\artemis-src\version.properties"
-Compress-Archive -Path "$localSource\*" -DestinationPath "$licenses\我控制-电脑端源码.zip" -CompressionLevel Optimal
+$sourceExport = Join-Path $packageWork 'source-export'
+& (Join-Path $PSScriptRoot 'Export-ProductSource.ps1') -SourceRoot $sourceRoot -OutputRoot $sourceExport -Scope Windows | Out-Null
+Copy-Required (Join-Path $sourceExport 'product-source.zip') "$licenses\我控制-电脑端源码.zip"
 
 @"
 我控制 $($productVersion.Name) 电脑端验收版 · 组件来源

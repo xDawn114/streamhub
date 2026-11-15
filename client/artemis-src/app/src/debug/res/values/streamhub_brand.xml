@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_label">我控制（调试版）</string>
+    <string name="app_label_game">我控制（调试版）</string>
+    <string name="app_label_root">我控制（调试版·超级用户版）</string>
+</resources>

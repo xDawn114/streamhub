@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hub_shortcuts_label">我控制 · 系统快捷键</string>
+    <string name="hub_shortcuts_description">远控前台时，将实体键盘 Alt+Tab、Win 键及其组合发送到电脑。按住 Alt 连续选择，Shift 反向，松开确认；Win+Tab 打开任务视图。不读取界面内容，不记录按键。退出远控后交还系统处理；部分系统可能仍保留快捷键。</string>
+</resources>

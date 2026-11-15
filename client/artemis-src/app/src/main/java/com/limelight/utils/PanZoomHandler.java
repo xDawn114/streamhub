@@ -1,6 +1,7 @@
 package com.limelight.utils;
 
 import android.content.Context;
+import android.graphics.Matrix;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -9,162 +10,138 @@ import android.view.View;
 import com.limelight.Game;
 import com.limelight.preferences.PreferenceConfiguration;
 
+/** Local view transform only. This class never sends remote input. */
 public class PanZoomHandler {
-    static private final float MAX_SCALE = 10.0f;
-
     private final Game game;
     private final View streamView;
-    private final PreferenceConfiguration prefConfig;
     private final boolean isTopMode;
+    private final float maxScale;
     private final ScaleGestureDetector scaleGestureDetector;
     private final GestureDetector gestureDetector;
     private View parent;
-    private float scaleFactor = 1.0f;
-    private float childX, childY = 0;
-    private float parentWidth, parentHeight = 0;
-    private float childWidth, childHeight = 0;
+    private float scaleFactor = 1f, childX, childY;
+    private float parentWidth, parentHeight, childWidth, childHeight;
+    private Runnable changed;
 
     public PanZoomHandler(Context context, Game game, View streamView, PreferenceConfiguration prefConfig) {
         this.game = game;
         this.streamView = streamView;
-        this.prefConfig = prefConfig;
-        this.isTopMode = prefConfig.alignDisplayTopCenter;
+        isTopMode = prefConfig.alignDisplayTopCenter;
+        maxScale = game.isHubManagedSession() ? 4f : 10f;
         scaleGestureDetector = new ScaleGestureDetector(context, new ScaleListener());
+        scaleGestureDetector.setQuickScaleEnabled(false);
         gestureDetector = new GestureDetector(context, new GestureListener());
-
-        // Everything gets easier with 0,0 as the pivot point
         streamView.setPivotX(0);
         streamView.setPivotY(0);
     }
 
-    public void handleTouchEvent(MotionEvent motionEvent) {
-        scaleGestureDetector.onTouchEvent(motionEvent);
-        gestureDetector.onTouchEvent(motionEvent);
-    }
+    public void setOnViewportChangedListener(Runnable listener) { changed = listener; }
 
-    private void updateDimensions() {
-        childHeight = streamView.getHeight() * scaleFactor;
-        childWidth = streamView.getWidth() * scaleFactor;
-        parentWidth = parent.getWidth();
-        parentHeight = parent.getHeight();
-    }
+    public void handleTouchEvent(MotionEvent event) { handleTouchEvent(null, event); }
 
-    private void constrainToBounds() {
-        updateDimensions();
-
-        if (parentWidth >= childWidth) {
-            childX = (parentWidth - childWidth) / 2;
-        } else {
-            float boundaryX = parentWidth - childWidth;
-            childX = Math.max(boundaryX, Math.min(childX, 0));
-        }
-
-        if (parentHeight >= childHeight) {
-            if (isTopMode) {
-                childY = 0;
-            } else {
-                childY = (parentHeight - childHeight) / 2;
+    public void handleTouchEvent(View source, MotionEvent event) {
+        if (!dimensions()) return;
+        // Android may already have inverse-transformed an event delivered to the
+        // SurfaceView. Gesture distances/foci must use its parent's stable space.
+        MotionEvent local = MotionEvent.obtain(event);
+        try {
+            if (source != null && source != parent && source.getParent() == parent) {
+                Matrix matrix = new Matrix(source.getMatrix());
+                matrix.postTranslate(source.getLeft() - parent.getScrollX(), source.getTop() - parent.getScrollY());
+                local.transform(matrix);
             }
-        } else {
-            float boundaryY = parentHeight - childHeight;
-            childY = Math.max(boundaryY, Math.min(childY, 0));
-        }
+            scaleGestureDetector.onTouchEvent(local);
+            gestureDetector.onTouchEvent(local);
+        } finally { local.recycle(); }
+    }
 
-        streamView.setX(childX);
-        streamView.setY(childY);
+    public void cancelGesture() {
+        long now = android.os.SystemClock.uptimeMillis();
+        MotionEvent cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0, 0, 0);
+        try { scaleGestureDetector.onTouchEvent(cancel); gestureDetector.onTouchEvent(cancel); }
+        finally { cancel.recycle(); }
+    }
+
+    private boolean dimensions() {
+        if (!(streamView.getParent() instanceof View)) return false;
+        parent = (View) streamView.getParent();
+        parentWidth = parent.getWidth(); parentHeight = parent.getHeight();
+        childWidth = streamView.getWidth() * scaleFactor;
+        childHeight = streamView.getHeight() * scaleFactor;
+        return parentWidth > 0 && parentHeight > 0 && childWidth > 0 && childHeight > 0;
+    }
+
+    private void apply() {
+        if (dimensions()) {
+            childX = parentWidth >= childWidth ? (parentWidth - childWidth) / 2f
+                    : Math.max(parentWidth - childWidth, Math.min(childX, 0));
+            childY = parentHeight >= childHeight ? (isTopMode ? 0 : (parentHeight - childHeight) / 2f)
+                    : Math.max(parentHeight - childHeight, Math.min(childY, 0));
+        }
+        streamView.setScaleX(scaleFactor); streamView.setScaleY(scaleFactor);
+        streamView.setX(childX); streamView.setY(childY);
+        if (changed != null) changed.run();
     }
 
     public void handleSurfaceChange() {
-        if (childWidth == 0 || parent == null) {
-            // Retrieve parent, should handle both built-in display and external display
-            parent = (View)streamView.getParent();
-            return;
+        float oldWidth = childWidth, oldHeight = childHeight;
+        float oldParentWidth = parentWidth, oldParentHeight = parentHeight;
+        if (!dimensions()) return;
+        if (oldWidth > 0 && oldHeight > 0) {
+            childX = (childX - oldParentWidth / 2f) * childWidth / oldWidth + parentWidth / 2f;
+            childY = (childY - oldParentHeight / 2f) * childHeight / oldHeight + parentHeight / 2f;
         }
+        apply();
+    }
 
-        float prevChildWidth = childWidth;
-        float prevChildHeight = childHeight;
-        float prevParentWidth = parentWidth;
-        float prevParentHeight = parentHeight;
+    private void scaleAt(float desired, float focusX, float focusY, float previousX, float previousY) {
+        float next = Float.isNaN(desired) || Float.isInfinite(desired) ? 1f : Math.max(1f, Math.min(maxScale, desired));
+        float ratio = next / scaleFactor;
+        childX = focusX - (previousX - childX) * ratio;
+        childY = focusY - (previousY - childY) * ratio;
+        scaleFactor = next;
+        apply();
+    }
 
-        updateDimensions();
+    public void scaleBy(float factor) {
+        if (!dimensions() || factor <= 0 || Float.isNaN(factor) || Float.isInfinite(factor)) return;
+        cancelGesture();
+        scaleAt(scaleFactor * factor, parentWidth / 2f, parentHeight / 2f, parentWidth / 2f, parentHeight / 2f);
+        game.updatePipAutoEnter();
+    }
 
-        float viewScaleX = childWidth / prevChildWidth;
-        float viewScaleY = childHeight / prevChildHeight;
-
-        float dPivotX1 = childX - prevParentWidth / 2;
-        float dPivotY1 = childY - prevParentHeight / 2;
-
-        float dPivotX2 = dPivotX1 * viewScaleX;
-        float dPivotY2 = dPivotY1 * viewScaleY;
-
-        childX = dPivotX2 + parentWidth / 2;
-        childY = dPivotY2 + parentHeight / 2;
-
-        streamView.setX(childX);
-        streamView.setY(childY);
-
-        constrainToBounds();
+    public void reset() {
+        cancelGesture();
+        setInitialZoomAndPan(1f, 0, 0);
+        game.updatePipAutoEnter();
     }
 
     private class ScaleListener extends ScaleGestureDetector.SimpleOnScaleGestureListener {
-        @Override
-        public boolean onScale(ScaleGestureDetector detector) {
-            float newScaleFactor = scaleFactor * detector.getScaleFactor();
-            newScaleFactor = Math.max(1, Math.min(newScaleFactor, MAX_SCALE)); // Apply minimum scale
-
-            // Calculate pivot point
-            float focusX = detector.getFocusX();
-            float focusY = detector.getFocusY();
-
-            float dPivotX = (childX - focusX) / scaleFactor * newScaleFactor;
-            float dPivotY = (childY - focusY) / scaleFactor * newScaleFactor;
-
-            childX = focusX + dPivotX;
-            childY = focusY + dPivotY;
-
-            scaleFactor = newScaleFactor;
-
-            streamView.setScaleX(scaleFactor);
-            streamView.setScaleY(scaleFactor);
-
-            streamView.setX(childX);
-            streamView.setY(childY);
-
-            constrainToBounds();
-            return true;
+        float previousX, previousY;
+        @Override public boolean onScaleBegin(ScaleGestureDetector detector) {
+            previousX = detector.getFocusX(); previousY = detector.getFocusY(); return true;
         }
-
-        @Override
-        public void onScaleEnd(ScaleGestureDetector detector) {
-            game.updatePipAutoEnter();
+        @Override public boolean onScale(ScaleGestureDetector detector) {
+            scaleAt(scaleFactor * detector.getScaleFactor(), detector.getFocusX(), detector.getFocusY(), previousX, previousY);
+            previousX = detector.getFocusX(); previousY = detector.getFocusY(); return true;
         }
+        @Override public void onScaleEnd(ScaleGestureDetector detector) { game.updatePipAutoEnter(); }
     }
 
     private class GestureListener extends GestureDetector.SimpleOnGestureListener {
-        @Override
-        public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
-            childX = streamView.getX() - distanceX;
-            childY = streamView.getY() - distanceY;
-
-            streamView.setX(childX);
-            streamView.setY(childY);
-
-            constrainToBounds();
-            return true;
+        @Override public boolean onDown(MotionEvent event) { return true; }
+        @Override public boolean onScroll(MotionEvent first, MotionEvent event, float dx, float dy) {
+            if (scaleGestureDetector.isInProgress() || event.getPointerCount() != 1) return true;
+            childX -= dx; childY -= dy; apply(); return true;
         }
     }
 
-    public void setInitialZoomAndPan(float scale, float offsetX, float offsetY) {
-        this.scaleFactor = scale;
-        // apply to view
-        streamView.setScaleX(scaleFactor);
-        streamView.setScaleY(scaleFactor);
-        this.childX = offsetX;
-        this.childY = offsetY;
-        streamView.setX(childX);
-        streamView.setY(childY);
+    public void setInitialZoomAndPan(float scale, float x, float y) {
+        scaleFactor = Float.isNaN(scale) || Float.isInfinite(scale) ? 1f : Math.max(1f, Math.min(maxScale, scale));
+        childX = Float.isNaN(x) || Float.isInfinite(x) ? 0 : x;
+        childY = Float.isNaN(y) || Float.isInfinite(y) ? 0 : y;
+        apply();
     }
-
     public float getScaleFactor() { return scaleFactor; }
     public float getChildX() { return childX; }
     public float getChildY() { return childY; }

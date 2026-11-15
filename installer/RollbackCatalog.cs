@@ -7,7 +7,7 @@ internal sealed record BackupFile(string Path, long Size, string Sha256);
 internal sealed record RollbackRecord(string Product, string Transaction, string InstallRoot, BackupFile[] Files);
 
 /// <summary>Only a verified snapshot inside the protected installer directory can become a rollback source.</summary>
-internal sealed class RollbackCatalog(string installerRoot, string installRoot)
+internal sealed partial class RollbackCatalog(string installerRoot, string installRoot)
 {
     private const string Product = "StreamHub.PC.0b1e5f94";
     private readonly string _catalogRoot = System.IO.Path.GetFullPath(installerRoot);
@@ -55,8 +55,8 @@ internal sealed class RollbackCatalog(string installerRoot, string installRoot)
     }
     private string BackupPath(string transaction)
     {
-        if (!Guid.TryParseExact(transaction,"N",out _)) throw new IOException("回滚事务路径无效。");
-        var path=System.IO.Path.Combine(_catalogRoot,transaction,"backup"); NoLinks(_catalogRoot); NoLinks(System.IO.Path.GetDirectoryName(path)!); NoLinks(path); return path;
+        if (!IsTransactionName(transaction)) throw new IOException("回滚事务路径无效。");
+        var path=System.IO.Path.Combine(TransactionPath(transaction),"backup"); NoLinks(path); return path;
     }
     private static void EnsureOwned(string source)
     {

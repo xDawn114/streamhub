@@ -112,9 +112,6 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix ".noirdebug"
-            resValue "string", "app_label", "我控制（调试版）"
-            resValue "string", "app_label_root", "我控制（调试版·超级用户版）"
-            resValue "string", "app_label_game", "我控制（调试版）"
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro', 'networking-proguard.pro'
@@ -150,9 +147,8 @@ android {
             // is to please change the applicationId before you publish.
             //
             // TL;DR: Leave the following line alone!
-            resValue "string", "app_label", "我控制"
-            resValue "string", "app_label_root", "我控制（超级用户版）"
-            resValue "string", "app_label_game", "我控制"
+            // Localized product labels live in src/main/res, with debug-only
+            // overrides in src/debug/res, so release lint sees real defaults.
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro', 'networking-proguard.pro'

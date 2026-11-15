@@ -9,11 +9,15 @@
     <Product>我控制</Product>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../host/Assets/我控制.ico" LogicalName="StreamHub.BrandIcon.ico" />
+    <InternalsVisibleTo Include="HostPolicyChecks" />
+    <InternalsVisibleTo Include="DeviceGrantChecks" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
     <PackageReference Include="System.IO.Pipes.AccessControl" Version="5.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <Compile Include="../host/Runtime/Contracts.cs" Link="Runtime/Contracts.cs" />
+    <Compile Include="../host/Runtime/HostPolicySnapshot.cs" Link="Runtime/HostPolicySnapshot.cs" />
     <Compile Include="../host/Runtime/ClipboardPolicy.cs" Link="Runtime/ClipboardPolicy.cs" />
     <Compile Include="../host/Runtime/ClipboardApi.cs" Link="Runtime/ClipboardApi.cs" />
     <Compile Include="../host/Runtime/LiveSessionState.cs" Link="Runtime/LiveSessionState.cs" />
@@ -22,6 +26,7 @@
     <Compile Include="../host/Runtime/RemoteDisplaySelection.cs" Link="Runtime/RemoteDisplaySelection.cs" />
     <Compile Include="../host/Runtime/RuntimeClient.cs" Link="Runtime/RuntimeClient.cs" />
     <Compile Include="../host/Runtime/ControlApiServer.cs" Link="Runtime/ControlApiServer.cs" />
+    <Compile Include="../host/Runtime/ControlJsonPolicy.cs" Link="Runtime/ControlJsonPolicy.cs" />
     <Compile Include="../host/Runtime/LocalBindingRegistry.cs" Link="Runtime/LocalBindingRegistry.cs" />
     <Compile Include="../host/Runtime/MaintenanceWindow.cs" Link="Runtime/MaintenanceWindow.cs" />
     <Compile Include="../host/Runtime/LanDiscovery.cs" Link="Runtime/LanDiscovery.cs" />
@@ -34,7 +39,9 @@
     <Compile Include="../host/Runtime/TabletRequestRegistry.cs" Link="Runtime/TabletRequestRegistry.cs" />
     <Compile Include="../host/Runtime/HostDisplayMode.cs" Link="Runtime/HostDisplayMode.cs" />
     <Compile Include="../host/Runtime/ControlApiIdentity.cs" Link="Runtime/ControlApiIdentity.cs" />
+    <Compile Include="../host/Runtime/ControlDeviceRegistry.cs" Link="Runtime/ControlDeviceRegistry.cs" />
     <Compile Include="../host/Runtime/PrivacyScreenPolicy.cs" Link="Runtime/PrivacyScreenPolicy.cs" />
+    <Compile Include="../host/Runtime/PowerAwakePolicy.cs" Link="Runtime/PowerAwakePolicy.cs" />
     <Compile Include="../host/Display/DisplayController.cs" Link="Display/DisplayController.cs" />
     <Compile Include="../host/Networking/*.cs" Link="Networking/%(Filename)%(Extension)" />
   </ItemGroup>

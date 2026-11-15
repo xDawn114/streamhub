@@ -26,8 +26,11 @@ public final class HubLiveControls implements AutoCloseable {
             try {
                 HubStore store = new HubStore(activity);
                 client = new HubControlClient(activity.getIntent().getStringExtra(com.limelight.Game.EXTRA_HOST), store.invitation()); control = client;
-                JSONObject caps = client.probeInfo().optJSONObject("capabilities");
+                JSONObject info = client.probeInfo(); store.rememberHostPolicy(info);
+                JSONObject caps = info.optJSONObject("capabilities");
                 if (caps == null || !caps.optBoolean("remotePrivacy")) throw new java.io.IOException("请更新电脑端后使用隐私屏。");
+                boolean managed = caps.optBoolean("hostManagedPolicy");
+                if (managed && Boolean.TRUE.equals(enabled)) throw new java.io.IOException("请在电脑设置中配置隐私屏。");
                 JSONObject body = new JSONObject().put("mode", "remote").put("leaseId", activity.getIntent().getStringExtra("HubLeaseId")).put("clientId", store.clientId());
                 if (enabled != null) body.put("enabled", enabled);
                 JSONObject result = client.request("session/privacy", body);
@@ -35,11 +38,13 @@ public final class HubLiveControls implements AutoCloseable {
                     busy = false; if (!alive()) return;
                     if (enabled != null) Toast.makeText(activity, result.optString("message"), Toast.LENGTH_LONG).show();
                     else {
-                        boolean current = result.optBoolean("enabled");
-                        HubStreamUi.dialog(activity).setTitle("本机隐私屏 · " + (current ? "已开启" : "已关闭"))
-                            .setMessage("开启后电脑本机显示黑屏，平板继续显示并接受远控输入。\n\n紧急恢复：在电脑物理键盘按 Ctrl+Alt+F12。断开连接后自动恢复。")
-                            .setPositiveButton(current ? "关闭隐私屏" : "开启隐私屏", (dialog, which) -> privacy(!current))
-                            .setNegativeButton("取消", null).show();
+                        boolean current = result.optBoolean(managed ? "active" : "enabled");
+                        android.app.AlertDialog.Builder dialog=HubStreamUi.dialog(activity).setTitle("本机隐私屏 · " + (current ? "已开启" : "已关闭"))
+                            .setMessage(managed ? "隐私屏策略由电脑设置统一管理。本次可临时恢复本机屏幕，下次连接仍遵循电脑策略。\n\n紧急恢复：电脑物理键盘 Ctrl+Alt+F12。" :
+                                "开启后电脑本机显示黑屏，平板继续显示并接受远控输入。\n\n紧急恢复：在电脑物理键盘按 Ctrl+Alt+F12。断开连接后自动恢复。")
+                            .setNegativeButton("关闭", null);
+                        if(!managed || current)dialog.setPositiveButton(managed?"本次恢复屏幕":current?"关闭隐私屏":"开启隐私屏",(d,w)->privacy(managed?false:!current));
+                        dialog.show();
                     }
                 });
             } catch (Exception error) { activity.runOnUiThread(() -> { busy = false; if (alive()) Toast.makeText(activity,"未完成："+error.getMessage(),Toast.LENGTH_LONG).show(); }); }
@@ -52,8 +57,9 @@ public final class HubLiveControls implements AutoCloseable {
         scroll.addView(HubLoginSettings.view(activity,true,()->HubStreamUi.dialog(activity).setTitle("立即锁定电脑？")
                 .setMessage("电脑将进入 Windows 锁屏；可以从本菜单打开键盘或设置自动填写密码。")
                 .setPositiveButton("锁屏",(confirm,index)->desktop("lock",null,null)).setNegativeButton("取消",null).show()));
-        HubStreamUi.dialog(activity).setTitle("锁屏与自动输入").setView(scroll).setPositiveButton("完成",(d,w)->
-            desktop("configure",activity.getSharedPreferences("streamhub_controls",android.content.Context.MODE_PRIVATE).getBoolean("lock_on_exit",false),null)).show();
+        HubStreamUi.dialog(activity).setTitle("电脑安全策略").setView(scroll).setPositiveButton("完成",(d,w)->{
+            if("legacy".equals(new HubStore(activity).hostPolicyMode()))desktop("configure",activity.getSharedPreferences("streamhub_controls",android.content.Context.MODE_PRIVATE).getBoolean("lock_on_exit",false),null);
+        }).show();
     }
     private void desktop(String action,Boolean enabled,Runnable saved) {
         if(busy||closed||!alive())return;busy=true;
@@ -63,8 +69,10 @@ public final class HubLiveControls implements AutoCloseable {
                 HubStore store=new HubStore(activity);
                 client=new HubControlClient(activity.getIntent().getStringExtra(com.limelight.Game.EXTRA_HOST),store.invitation());
                 control=client;
-                JSONObject caps=client.probeInfo().optJSONObject("capabilities");
+                JSONObject info=client.probeInfo();store.rememberHostPolicy(info);
+                JSONObject caps=info.optJSONObject("capabilities");
                 if(caps==null||!caps.optBoolean("remoteDesktopLock"))throw new java.io.IOException("请更新电脑端后使用锁屏功能。");
+                if(caps.optBoolean("hostManagedPolicy") && "configure".equals(action))throw new java.io.IOException("退出锁屏策略由电脑设置统一管理。");
                 JSONObject body=new JSONObject().put("leaseId",activity.getIntent().getStringExtra("HubLeaseId")).put("clientId",store.clientId()).put("action",action);
                 if(enabled!=null)body.put("enabled",enabled);
                 JSONObject result=client.request("session/desktop",body);

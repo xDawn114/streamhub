@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>HostPolicyChecks</AssemblyName></PropertyGroup>
+  <ItemGroup><Compile Remove="../../common/ProductVersion.cs"/><ProjectReference Include="../../service/StreamHub.Service.csproj"/><FrameworkReference Include="Microsoft.AspNetCore.App"/></ItemGroup>
+</Project>

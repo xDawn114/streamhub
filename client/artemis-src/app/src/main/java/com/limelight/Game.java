@@ -223,6 +223,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean grabbedInput = true;
     private boolean cursorVisible = false;
     private boolean isPanZoomMode = false;
+    // Switching local/remote routing must never forward the tail of an old gesture.
+    private boolean hubViewportAwaitDown;
     private boolean synthClickPending = false;
     private boolean pointerSwiping = false;
     private boolean waitingForAllModifiersUp = false;
@@ -570,6 +572,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 streamView,
                 prefConfig
         );
+        panZoomHandler.setOnViewportChangedListener(this::updateHubViewportState);
 
         // Restore previous zoom & pan if enabled and saved
         if (prefConfig.rememberZoomPan) {
@@ -1012,6 +1015,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 @Override public void rotateScreen() { Game.this.rotateScreen(); }
                 @Override public void toggleZoom() { Game.this.toggleZoomMode(); }
                 @Override public boolean zoomEnabled() { return Game.this.isZoomModeEnabled(); }
+                @Override public float zoomScale() { return panZoomHandler == null ? 1f : panZoomHandler.getScaleFactor(); }
+                @Override public void resetZoom() { Game.this.resetHubViewport(); }
+                @Override public void scaleZoom(float factor) { Game.this.scaleHubViewport(factor); }
                 @Override public void sendClipboard() { Game.this.sendClipboard(true); }
                 @Override public void fetchClipboard() { Game.this.getClipboard(0); }
                 @Override public void disconnect() { if(hubSessionLease!=null)hubSessionLease.userExit();finish(); }
@@ -1634,6 +1640,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) hubWindowSwitchShortcut.reset();
+        if (hasFocus && hubShortcutForeground) com.limelight.streamhub.HubSystemShortcuts.activate(hubShortcutTarget);
+        else com.limelight.streamhub.HubSystemShortcuts.deactivate(hubShortcutTarget);
         if (!hasFocus && isHubManagedSession()) releaseHubTouches();
 
         // We can't guarantee the state of modifiers keys which may have
@@ -2090,6 +2099,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onDestroy() {
+        com.limelight.streamhub.HubSystemShortcuts.deactivate(hubShortcutTarget);
         super.onDestroy();
         if (hubSessionLease != null && !connectionStopRequested) {
             if (conn != null && attemptedConnection) stopConnection();
@@ -2142,6 +2152,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onPause() {
+        hubShortcutForeground = false;
+        com.limelight.streamhub.HubSystemShortcuts.deactivate(hubShortcutTarget);
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
             if (controllerHandler != null) {
@@ -2423,6 +2435,51 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         return (byte) modifierFlags;
     }
 
+    private boolean hubShortcutForeground;
+    private final com.limelight.streamhub.HubAltTabSession hubAltTabSession = new com.limelight.streamhub.HubAltTabSession((key,direction,modifiers,flags)->{
+        if(conn!=null)conn.sendKeyboardInput(key,direction,modifiers,flags);
+    });
+    private final com.limelight.streamhub.HubTaskViewShortcut hubTaskViewShortcut = new com.limelight.streamhub.HubTaskViewShortcut((key,direction,modifiers,flags)->{
+        if(conn!=null)conn.sendKeyboardInput(key,direction,modifiers,flags);
+    });
+    private final com.limelight.streamhub.HubSystemShortcuts.Target hubShortcutTarget = new com.limelight.streamhub.HubSystemShortcuts.Target() {
+        @Override public boolean isActive() {
+            return hubShortcutForeground && hasWindowFocus() && !isFinishing() && !isDestroyed() &&
+                    connected && grabbedInput && isHubManagedSession() && conn != null;
+        }
+        @Override public void switchWindow(boolean reverse) { hubAltTabSession.step(reverse); }
+        @Override public void finishSwitching() { hubAltTabSession.finish();hubTaskViewShortcut.finish(); }
+        @Override public void showTaskView() {
+            hubAltTabSession.finish();
+            hubTaskViewShortcut.open();
+            Game.this.modifierFlags = 0;
+        }
+        @Override public void windowsKey(boolean right,boolean down) { hubTaskViewShortcut.windowsKey(right,down); }
+    };
+    @Override protected void onResume() {
+        super.onResume(); hubShortcutForeground = true;
+        if (hasWindowFocus()) com.limelight.streamhub.HubSystemShortcuts.activate(hubShortcutTarget);
+    }
+    private void sendHubWindowSwitch(boolean reverse) {
+        com.limelight.streamhub.HubWindowSwitchShortcut.releaseHostModifiers((key, flags) ->
+                conn.sendKeyboardInput(key, KeyboardPacket.KEY_UP, (byte) 0, flags));
+        sendKeys(reverse
+                ? new short[] {KeyboardTranslator.VK_LMENU, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_TAB}
+                : new short[] {KeyboardTranslator.VK_LMENU, KeyboardTranslator.VK_TAB});
+    }
+
+    private final com.limelight.streamhub.HubWindowSwitchShortcut hubWindowSwitchShortcut =
+            new com.limelight.streamhub.HubWindowSwitchShortcut();
+
+    private boolean handleHubWindowShortcut(KeyEvent event) {
+        if (connected && grabbedInput && isHubManagedSession() &&
+                !(prefConfig.ignoreSynthEvents && event.getDeviceId() <= 0) &&
+                hubWindowSwitchShortcut.handle(event, reverse -> {
+                    sendHubWindowSwitch(reverse);
+                })) return true;
+        return false;
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         return handleKeyDown(event) || super.onKeyDown(keyCode, event);
@@ -2439,6 +2496,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (prefConfig.ignoreSynthEvents && deviceId <= 0) {
             return false;
         }
+
+        // StreamView consumes physical/IME keys in onKeyPreIme before the
+        // Activity dispatches them. Route shortcuts at this shared input entry.
+        if (handleHubWindowShortcut(event)) return true;
 
         // Handle a synthetic back button event that some Android OS versions
         // create as a result of a right-click. This event WILL repeat if
@@ -2530,6 +2591,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (prefConfig.ignoreSynthEvents && deviceId <= 0) {
             return false;
         }
+
+        if (handleHubWindowShortcut(event)) return true;
 
         // Handle a synthetic back button event that some Android OS versions
         // create as a result of a right-click.
@@ -3298,6 +3361,20 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     // Returns true if the event was consumed
     // NB: View is only present if called from a view callback
     public boolean handleMotionEvent(View view, MotionEvent event) {
+        boolean screenPointer = event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)
+                || event.isFromSource(InputDevice.SOURCE_STYLUS);
+        if (isHubManagedSession() && screenPointer) {
+            if (hubViewportAwaitDown) {
+                if (event.getActionMasked() != MotionEvent.ACTION_DOWN) return true;
+                hubViewportAwaitDown = false;
+            }
+            // Keep this before mouse/pen/native-touch routing and synthetic-input
+            // filters. Adjusting the view never falls through to remote input.
+            if (isPanZoomMode) {
+                if (panZoomHandler != null) panZoomHandler.handleTouchEvent(view, event);
+                return true;
+            }
+        }
         // Pass through mouse/touch/joystick input if we're not grabbing
         if (!grabbedInput) {
             return false;
@@ -3663,7 +3740,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                             if(event.getActionMasked()==MotionEvent.ACTION_UP && hubDesktopInput!=null)hubDesktopInput.touchedLoginField();
                             return true;
                         }
-                        return handleTouchInput(event,touchContextMap,true);
+                        return handleTouchInput(event,touchContextMap,view != streamView);
                     }
                     if (prefConfig.enableMultiTouchScreen && !prefConfig.touchscreenTrackpad && trySendTouchEvent(view, event)) {
                         // If this host supports touch events and absolute touch is enabled,
@@ -4753,17 +4830,41 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         return isPanZoomMode;
     }
     public void toggleZoomMode() {
-        this.isPanZoomMode = !this.isPanZoomMode;
+        setZoomMode(!isPanZoomMode);
+    }
+    private void setZoomMode(boolean enabled) {
+        if (isHubManagedSession()) {
+            releaseHubTouches();
+            hubViewportAwaitDown = true;
+            if (enabled) hideAllStreamKeyboards();
+        }
+        if (panZoomHandler != null) panZoomHandler.cancelGesture();
+        this.isPanZoomMode = enabled;
         if (this.isPanZoomMode) {
-            Toast.makeText(this, getString(R.string.pan_zoom_mode_enabled), Toast.LENGTH_SHORT).show();
+            if (!isHubManagedSession()) Toast.makeText(this, getString(R.string.pan_zoom_mode_enabled), Toast.LENGTH_SHORT).show();
         } else {
-            Toast.makeText(this, getString(R.string.pan_zoom_mode_disabled), Toast.LENGTH_SHORT).show();
+            if (!isHubManagedSession()) Toast.makeText(this, getString(R.string.pan_zoom_mode_disabled), Toast.LENGTH_SHORT).show();
         }
         updateZoomButtonAppearance();
+        updateHubViewportState();
 
         if (ExternalDisplayControlActivity.instance != null) {
             ExternalDisplayControlActivity.instance.toggleZoomMode(false);
         }
+    }
+    private void updateHubViewportState() {
+        if (streamHubInputToolbar != null && panZoomHandler != null)
+            streamHubInputToolbar.setViewportState(isPanZoomMode, panZoomHandler.getScaleFactor());
+    }
+    private void resetHubViewport() {
+        releaseHubTouches(); hubViewportAwaitDown = true;
+        if (panZoomHandler != null) panZoomHandler.reset();
+        updateHubViewportState();
+    }
+    private void scaleHubViewport(float factor) {
+        releaseHubTouches(); hubViewportAwaitDown = true;
+        if (panZoomHandler != null) panZoomHandler.scaleBy(factor);
+        updateHubViewportState();
     }
 
     public void rotateScreen() {
@@ -4955,7 +5056,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Always exit zoom mode if mouse mode has changed
         isPanZoomMode = false;
+        if (isHubManagedSession()) hubViewportAwaitDown = true;
+        if (panZoomHandler != null) panZoomHandler.cancelGesture();
         updateZoomButtonAppearance();
+        updateHubViewportState();
     }
 
     public void toggleHUD() {

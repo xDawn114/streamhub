@@ -95,7 +95,7 @@ public final class HubUpdates {
     public boolean ready() { return downloaded != null && available != null; }
     public boolean checkDue() { return HubUpdateSchedule.due(autoCheck(), preferences.getLong("nextCheck", 0), System.currentTimeMillis()); }
     public boolean lastCheckFailed() { return preferences.getInt("failures", 0) > 0; }
-    public String currentVersion() { return "当前 " + BuildConfig.VERSION_NAME + " / " + BuildConfig.VERSION_CODE + (BuildConfig.STREAMHUB_INTERNAL ? " · 内测渠道" : " · 正式渠道") +
+    public String currentVersion() { return "当前\u00A0" + BuildConfig.VERSION_NAME + " / " + BuildConfig.VERSION_CODE + (BuildConfig.STREAMHUB_INTERNAL ? " · 内测渠道" : " · 正式渠道") +
             (previousInstall.isEmpty() ? "" : "\n" + previousInstall); }
     public String lastChecked() {
         long value = preferences.getLong("lastChecked", 0);

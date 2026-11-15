@@ -40,7 +40,8 @@ internal sealed partial class Deployment
         ValidateExisting(existing);
         ValidateServiceOwnership();
         EnsureProtectedData();
-        var transaction = Guid.NewGuid().ToString("N");
+        var catalog = new RollbackCatalog(Path.Combine(_dataRoot, "installer"), _root);
+        var transaction = catalog.CreateTransaction(ProductVersion.Name + "." + ProductVersion.Code);
         var work = Path.Combine(_dataRoot, "installer", transaction);
         var stage = Path.Combine(work, "stage");
         var backup = Path.Combine(work, "backup");
@@ -53,7 +54,6 @@ internal sealed partial class Deployment
         var committed = false;
         var filesTouched = false;
         RollbackRecord? rollbackRecord = null;
-        var catalog = new RollbackCatalog(Path.Combine(_dataRoot, "installer"), _root);
         try
         {
             Log("正在更新我控制程序……");
@@ -65,7 +65,7 @@ internal sealed partial class Deployment
             CopyTree(stage, _root);
             File.WriteAllText(Path.Combine(_root, Marker), JsonSerializer.Serialize(new { productId = ProductId, version = ProductVersion.Name, versionCode = ProductVersion.Code, installedUtc = DateTimeOffset.UtcNow, root = _root }), Encoding.UTF8);
             RegisterService();
-            ConfigureFirewall(true);
+            ConfigureFirewall(true, captureUpgrade: existing);
             ConfigureStartup(_options.AutoStart);
             RegisterShortcuts();
             RegisterUninstall();
@@ -96,6 +96,7 @@ internal sealed partial class Deployment
                         CopyTree(backup, _root);
                         RegisterService();
                     }
+                    RestoreUpgradeFirewall();
                     if (serviceWasRunning && !ServiceRunning()) using (var service = new ServiceController(ServiceName)) service.Start();
                 }
                 else
@@ -116,6 +117,7 @@ internal sealed partial class Deployment
             if (Directory.Exists(stage)) Directory.Delete(stage, true);
             if (committed && !existing && Directory.Exists(work)) Directory.Delete(work, true);
         }
+        if (committed) catalog.Prune(Log);
     }
 
     public void Uninstall()
@@ -267,42 +269,36 @@ internal sealed partial class Deployment
         }
     }
 
-    private void ConfigureFirewall(bool enabled)
+    private FirewallUpgradeRollback? _upgradeFirewall;
+
+    private void ConfigureFirewall(bool enabled, bool captureUpgrade = false)
     {
-        dynamic policy = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FwPolicy2")!)!;
-        foreach (var obsolete in new[] { "StreamHub-Streaming-TCP", "StreamHub-Streaming-UDP", "我控制 · 画面与控制", "我控制 · 音视频" })
-            try { policy.Rules.Remove(obsolete); } catch (System.Runtime.InteropServices.COMException) { }
-        var definitions = new[]
+        using var firewall = new WindowsProductFirewallAdapter();
+        if (!enabled)
         {
-            (Name:"StreamHub-Remote-TCP", Title:"我控制 · 远程主屏控制", Program:Path.Combine(_root,"components","streaming","remote","sunshine.exe"), Protocol:6, Ports:"48984,48989,49010", Scope:"LocalSubnet,100.64.0.0/10"),
-            (Name:"StreamHub-Remote-UDP", Title:"我控制 · 远程主屏音视频", Program:Path.Combine(_root,"components","streaming","remote","sunshine.exe"), Protocol:17, Ports:"48998-49000,49002,49010", Scope:"LocalSubnet,100.64.0.0/10"),
-            (Name:"StreamHub-Tablet-TCP", Title:"我控制 · 平板副屏控制", Program:Path.Combine(_root,"components","streaming","tablet","sunshine.exe"), Protocol:6, Ports:"49084,49089,49110", Scope:"LocalSubnet,100.64.0.0/10"),
-            (Name:"StreamHub-Tablet-UDP", Title:"我控制 · 平板副屏音视频", Program:Path.Combine(_root,"components","streaming","tablet","sunshine.exe"), Protocol:17, Ports:"49098-49100,49102,49110", Scope:"LocalSubnet,100.64.0.0/10"),
-            (Name:"StreamHub-Control-TCP", Title:"我控制 · 可信设备连接", Program:Path.Combine(_root,"service","串流中心后台.exe"), Protocol:6, Ports:"48980", Scope:"LocalSubnet,100.64.0.0/10"),
-            (Name:"StreamHub-Product-Control-TCP", Title:"我控制 · 设备绑定与副屏请求", Program:Path.Combine(_root,"service","串流中心后台.exe"), Protocol:6, Ports:"49199", Scope:"LocalSubnet,100.64.0.0/10"),
-            (Name:"StreamHub-Discovery-UDP", Title:"我控制 · 附近电脑发现", Program:Path.Combine(_root,"service","串流中心后台.exe"), Protocol:17, Ports:"5353", Scope:"LocalSubnet"),
-            (Name:"StreamHub-Network-UDP", Title:"我控制 · 异地直连", Program:Path.Combine(_root,"components","network","tailscaled.exe"), Protocol:17, Ports:"41641", Scope:"*")
-        };
-        foreach (var item in definitions)
-        {
-            // Rule names are owned by this product; never modify an upstream rule.
-            try { policy.Rules.Remove(item.Name); } catch (System.Runtime.InteropServices.COMException) { }
-            try { policy.Rules.Remove(item.Title); } catch (System.Runtime.InteropServices.COMException) { }
-            if (!enabled) continue;
-            dynamic rule = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FWRule")!)!;
-            rule.Name = item.Title;
-            rule.Description = item.Title;
-            rule.Grouping = "我控制";
-            rule.ApplicationName = item.Program;
-            rule.Protocol = item.Protocol;
-            rule.LocalPorts = item.Ports;
-            rule.RemoteAddresses = item.Scope;
-            rule.Direction = 1;
-            rule.Action = 1;
-            rule.Profiles = 7;
-            rule.Enabled = true;
-            policy.Rules.Add(rule);
+            // Match both product names and product executable paths. Never remove independent
+            // Sunshine/Tailscale rules, even if another installation reused a rule name.
+            ProductFirewallTransaction.Apply(firewall, _root, [], []);
+            return;
         }
+        EnsureProtectedData();
+        var store = new ProtectedNetworkAccessStore(_dataRoot);
+        if (captureUpgrade) _upgradeFirewall = FirewallUpgradeRollback.Capture(_root, firewall, store);
+        var manager = new NetworkAccessManager(_root, store, firewall);
+        // The old service/daemon is stopped during install. The new service admits VPN traffic
+        // only after its own protected LocalAPI self IPs match the current interface inventory.
+        var state = manager.Refresh([], allowLegacyMigration: true);
+        if (state.ConfigurationValid) _upgradeFirewall?.PolicyApplied();
+        Log(state.Message);
+        if (!state.ConfigurationValid || !state.FirewallApplied || state.LastError is not null)
+            throw new IOException("网络访问策略没有安全完成：" + state.LastError);
+    }
+
+    private void RestoreUpgradeFirewall()
+    {
+        if (_upgradeFirewall is null) return; // Failure before firewall mutation requires no restoration.
+        using var firewall = new WindowsProductFirewallAdapter();
+        Log(_upgradeFirewall.Restore(firewall, new ProtectedNetworkAccessStore(_dataRoot)));
     }
 
     private void RegisterShortcuts()

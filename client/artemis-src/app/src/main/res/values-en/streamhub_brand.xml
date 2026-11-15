@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_label">iControl</string>
+    <string name="app_label_game">iControl</string>
+    <string name="app_label_root">iControl (root)</string>
+</resources>

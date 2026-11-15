@@ -22,8 +22,12 @@
     <Compile Include="../native/EngineIntegrity.cs" Link="Packaging/EngineIntegrity.cs" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
     <Compile Include="../host/Networking/NetworkHandover.cs" Link="Networking/NetworkHandover.cs" />
+    <Compile Include="../host/Networking/UsableIpv4.cs" Link="Networking/UsableIpv4.cs" />
+    <Compile Include="../host/Networking/NetworkAccessPolicy.cs" Link="Networking/NetworkAccessPolicy.cs" />
+    <Compile Include="../host/Networking/ProductFirewall.cs" Link="Networking/ProductFirewall.cs" />
     <Compile Include="../host/Runtime/RuntimeClient.cs" Link="Runtime/RuntimeClient.cs" />
     <Compile Include="../host/Runtime/Contracts.cs" Link="Runtime/Contracts.cs" />
+    <Compile Include="../host/Runtime/HostPolicySnapshot.cs" Link="Runtime/HostPolicySnapshot.cs" />
     <Compile Include="../host/Runtime/ClipboardPolicy.cs" Link="Runtime/ClipboardPolicy.cs" />
   </ItemGroup>
   <Target Name="ValidatePayloadMode" BeforeTargets="PrepareForBuild">
