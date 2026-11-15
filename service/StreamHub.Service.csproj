@@ -15,7 +15,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
     <PackageReference Include="System.IO.Pipes.AccessControl" Version="5.0.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="11.0.0" />
     <Compile Include="../host/Runtime/Contracts.cs" Link="Runtime/Contracts.cs" />
     <Compile Include="../host/Runtime/HostPolicySnapshot.cs" Link="Runtime/HostPolicySnapshot.cs" />
     <Compile Include="../host/Runtime/ClipboardPolicy.cs" Link="Runtime/ClipboardPolicy.cs" />
