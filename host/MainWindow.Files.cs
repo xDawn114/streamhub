@@ -11,6 +11,7 @@ public partial class MainWindow
     private TransferSnapshot? _fileSnapshot;
     private bool _applyingFileSnapshot, _filePermissionsDirty;
     private string? _filePermissionsDevice;
+    private string? _fileTargetClientId;
     private async Task RefreshFilesAsync()
     {
         var response = await _runtime.SendAsync(new("files-status"), _closing.Token);
@@ -38,12 +39,12 @@ public partial class MainWindow
         OpenReceiveDirectoryButton.IsEnabled = !string.IsNullOrEmpty(_fileSnapshot.Settings.ReceiveDirectory);
         FileOpenDirectoryButton.IsEnabled = OpenReceiveDirectoryButton.IsEnabled;
         FileOpenDirectoryButton.ToolTip = FileOpenDirectoryButton.IsEnabled ? "打开接收目录" : "请在设备权限中选择接收目录";
-        var selected = FileDeviceBox.SelectedValue as string;
+        var selected = _fileTargetClientId ?? FileDeviceBox.SelectedValue as string;
         _applyingFileSnapshot = true;
         try {
-            FileDeviceBox.ItemsSource = _fileSnapshot.Devices.Select(x => new { x.ClientId, Label = x.UsesDevicePermissions ? x.Name : x.Name + " · " + (x.Allowed ? "已允许" : "待允许") }).ToArray();
+            FileDeviceBox.ItemsSource = _fileSnapshot.Devices.Select(x => new { x.ClientId, Label = x.Name }).ToArray();
             FileDeviceBox.SelectedValue = selected;
-            if (FileDeviceBox.SelectedIndex < 0 && FileDeviceBox.Items.Count > 0) FileDeviceBox.SelectedIndex = 0;
+            if (selected is null && FileDeviceBox.SelectedIndex < 0 && FileDeviceBox.Items.Count > 0) FileDeviceBox.SelectedIndex = 0;
         } finally { _applyingFileSnapshot = false; }
         RenderFilePermissions();
         string? task = FileTaskList.SelectedValue as string;
@@ -71,7 +72,11 @@ public partial class MainWindow
     private void RefreshFiles_Click(object sender, RoutedEventArgs e) => _ = RunAction(RefreshFilesAsync);
     private void EnableFiles_Click(object sender, RoutedEventArgs e) => _ = RunAction(async () =>
     {
-        var picker = new OpenFolderDialog { Title = "选择电脑接收文件夹" };
+        var saved = _fileSnapshot?.Settings.ReceiveDirectory;
+        var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        var suggested = string.IsNullOrWhiteSpace(saved) ? Path.Combine(downloads, "我控制") : saved;
+        var picker = new OpenFolderDialog { Title = "选择电脑接收文件夹", DefaultDirectory = downloads,
+            FolderName = suggested, InitialDirectory = Directory.Exists(suggested) ? suggested : downloads };
         if (picker.ShowDialog(this) != true) return;
         if (System.Windows.MessageBox.Show(this, "将电脑接收目录设为：\n" + picker.FolderName + "\n\n此操作不新增浏览目录，也不授予删除权限。", "修改接收目录", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         await CommandAsync(new("files-configure", FilePath: picker.FolderName, TransferEnabled: true)); await RefreshFilesAsync();
@@ -141,6 +146,7 @@ public partial class MainWindow
     private void FileDevice_SelectionChanged(object sender,System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (_applyingFileSnapshot) return;
+        if (FileDeviceBox.SelectedValue is string selected) _fileTargetClientId = selected;
         _filePermissionsDirty = false;
         RenderFilePermissions();
         RenderFilesInlineState();

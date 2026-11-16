@@ -499,10 +499,10 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 await SaveDesiredAsync(cancellationToken);
                 message = pause ? "已暂停接受连接，并断开主屏和副屏；异地网络设置保留。" : "已恢复接受连接。";
             }
-            else if (command is "control-device-list" or "control-device-revoke" or "control-device-scope" or "control-device-rename" or "control-legacy-policy")
+            else if (command is "control-device-list" or "control-device-revoke" or "control-device-scope" or "control-device-rename" or "control-device-delete-history" or "control-legacy-policy")
             {
                 payload = await DeviceCommandAsync(request, cancellationToken);
-                message = "控制接口设备授权已更新。";
+                message = command == "control-device-delete-history" ? "历史设备已删除。" : "控制接口设备授权已更新。";
             }
             else if (command == "session-disconnect")
             {

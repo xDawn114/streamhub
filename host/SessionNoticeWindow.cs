@@ -28,6 +28,7 @@ internal sealed class SessionNoticeWindow : Window
     {
         _runtime = runtime ?? new();
         Title = "我控制 · 正在被远程控制";
+        FontFamily = new System.Windows.Media.FontFamily("Segoe UI Variable, Microsoft YaHei UI");
         Width = 460; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
         WindowStyle = WindowStyle.None; AllowsTransparency = true; Background = Brushes.Transparent;
         ShowInTaskbar = false; ShowActivated = false; Topmost = true;

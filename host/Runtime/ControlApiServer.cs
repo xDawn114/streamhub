@@ -111,6 +111,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             case "control-device-revoke": _devices.Revoke(request.RequestId ?? ""); break;
             case "control-device-scope": _devices.SetScope(request.RequestId ?? "", (ControlScope)(request.DeviceScope ?? 0)); break;
             case "control-device-rename": _devices.Rename(request.RequestId ?? "", request.Name ?? ""); break;
+            case "control-device-delete-history": _devices.DeleteHistory(request.RequestId ?? ""); break;
             case "control-legacy-policy": _devices.SetLegacyAllowed(request.LegacyBindingAllowed == true); break;
             case "control-device-list": break;
             default: throw new InvalidOperationException("设备授权操作无效。");

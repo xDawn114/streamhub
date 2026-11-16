@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 
 // Parse single-file bundle and CLI metadata only. Never load/run installer code.
-if (args.Length != 2 || args[1] is not ("none" or "payload")) throw new ArgumentException("file.exe none|payload");
+if (args.Length is < 2 or > 3 || args[1] is not ("none" or "payload") || args.Length == 3 && args[1] != "payload") throw new ArgumentException("file.exe none|payload [empty-export-directory]");
 byte[] bytes = File.ReadAllBytes(args[0]);
 byte[] signature = Convert.FromHexString("8B1202B96A612038727B930214D7A03213F5B9E6EFAE3318EE3B2DCE24B36AAE");
 int marker = bytes.AsSpan().IndexOf(signature);
@@ -42,29 +42,18 @@ foreach(var handle in metadata.ManifestResources)
 if(args[1]=="none") { if(payload is not null)throw new InvalidDataException("Uninstaller contains installation payload."); Console.WriteLine("PASS: bundled uninstaller has no installation payload; installer code not executed.");return; }
 if(payload is null)throw new InvalidDataException("Installation payload missing.");
 using var archive=new ZipArchive(new MemoryStream(payload,false));
+var logical=StreamHub.Packaging.PayloadArchive.Open(archive);
+logical.VerifyFiles();
 if(nativeRecord is null)throw new InvalidDataException("Installer is missing its pinned native engine record.");
 using var nativeStream=new MemoryStream(nativeRecord,false);
 var pinnedEngine=StreamHub.Packaging.EngineIntegrity.ExpectedHash(nativeStream);
 foreach(var profile in new[]{"remote","tablet"})
 {
-    var engine=archive.GetEntry($"components/streaming/{profile}/sunshine.exe")??throw new InvalidDataException("Missing isolated engine.");
+    var engine=logical.Files[$"components/streaming/{profile}/sunshine.exe"];
     using var input=engine.Open();
     StreamHub.Packaging.EngineIntegrity.Verify(input,pinnedEngine,profile);
 }
-var duplicates=archive.Entries.GroupBy(x=>x.FullName,StringComparer.OrdinalIgnoreCase).Any(g=>g.Count()>1);
-if(duplicates)throw new InvalidDataException("Duplicate payload entries.");
 var manifestEntry=archive.GetEntry("组件清单.json")??throw new InvalidDataException("Component manifest missing.");
 using var manifestStream=manifestEntry.Open();using var manifest=JsonDocument.Parse(manifestStream);
-int verified=0;
-foreach(var file in manifest.RootElement.GetProperty("files").EnumerateArray())
-{
-    string name=file.GetProperty("path").GetString()!.Replace('\\','/');
-    if(name.StartsWith('/') || name.Split('/').Contains("..") || name.Contains(':'))throw new InvalidDataException("Invalid manifest path.");
-    var entry=archive.GetEntry(name)??throw new InvalidDataException("Missing file: "+name);
-    if(entry.Length!=file.GetProperty("size").GetInt64())throw new InvalidDataException("Size differs: "+name);
-    using var input=entry.Open(); string hash=Convert.ToHexString(SHA256.HashData(input));
-    if(!hash.Equals(file.GetProperty("sha256").GetString(),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Checksum differs: "+name);
-    verified++;
-}
-if(archive.Entries.Count(x=>!x.FullName.EndsWith('/'))!=verified+1)throw new InvalidDataException("Payload includes unlisted files.");
-Console.WriteLine($"PASS: actual bundled payload contains {verified} verified files, version {manifest.RootElement.GetProperty("version").GetString()}; installer code not executed.");
+Console.WriteLine($"PASS: bundled payload reconstructs {logical.Files.Count} verified files ({logical.AliasCount} aliases), version {manifest.RootElement.GetProperty("version").GetString()}; installer code not executed.");
+if (args.Length == 3) { logical.Extract(args[2]); Console.WriteLine("PASS: verified resources exported without running installer code."); }

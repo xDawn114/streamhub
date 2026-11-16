@@ -303,6 +303,165 @@ index 5eac499..386f79e 100644
      input_t result {new input_raw_t {}};
  
      if (auto &raw = *result; config::input.controller && !should_use_virtualhid_gamepads(raw) && virtualhid::should_try_vigembus_fallback(config::input.gamepad, false, config::input.gamepad_driver)) {
+diff --git a/src/stream.cpp b/src/stream.cpp
+index 1291c9c..7321d4d 100644
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -32,6 +32,7 @@ extern "C" {
+ #include "platform/common.h"
+ #include "process.h"
+ #include "stream.h"
++#include "streamhub_first_frame.h"
+ #include "sync.h"
+ #include "system_tray.h"
+ #include "thread_safe.h"
+@@ -487,6 +488,7 @@ namespace stream {
+    * @brief Runtime state for one audio/video streaming session.
+    */
+   struct session_t {
++    streamhub::first_frame_trace first_frame;
+     config_t config;  ///< Stream or encoder configuration captured for the worker.
+ 
+     safe::mail_t mail;  ///< Mailbox used to distribute packets and lifecycle events.
+@@ -560,6 +562,17 @@ namespace stream {
+     std::atomic<session::state_e> state;  ///< Current lifecycle state observed by stream workers.
+   };
+ 
++  void first_frame_mark(void *channel_data, streamhub::first_frame_phase phase, int64_t frame_index) {
++    if (!channel_data) return;
++    auto *session = static_cast<session_t *>(channel_data);
++    if (auto sample = session->first_frame.mark(phase, frame_index)) {
++      BOOST_LOG(info) << "[StreamHubFrame] session=" << sample->session_id
++                      << " origin_us=" << sample->origin_us
++                      << " phase=" << streamhub::phase_name(sample->phase)
++                      << " elapsed_ms=" << sample->elapsed_ms << " frame=" << sample->frame_index;
++    }
++  }
++
+   /**
+    * First part of cipher must be struct of type control_encrypted_t
+    *
+@@ -1553,6 +1566,7 @@ namespace stream {
+       frame_network_latency_logger.first_point_now();
+ 
+       auto session = (session_t *) packet->channel_data;
++      if (packet->is_idr()) first_frame_mark(session, streamhub::first_frame_phase::first_idr_dequeued, packet->frame_index());
+       auto lowseq = session->video.lowseq;
+ 
+       std::string_view payload {(char *) packet->data(), packet->data_size()};
+@@ -1787,6 +1801,7 @@ namespace stream {
+               batch_info.block_offset = next_shard_to_send;
+               batch_info.block_count = current_batch_size;
+ 
++              if (packet->is_idr()) first_frame_mark(session, streamhub::first_frame_phase::first_idr_send_begin, packet->frame_index());
+               frame_send_batch_latency_logger.first_point_now();
+               // Use a batched send if it's supported on this platform
+               if (!platf::send_batch(batch_info)) {
+@@ -1833,6 +1848,7 @@ namespace stream {
+         });
+ 
+         session->video.lowseq = lowseq;
++        if (packet->is_idr()) first_frame_mark(session, streamhub::first_frame_phase::first_idr_send_complete, packet->frame_index());
+       } catch (const std::exception &e) {
+         BOOST_LOG(error) << "Broadcast video failed "sv << e.what();
+         std::this_thread::sleep_for(100ms);
+@@ -2137,11 +2153,14 @@ namespace stream {
+     while_starting_do_nothing(session->state);
+ 
+     auto ref = broadcast.ref();
++    first_frame_mark(session, streamhub::first_frame_phase::video_wait_begin);
+     auto error = recv_ping(session, ref, socket_e::video, session->video.ping_payload, session->video.peer, config::stream.ping_timeout);
+     if (error < 0) {
+       return;
+     }
+ 
++    first_frame_mark(session, streamhub::first_frame_phase::video_ping_ready);
++
+     // Enable local prioritization and QoS tagging on video traffic if requested by the client
+     auto address = session->video.peer.address();
+     session->video.qos = platf::enable_socket_qos(ref->video_sock.native_handle(), address, session->video.peer.port(), platf::qos_data_type_e::video, session->config.videoQosType != 0);
+@@ -2263,6 +2282,7 @@ namespace stream {
+      * @brief Start the audio, video, and control workers for a streaming session.
+      */
+     int start(session_t &session, const std::string &addr_string) {
++      first_frame_mark(&session, streamhub::first_frame_phase::session_start);
+       session.input = input::alloc(session.mail, session.input_session_id);
+ 
+       session.broadcast_ref = broadcast.ref();
+diff --git a/src/streamhub_first_frame.h b/src/streamhub_first_frame.h
+new file mode 100644
+index 0000000..d9453e2
+--- /dev/null
++++ b/src/streamhub_first_frame.h
+@@ -0,0 +1,68 @@
++#pragma once
++
++#include <atomic>
++#include <chrono>
++#include <cstdint>
++#include <optional>
++
++namespace streamhub {
++  enum class first_frame_phase : unsigned {
++    session_start, video_wait_begin, video_ping_ready, capture_begin,
++    encode_device_begin, encode_device_ready, encoder_begin, encoder_ready,
++    initial_idr_queued, idr_requested, first_capture_available, encode_submit,
++    first_idr_encoded, first_idr_dequeued, first_idr_send_begin, first_idr_send_complete,
++    count
++  };
++
++  inline const char *phase_name(first_frame_phase phase) {
++    constexpr const char *names[] = {
++      "session-start", "video-wait-begin", "video-ping-ready", "capture-begin",
++      "encode-device-begin", "encode-device-ready", "encoder-begin", "encoder-ready",
++      "initial-idr-queued", "idr-requested", "first-capture-available", "encode-submit",
++      "first-idr-encoded", "first-idr-dequeued", "first-idr-send-begin", "first-idr-send-complete"
++    };
++    static_assert(sizeof(names) / sizeof(names[0]) == static_cast<unsigned>(first_frame_phase::count));
++    const auto index = static_cast<unsigned>(phase);
++    return index < static_cast<unsigned>(first_frame_phase::count) ? names[index] : "invalid";
++  }
++
++  // Owned by the streaming session, never indexed by a reusable raw pointer.
++  // Each stage logs once across capture/encode/sender threads; late recovery IDRs
++  // do not overwrite startup measurements. No GOP, cache or encoder changes.
++  class first_frame_trace {
++    static_assert(static_cast<unsigned>(first_frame_phase::count) <= 32);
++  public:
++    using clock = std::chrono::steady_clock;
++    struct sample {
++      uint64_t session_id;
++      int64_t origin_us;
++      first_frame_phase phase;
++      int64_t elapsed_ms;
++      int64_t frame_index;
++    };
++    explicit first_frame_trace(clock::time_point started = clock::now()) :
++        id(next_id.fetch_add(1, std::memory_order_relaxed)), started(started) {}
++
++    std::optional<sample> mark(first_frame_phase phase, int64_t frame_index = 0, clock::time_point now = clock::now()) {
++      const auto index = static_cast<unsigned>(phase);
++      if (index >= static_cast<unsigned>(first_frame_phase::count) || now < started) return std::nullopt;
++      const uint32_t bit = uint32_t{1} << index;
++      if (seen.load(std::memory_order_relaxed) & bit) return std::nullopt;
++      if (seen.fetch_or(bit, std::memory_order_relaxed) & bit) return std::nullopt;
++      return sample{id, std::chrono::duration_cast<std::chrono::microseconds>(started.time_since_epoch()).count(),
++        phase, std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count(), frame_index};
++    }
++
++  private:
++    inline static std::atomic<uint64_t> next_id{1};
++    const uint64_t id;
++    const clock::time_point started;
++    std::atomic<uint32_t> seen{0};
++  };
++}
++
++namespace stream {
++  // A null channel is used by capability probes, which must not be logged as
++  // real stream sessions. The implementation lives beside stream::session_t.
++  void first_frame_mark(void *channel_data, streamhub::first_frame_phase phase, int64_t frame_index = 0);
++}
 diff --git a/src/streamhub_probe_cache.h b/src/streamhub_probe_cache.h
 new file mode 100644
 index 0000000..fe45555
@@ -417,17 +576,18 @@ index 0000000..4940b2b
 +  }
 +}
 diff --git a/src/video.cpp b/src/video.cpp
-index 843a19a..4337e67 100644
+index 843a19a..b8f22b5 100644
 --- a/src/video.cpp
 +++ b/src/video.cpp
-@@ -1,3 +1,6 @@
+@@ -1,3 +1,7 @@
 +#include "src/streamhub_timing.h"
++#include "src/streamhub_first_frame.h"
 +#include "src/streamhub_probe_cache.h"
 +#include "src/streamhub_probe_plan.h"
  /**
   * @file src/video.cpp
   * @brief Definitions for video.
-@@ -31,6 +34,7 @@ extern "C" {
+@@ -31,6 +35,7 @@ extern "C" {
  #include "globals.h"
  #include "input.h"
  #include "logging.h"
@@ -435,7 +595,7 @@ index 843a19a..4337e67 100644
  #include "nvenc/nvenc_encoder.h"
  #include "platform/common.h"
  #include "sync.h"
-@@ -1470,6 +1474,8 @@ namespace video {
+@@ -1470,6 +1475,8 @@ namespace video {
    static encoder_t *chosen_encoder;
    int active_hevc_mode;  ///< HEVC mode selected by the most recent encoder probe.
    int active_av1_mode;  ///< AV1 mode selected by the most recent encoder probe.
@@ -444,39 +604,145 @@ index 843a19a..4337e67 100644
    bool last_encoder_probe_supported_ref_frames_invalidation = false;  ///< Whether the last probe found reference-frame invalidation support.
    std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec = {};  ///< YUV444 support discovered for each probed codec.
  
-@@ -2410,6 +2416,7 @@ namespace video {
+@@ -1891,6 +1898,7 @@ namespace video {
+ 
+       packet->replacements = &session.replacements;
+       packet->channel_data = channel_data;
++      if (packet->is_idr()) stream::first_frame_mark(channel_data, streamhub::first_frame_phase::first_idr_encoded, packet->frame_index());
+       packets->raise(std::move(packet));
+     }
+ 
+@@ -1922,6 +1930,7 @@ namespace video {
+     packet->channel_data = channel_data;
+     packet->after_ref_frame_invalidation = encoded_frame.after_ref_frame_invalidation;
+     packet->frame_timestamp = frame_timestamp;
++    if (packet->is_idr()) stream::first_frame_mark(channel_data, streamhub::first_frame_phase::first_idr_encoded, packet->frame_index());
+     packets->raise(std::move(packet));
+ 
+     return 0;
+@@ -2408,11 +2417,15 @@ namespace video {
+     const encoder_t &encoder,
+     void *channel_data
    ) {
++    stream::first_frame_mark(channel_data, streamhub::first_frame_phase::encoder_begin);
      auto session = make_encode_session(disp.get(), encoder, config, disp->width, disp->height, std::move(encode_device));
      if (!session) {
 +      streamhub_encode_failed = true;
        return;
      }
  
-@@ -2640,6 +2647,7 @@ namespace video {
++    stream::first_frame_mark(channel_data, streamhub::first_frame_phase::encoder_ready);
++
+     // As a workaround for NVENC hangs and to generally speed up encoder reinit,
+     // we will complete the encoder teardown in a separate thread if supported.
+     // This will move expensive processing off the encoder thread to allow us
+@@ -2466,6 +2479,7 @@ namespace video {
+       }
  
+       if (requested_idr_frame) {
++        stream::first_frame_mark(channel_data, streamhub::first_frame_phase::idr_requested, frame_nr);
+         session->request_idr_frame();
+       }
+ 
+@@ -2475,6 +2489,7 @@ namespace video {
+       if (!requested_idr_frame || images->peek()) {
+         if (auto img = images->pop(max_frametime)) {
+           frame_timestamp = img->frame_timestamp;
++          if (frame_timestamp) stream::first_frame_mark(channel_data, streamhub::first_frame_phase::first_capture_available, frame_nr);
+           if (session->convert(*img)) {
+             BOOST_LOG(error) << "Could not convert image"sv;
+             return;
+@@ -2498,6 +2513,7 @@ namespace video {
+         break;
+       }
+ 
++      stream::first_frame_mark(channel_data, streamhub::first_frame_phase::encode_submit, frame_nr);
+       if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp)) {
+         BOOST_LOG(error) << "Could not encode video packet"sv;
+         return;
+@@ -2638,11 +2654,15 @@ namespace video {
+ 
+     encode_session.ctx = &ctx;
+ 
++    stream::first_frame_mark(ctx.channel_data, streamhub::first_frame_phase::encode_device_begin);
      auto encode_device = make_encode_device(*disp, encoder, ctx.config);
      if (!encode_device) {
 +      streamhub_encode_failed = true;
        return std::nullopt;
      }
  
-@@ -2659,6 +2667,7 @@ namespace video {
++    stream::first_frame_mark(ctx.channel_data, streamhub::first_frame_phase::encode_device_ready);
++
+     // absolute mouse coordinates require that the dimensions of the screen are known
+     ctx.touch_port_events->raise(make_port(disp, ctx.config));
  
+@@ -2657,11 +2677,15 @@ namespace video {
+     }
+     ctx.hdr_events->raise(std::move(hdr_info));
+ 
++    stream::first_frame_mark(ctx.channel_data, streamhub::first_frame_phase::encoder_begin);
      auto session = make_encode_session(disp, encoder, ctx.config, img.width, img.height, std::move(encode_device));
      if (!session) {
 +      streamhub_encode_failed = true;
        return std::nullopt;
      }
  
-@@ -2925,6 +2934,7 @@ namespace video {
++    stream::first_frame_mark(ctx.channel_data, streamhub::first_frame_phase::encoder_ready);
++
+     // Load the initial image to prepare for encoding
+     if (session->convert(img)) {
+       BOOST_LOG(error) << "Could not convert initial image"sv;
+@@ -2777,10 +2801,12 @@ namespace video {
+           }
  
+           if (ctx->idr_events->peek()) {
++            stream::first_frame_mark(ctx->channel_data, streamhub::first_frame_phase::idr_requested, ctx->frame_nr);
+             pos->session->request_idr_frame();
+             ctx->idr_events->pop();
+           }
+ 
++          if (frame_captured) stream::first_frame_mark(ctx->channel_data, streamhub::first_frame_phase::first_capture_available, ctx->frame_nr);
+           if (frame_captured && pos->session->convert(*img)) {
+             BOOST_LOG(error) << "Could not convert image"sv;
+             ctx->shutdown_event->raise(true);
+@@ -2793,6 +2819,7 @@ namespace video {
+             frame_timestamp = img->frame_timestamp;
+           }
+ 
++          stream::first_frame_mark(ctx->channel_data, streamhub::first_frame_phase::encode_submit, ctx->frame_nr);
+           if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp)) {
+             BOOST_LOG(error) << "Could not encode video packet"sv;
+             ctx->shutdown_event->raise(true);
+@@ -2923,11 +2950,15 @@ namespace video {
+ 
+       auto &encoder = *chosen_encoder;
+ 
++      stream::first_frame_mark(channel_data, streamhub::first_frame_phase::encode_device_begin);
        auto encode_device = make_encode_device(*display, encoder, config);
        if (!encode_device) {
 +        streamhub_encode_failed = true;
          return;
        }
  
-@@ -3068,14 +3078,26 @@ namespace video {
++      stream::first_frame_mark(channel_data, streamhub::first_frame_phase::encode_device_ready);
++
+       // absolute mouse coordinates require that the dimensions of the screen are known
+       touch_port_event->raise(make_port(display.get(), config));
+ 
+@@ -2968,10 +2999,12 @@ namespace video {
+     config_t config,
+     void *channel_data
+   ) {
++    stream::first_frame_mark(channel_data, streamhub::first_frame_phase::capture_begin);
+     config = resolve_dynamic_range(*chosen_encoder, config);
+ 
+     auto idr_events = mail->event<bool>(mail::idr);
+ 
++    stream::first_frame_mark(channel_data, streamhub::first_frame_phase::initial_idr_queued);
+     idr_events->raise(true);
+     if (chosen_encoder->flags & PARALLEL_ENCODING) {
+       capture_async(std::move(mail), config, channel_data);
+@@ -3068,14 +3101,26 @@ namespace video {
    bool validate_encoder(encoder_t &encoder, bool expect_failure) {
      const auto output_name {display_device::map_output_name(config::video.output_name)};
      std::shared_ptr<platf::display_t> disp;
@@ -505,7 +771,7 @@ index 843a19a..4337e67 100644
  
      encoder.h264.capabilities.set();
      encoder.hevc.capabilities.set();
-@@ -3086,7 +3108,7 @@ namespace video {
+@@ -3086,7 +3131,7 @@ namespace video {
      config_t config_autoselect {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
  
      // If the encoder isn't supported at all (not even H.264), bail early
@@ -514,7 +780,7 @@ index 843a19a..4337e67 100644
      if (!disp) {
        return false;
      }
-@@ -3174,12 +3196,21 @@ namespace video {
+@@ -3174,12 +3219,21 @@ namespace video {
        encoder.av1.capabilities.reset();
      }
  
@@ -540,7 +806,7 @@ index 843a19a..4337e67 100644
          if (!disp) {
            return;
          }
-@@ -3198,8 +3229,8 @@ namespace video {
+@@ -3198,8 +3252,8 @@ namespace video {
  
        auto test_yuv420_hdr = [&](auto &flag_map, auto video_format) {
          const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 0, 0};
@@ -551,7 +817,7 @@ index 843a19a..4337e67 100644
          if (!disp) {
            return;
          }
-@@ -3218,8 +3249,11 @@ namespace video {
+@@ -3218,8 +3272,11 @@ namespace video {
  
        auto test_yuv444_hdr = [&](auto &flag_map, auto video_format) {
          const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 1, 0};
@@ -565,7 +831,7 @@ index 843a19a..4337e67 100644
          if (!disp) {
            return;
          }
-@@ -3242,9 +3276,9 @@ namespace video {
+@@ -3242,9 +3299,9 @@ namespace video {
        encoder.h264[encoder_t::DYNAMIC_RANGE_YUV444] = false;
  
        test_yuv444(encoder.hevc, 1);
@@ -576,7 +842,7 @@ index 843a19a..4337e67 100644
        test_yuv420_hdr(encoder.av1, 2);
        test_yuv444_hdr(encoder.av1, 2);
      }
-@@ -3264,6 +3298,11 @@ namespace video {
+@@ -3264,6 +3321,11 @@ namespace video {
    }
  
    int probe_encoders() {
@@ -588,7 +854,7 @@ index 843a19a..4337e67 100644
      if (!allow_encoder_probing()) {
        // Error already logged
        return -1;
-@@ -3271,16 +3310,62 @@ namespace video {
+@@ -3271,16 +3333,62 @@ namespace video {
  
      auto encoder_list = encoders;
  
@@ -653,7 +919,7 @@ index 843a19a..4337e67 100644
      last_encoder_probe_supported_ref_frames_invalidation = false;
  
      auto adjust_encoder_constraints_hevc = [&](encoder_t *encoder) {
-@@ -3502,6 +3587,7 @@ namespace video {
+@@ -3502,6 +3610,7 @@ namespace video {
        BOOST_LOG(debug) << "ENCODER STATUS ACTIVE_AV1_MODE: "sv << active_av1_mode;
      }
  

@@ -8,7 +8,8 @@ namespace StreamHub.Host.Runtime;
 public sealed record ControlDevice(string Id, string ClientId, string Name, string TokenHash,
     ControlScope Scope, bool Revoked, DateTimeOffset CreatedAt,
     string? RemoteCertificate = null, string? TabletCertificate = null,
-    string? Alias = null, string DeviceType = "android", DateTimeOffset? LastSeen = null);
+    string? Alias = null, string DeviceType = "android", DateTimeOffset? LastSeen = null,
+    bool HistoryDeleted = false);
 public sealed record ControlDeviceList(bool LegacyAllowed, ControlDeviceSummary[] Devices);
 public sealed record ControlDeviceSummary(string Id, string ClientId, string Name, ControlScope Scope,
     bool Revoked, DateTimeOffset CreatedAt, string? Alias = null, string DeviceType = "android", DateTimeOffset? LastSeen = null);
@@ -43,7 +44,7 @@ public sealed class ControlDeviceRegistry
         {
             ValidateClient(d.ClientId, d.Name); ValidateScope(d.Scope);
             if (d.Alias is { } alias && (alias.Length is < 1 or > 40 || alias.Any(char.IsControl)) ||
-                d.DeviceType is not ("android" or "phone" or "tablet"))
+                d.DeviceType is not ("android" or "phone" or "tablet") || d.HistoryDeleted && !d.Revoked)
                 throw new InvalidDataException("设备备注或类型无效。");
             if (!ValidId(d.Id) || d.TokenHash is not { Length: 64 } || !d.TokenHash.All(char.IsAsciiHexDigit))
                 throw new InvalidDataException("设备授权记录格式无效。");
@@ -66,7 +67,7 @@ public sealed class ControlDeviceRegistry
     }
     public ControlDeviceList Snapshot()
     {
-        lock (_gate) return new(_state.LegacyAllowed, _state.Devices.Select(d =>
+        lock (_gate) return new(_state.LegacyAllowed, _state.Devices.Where(d => !d.HistoryDeleted).Select(d =>
             new ControlDeviceSummary(d.Id, d.ClientId, d.Name, d.Scope, d.Revoked, d.CreatedAt, d.Alias, d.DeviceType, d.LastSeen)).ToArray());
     }
     public bool? FilePermission(string clientId)
@@ -132,6 +133,22 @@ public sealed class ControlDeviceRegistry
         }
     }
     public void Revoke(string id) => Change(id, d => d with { Revoked = true });
+    public void DeleteHistory(string id)
+    {
+        lock (_gate)
+        {
+            var device = _state.Devices.FirstOrDefault(d => d.Id == id)
+                ?? throw new InvalidOperationException("历史设备不存在，请刷新。");
+            if (!device.Revoked) throw new InvalidOperationException("请先撤销设备，再删除历史记录。");
+            if (device.HistoryDeleted) return;
+            // Retain the revoked credential, client ID, and media fence. Removing
+            // them would make a legacy file/media identity appear unknown again.
+            // Presentation-only deletion must not interrupt unrelated sessions.
+            Commit(_state with { Devices = _state.Devices.Select(d => d.Id == id
+                ? d with { HistoryDeleted = true, Name = "已删除设备", Alias = null, LastSeen = null, DeviceType = "android" }
+                : d).ToArray() }, permissionsChanged: false);
+        }
+    }
     public void SetScope(string id, ControlScope scope)
     { ValidateScope(scope); Change(id, d => d with { Scope = scope }); }
     public void SetLegacyAllowed(bool allowed) { lock (_gate) Commit(_state with { LegacyAllowed = allowed }); }
@@ -251,13 +268,13 @@ public sealed class ControlDeviceRegistry
             Commit(_state with { Devices = _state.Devices.Select(d => d.Id == id ? change(d) : d).ToArray() });
         }
     }
-    private void Commit(State next)
+    private void Commit(State next, bool permissionsChanged = true)
     {
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(next, RuntimeProtocol.JsonOptions);
         if (bytes.Length > 1048576) throw new InvalidDataException("设备授权记录已达大小上限，未更改授权。");
         _save?.Invoke(bytes); // Failure preserves the prior in-memory permissions.
         _state = next;
-        Revision++;
+        if (permissionsChanged) Revision++;
     }
     public ControlPrincipal? Authenticate(string authorization, byte[] legacyToken)
     {

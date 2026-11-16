@@ -22,6 +22,9 @@ public partial class MainWindow
     private bool _loadingUpdatePreferences = true, _updateRunning;
     private int _updateNotifiedCode;
     private string _previousUpdateOutcome = "";
+    private Task? _installerWork;
+    private bool _installerInFlight, _installerHasProcess;
+    private static string InstallTraceDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StreamHub", "logs");
     private string UpdatePreferencesPath => Path.Combine(Path.GetDirectoryName(UiPreferencesPath)!, "update-preferences.json");
     private string UpdateCacheRoot => Path.Combine(Path.GetDirectoryName(UiPreferencesPath)!, "updates");
     private string UpdateReceiptPath => Path.Combine(UpdateCacheRoot, "downloaded-update.json");
@@ -53,7 +56,7 @@ public partial class MainWindow
         }
         catch { UpdateStateText.Text = "更新配置不可用"; }
         _previousUpdateOutcome = UpdateInstallAttempt.Describe(UpdateAttemptPath, ProductVersion.Code,
-            ProductVersion.IsInternal ? "internal" : "stable", DateTimeOffset.UtcNow);
+            ProductVersion.IsInternal ? "internal" : "stable", DateTimeOffset.UtcNow, InstallTraceDirectory);
         UpdateVersionText.Text = CurrentUpdateVersion;
         _updateTimer.Tick += async (_, _) => await MaybeCheckUpdateAsync();
         Loaded += async (_, _) =>
@@ -90,7 +93,7 @@ public partial class MainWindow
     }
     private async Task MaybeCheckUpdateAsync()
     {
-        if (_updates is null || _updateRunning || _closing.IsCancellationRequested || !_updatePreferences.Due(DateTimeOffset.UtcNow)) return;
+        if (_updates is null || _updateRunning || _installerInFlight || _closing.IsCancellationRequested || !_updatePreferences.Due(DateTimeOffset.UtcNow)) return;
         try { if (await UpdateIdleAsync()) await CheckForUpdateAsync(false); }
         catch (OperationCanceledException) { }
         catch { /* A background failure never opens a dialog or disrupts a session. */ }
@@ -98,7 +101,7 @@ public partial class MainWindow
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e) => await CheckForUpdateAsync(true);
     private async Task CheckForUpdateAsync(bool manual)
     {
-        if (_updates is null || _updateRunning) return;
+        if (_updates is null || _updateRunning || _installerInFlight) return;
         BeginUpdateOperation();
         var token = _updateOperation!.Token;
         _availableUpdate = null; _downloadedUpdate = null; RenderUpdateActions();
@@ -150,13 +153,13 @@ public partial class MainWindow
     }
     private void RenderUpdateActions()
     {
-        CheckUpdateButton.IsEnabled = !_updateRunning && _updates is not null;
+        CheckUpdateButton.IsEnabled = !_updateRunning && !_installerInFlight && _updates is not null;
         DownloadUpdateButton.Visibility = _availableUpdate is not null && _downloadedUpdate is null ? Visibility.Visible : Visibility.Collapsed;
-        DownloadUpdateButton.IsEnabled = !_updateRunning && _updateTrust is not null && UpdatePolicy.Configured(_updateTrust);
+        DownloadUpdateButton.IsEnabled = !_updateRunning && !_installerInFlight && _updateTrust is not null && UpdatePolicy.Configured(_updateTrust);
         InstallUpdateButton.Visibility = _downloadedUpdate is not null ? Visibility.Visible : Visibility.Collapsed;
-        InstallUpdateButton.IsEnabled = !_updateRunning;
-        CancelUpdateButton.Visibility = _updateRunning ? Visibility.Visible : Visibility.Collapsed;
-        UpdateProgress.Visibility = _updateRunning ? Visibility.Visible : Visibility.Collapsed;
+        InstallUpdateButton.IsEnabled = !_updateRunning && !_installerInFlight;
+        CancelUpdateButton.Visibility = _updateRunning && !_installerInFlight ? Visibility.Visible : Visibility.Collapsed;
+        UpdateProgress.Visibility = _updateRunning || _installerInFlight ? Visibility.Visible : Visibility.Collapsed;
     }
     private void BeginUpdateOperation()
     {
@@ -170,7 +173,7 @@ public partial class MainWindow
     private void CancelUpdate_Click(object sender, RoutedEventArgs e) => _updateOperation?.Cancel();
     private async void DownloadUpdate_Click(object sender, RoutedEventArgs e)
     {
-        if (_updateRunning || _availableUpdate is null) return;
+        if (_updateRunning || _installerInFlight || _availableUpdate is null) return;
         BeginUpdateOperation();
         try { await DownloadUpdateCoreAsync(_updateOperation!.Token); RenderAvailableUpdateState(); }
         catch (OperationCanceledException) { UpdateStateText.Text = "已取消下载，可重新下载。"; }
@@ -211,48 +214,124 @@ public partial class MainWindow
     }
     private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
     {
-        if (_updateRunning || _updates is null || _availableUpdate is null || _downloadedUpdate is null) return;
+        if (_updateRunning || _installerInFlight || _updates is null || _availableUpdate is null || _downloadedUpdate is null) return;
         if (MessageBox.Show(this, $"安装 {_availableUpdate.Version} / {_availableUpdate.VersionCode}？\n绑定和设置保留；Windows 将要求管理员确认。", "安装更新", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK) return;
         BeginUpdateOperation();
-        var launched = false;
         try
         {
             await RequireUpdateIdleAsync();
-            using var verified = await _updates.OpenVerifiedAsync(_availableUpdate, _downloadedUpdate, _updateOperation!.Token);
-            UpdateInstallAttempt.Save(UpdateAttemptPath, new(ProductVersion.Code, _availableUpdate.VersionCode,
-                ProductVersion.IsInternal ? "internal" : "stable", DateTimeOffset.UtcNow));
-            using var installer = LaunchUpdate(verified.Path, "--quiet --skip-driver --require-idle");
-            launched = true;
-            UpdateStateText.Text = "安装器已启动，绑定和设置保留；完成后重新打开我控制。";
-            await installer.WaitForExitAsync(_updateOperation.Token);
-            UpdateStateText.Text = installer.ExitCode == 0 ? "安装器已完成，请重新打开我控制确认新版本。" :
-                "安装未完成，请重新打开我控制确认当前版本；可重试，或使用“恢复上个版本”。";
+            var verified = await _updates.OpenVerifiedAsync(_availableUpdate, _downloadedUpdate, _updateOperation!.Token);
+            var attempt = new UpdateInstallAttempt(ProductVersion.Code, _availableUpdate.VersionCode,
+                ProductVersion.IsInternal ? "internal" : "stable", DateTimeOffset.UtcNow, Guid.NewGuid().ToString("N"), "elevation-pending");
+            UpdateLaunchOperation<Process> launch;
+            try
+            {
+                UpdateInstallAttempt.Save(UpdateAttemptPath, attempt);
+                _updateOperation.Token.ThrowIfCancellationRequested();
+                launch = LaunchUpdate(verified.Path, ["--quiet", "--skip-driver", "--require-idle", "--update-attempt", attempt.AttemptId!], verified);
+            }
+            catch { verified.Dispose(); throw; }
+            _installerInFlight = true; _installerHasProcess = false; RenderUpdateActions();
+            UpdateStateText.Text = "正在请求 Windows 安装授权…";
+            _installerWork = TrackInstallerAsync(launch, attempt);
+            try { await _installerWork.WaitAsync(TimeSpan.FromSeconds(45), _closing.Token); }
+            catch (TimeoutException)
+            {
+                if (!_installerHasProcess) UpdateStateText.Text = "Windows 尚未返回启动结果，请查看授权框；当前请求仍在等待。";
+                // Do not resubmit or release the verified file while ShellExecute
+                // may still return a live installer. TrackInstallerAsync owns it.
+            }
         }
         catch (Exception error)
         {
-            if (!launched) { try { File.Delete(UpdateAttemptPath); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
-            UpdateStateText.Text = launched ? "安装进程已启动；重新打开我控制后可确认版本。" :
-                error is System.ComponentModel.Win32Exception { NativeErrorCode: 1223 } ? "已取消 Windows 安装授权，可稍后重新安装。" : "未开始安装：" + error.Message;
+            if (!_closing.IsCancellationRequested) UpdateStateText.Text = "未开始安装：" + error.Message;
         }
         finally { EndUpdateOperation(); }
     }
-    private void RollbackUpdate_Click(object sender, RoutedEventArgs e)
+    private async void RollbackUpdate_Click(object sender, RoutedEventArgs e)
     {
+        if (_updateRunning || _installerInFlight) return;
         try
         {
             var pointer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StreamHub", "installer", "latest-rollback.json");
             if (!File.Exists(pointer)) throw new IOException("尚无可用的升级备份。首次安装不能恢复上版。");
             if (MessageBox.Show(this, "恢复上次升级前的程序？\n绑定和个人设置保留。请先结束串流和当前文件操作。", "恢复上个版本", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
-            using var recovery = LaunchUpdate(Path.Combine(AppContext.BaseDirectory, "卸载串流中心.exe"), "--rollback --require-idle");
-            ShowFeedback("已打开恢复向导，请完成 Windows 管理员确认。");
+            var launch = LaunchUpdate(Path.Combine(AppContext.BaseDirectory, "卸载串流中心.exe"), ["--rollback", "--require-idle"]);
+            _installerInFlight = true; _installerHasProcess = false; RenderUpdateActions();
+            _installerWork = TrackInstallerAsync(launch, null);
+            try { await _installerWork.WaitAsync(TimeSpan.FromSeconds(45), _closing.Token); }
+            catch (TimeoutException) { if (!_installerHasProcess) UpdateStateText.Text = "Windows 尚未返回恢复程序的启动结果，请查看授权框。"; }
         }
         catch (Exception error) { ShowFeedback("未启动恢复：" + error.Message, error: true); }
     }
-    private static Process LaunchUpdate(string executable, string arguments)
+    private async Task TrackInstallerAsync(UpdateLaunchOperation<Process> launch, UpdateInstallAttempt? attempt)
     {
-        var root = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-        if (root.Contains('"')) throw new IOException("安装目录无效。");
-        var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas", Arguments = arguments + " --install-dir \"" + root + "\"" };
-        return Process.Start(start) ?? throw new IOException("未能启动安装程序。");
+        void Remember(string phase, int? pid = null, int? exitCode = null)
+        {
+            if (attempt is null) return;
+            attempt = attempt with { Phase = phase, ProcessId = pid, ExitCode = exitCode };
+            try { UpdateInstallAttempt.Save(UpdateAttemptPath, attempt); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+        try
+        {
+            using var installer = await launch.Started;
+            _installerHasProcess = true;
+            Remember("process-started", installer.Id);
+            UpdateStateText.Text = "安装进程已创建，正在等待安装器进入。";
+            var waiting = Stopwatch.StartNew();
+            var exited = installer.WaitForExitAsync(_closing.Token);
+            while (!exited.IsCompleted)
+            {
+                if (attempt?.AttemptId is { } id)
+                {
+                    var trace = InstallTrace.Read(Path.Combine(InstallTraceDirectory, InstallTrace.FileName(id)), id, attempt.TargetCode, DateTimeOffset.UtcNow);
+                    if (trace is not null) UpdateStateText.Text = trace.Describe();
+                    else if (waiting.Elapsed > TimeSpan.FromSeconds(30)) UpdateStateText.Text = "进程已创建，但尚无安装器入口记录；仍在等待，请勿重复安装。";
+                }
+                if (waiting.Elapsed > TimeSpan.FromMinutes(5)) UpdateStateText.Text = "安装等待较久，进程仍在运行；请查看安装窗口或安装记录。";
+                await Task.WhenAny(exited, Task.Delay(1000, _closing.Token));
+                _closing.Token.ThrowIfCancellationRequested();
+            }
+            await exited;
+            Remember("exited", installer.Id, installer.ExitCode);
+            UpdateStateText.Text = installer.ExitCode switch
+            {
+                0 => attempt is null ? "恢复向导已退出，请重新打开我控制确认版本。" : "安装器已退出，请重新打开我控制确认新版本。",
+                16 => "另一项安装或恢复正在进行，请等待它完成。",
+                17 => "恢复程序等待上个进程退出超时，可稍后重试。",
+                _ => "安装未完成，请查看安装记录后重试。"
+            };
+        }
+        catch (System.ComponentModel.Win32Exception error) when (error.NativeErrorCode == 1223)
+        { Remember("cancelled"); if (!_closing.IsCancellationRequested) UpdateStateText.Text = "已取消 Windows 安装授权，可稍后重新安装。"; }
+        catch (OperationCanceledException) when (_closing.IsCancellationRequested) { }
+        catch (Exception error)
+        { Remember("launch-failed"); if (!_closing.IsCancellationRequested) UpdateStateText.Text = "未完成安装启动：" + error.Message; }
+        finally { _installerInFlight = false; if (!_closing.IsCancellationRequested) RenderUpdateActions(); }
+    }
+    private UpdateLaunchOperation<Process> LaunchUpdate(string executable, string[] arguments, IDisposable? packageLock = null)
+    {
+        // Capture the real window owner before scheduling the STA shell call.
+        var start = UpdateShellStartInfo.Create(executable, arguments, AppContext.BaseDirectory,
+            new System.Windows.Interop.WindowInteropHelper(this).Handle);
+        var tracePath = Path.Combine(UpdateCacheRoot, "launch-" + Guid.NewGuid().ToString("N") + ".jsonl");
+        var elapsed = Stopwatch.StartNew();
+        void Observe(string phase, Exception? error)
+        {
+            Directory.CreateDirectory(UpdateCacheRoot);
+            File.AppendAllText(tracePath, JsonSerializer.Serialize(new {
+                phase, elapsedMs = elapsed.ElapsedMilliseconds, utc = DateTimeOffset.UtcNow,
+                productCode = ProductVersion.Code, ownerPresent = start.ErrorDialogParentHandle != IntPtr.Zero,
+                errorType = error?.GetType().Name,
+                nativeErrorCode = (error as System.ComponentModel.Win32Exception)?.NativeErrorCode
+            }) + Environment.NewLine);
+        }
+        return new(() => Process.Start(start) ?? throw new IOException("Windows 未返回安装进程。"), packageLock, action =>
+        {
+            var worker = new Thread(() => action()) { IsBackground = true, Name = "iControl installer launch" };
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+        }, Observe);
     }
 }

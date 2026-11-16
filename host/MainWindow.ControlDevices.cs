@@ -14,7 +14,14 @@ public partial class MainWindow
     private async Task ReadControlDevicesAsync()
     {
         var result = await _runtime.SendAsync(new("control-device-list"), _closing.Token);
-        if (!result.Success || result.PayloadJson is null) { ControlDeviceStateText.Text = result.Message; return; }
+        if (!result.Success || result.PayloadJson is null)
+        {
+            _controlDeviceList = null;
+            RenderUnifiedDevices();
+            RenderReceiverChoices();
+            ControlDeviceStateText.Text = result.Message;
+            return;
+        }
         _controlDeviceList = JsonSerializer.Deserialize<ControlDeviceList>(result.PayloadJson, RuntimeProtocol.JsonOptions);
         if (_controlDeviceList is null) return;
         string? selected = ControlDeviceBox.SelectedValue as string;
@@ -22,7 +29,7 @@ public partial class MainWindow
         try
         {
             ControlDeviceBox.ItemsSource = _controlDeviceList.Devices.Select(d => new { d.Id,
-                Label = DeviceDisplayName(d) + " · " + (d.Revoked ? "已撤销" : "已授权") + " · " + d.Id[^6..] }).ToArray();
+                Label = DeviceDisplayName(d) + (d.Revoked ? "（已撤销）" : "") + " · ID " + d.Id[^6..] }).ToArray();
             ControlDeviceBox.SelectedValue = selected;
             if (ControlDeviceBox.SelectedIndex < 0 && ControlDeviceBox.Items.Count > 0) ControlDeviceBox.SelectedIndex = 0;
             AllowLegacyBindingCheck.IsChecked = _controlDeviceList.LegacyAllowed;

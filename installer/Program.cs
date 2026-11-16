@@ -10,6 +10,12 @@ internal static class Program
     private static int Main(string[] args)
     {
         var options = InstallOptions.Parse(args);
+        try { return Run(options, args); }
+        catch (Exception ex) { Deployment.WriteFailure(options, ex); return 1; }
+    }
+
+    private static int Run(InstallOptions options, string[] args)
+    {
         if (options.VerifyNoPayload) return System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceNames().Contains("StreamHub.Payload.zip") ? 3 : 0;
         if (options.CleanupParent > 0) return Deployment.Cleanup(options);
         ApplicationConfiguration.Initialize();
@@ -19,17 +25,23 @@ internal static class Program
             return 5;
         }
         if (options.Rollback && Deployment.LaunchRollbackWorker(options, args)) return 0;
+        var trace = new Deployment(options, _ => { });
         if(options.WaitParent>0)
         {
             try { using var parent=Process.GetProcessById(options.WaitParent); if(!parent.WaitForExit(10000))return 17; }
             catch(ArgumentException) { }
         }
-        using var transaction = new Mutex(true, @"Global\StreamHub.InstallTransaction", out var ownsTransaction);
-        if (!ownsTransaction)
+        using var transaction = InstallTransactionLock.TryAcquire(@"Global\StreamHub.InstallTransaction");
+        if (transaction is null)
         {
             if (!options.Quiet) MessageBox.Show("另一项安装或恢复正在进行，请等待它完成。", "我控制");
             return 16;
         }
+        options.OwnsTransaction = true;
+        // Flush entry timing only after acquiring the lock. ProtectData changes
+        // ACLs/owner metadata and must never race an active installation.
+        trace.Stage("entry");
+        trace.Stage("locked");
         if (options.Quiet)
         {
             try
@@ -38,6 +50,7 @@ internal static class Program
                 if (options.VerifyOnly) deployment.VerifyPackage();
                 else if (options.Rollback) deployment.Rollback();
                 else if (options.Uninstall) deployment.Uninstall(); else deployment.Install();
+                deployment.Stage("complete", 0);
                 return 0;
             }
             catch (Exception ex)
@@ -101,6 +114,7 @@ internal sealed class InstallWindow : Form
             });
             _log.AppendText(_options.Rollback ? "上个版本已恢复。请重新打开我控制。" : _options.Uninstall ? "卸载完成。配置与共享驱动已保留。" : "安装完成。请从开始菜单打开“我控制”。");
             _execute.Text = "完成";
+            new Deployment(_options, _ => { }).Stage("complete", 0);
         }
         catch (Exception ex)
         {
@@ -124,6 +138,11 @@ internal sealed class InstallOptions
     public bool RequireIdle { get; set; }
     public int WaitParent { get; set; }
     public int CleanupParent { get; set; }
+    public string AttemptId { get; private set; } = Guid.NewGuid().ToString("N");
+    public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+    public Stopwatch Elapsed { get; } = Stopwatch.StartNew();
+    internal bool DataProtected { get; set; }
+    internal bool OwnsTransaction { get; set; }
 
     public static InstallOptions Parse(string[] args)
     {
@@ -142,6 +161,10 @@ internal sealed class InstallOptions
                 case "--verify-payload": result.VerifyOnly = true; result.Quiet = true; break;
                 case "--verify-no-payload": result.VerifyNoPayload = true; result.Quiet = true; break;
                 case "--install-dir" when i + 1 < args.Length: result.InstallRoot = args[++i]; break;
+                case "--update-attempt" when i + 1 < args.Length:
+                    var id = args[++i];
+                    if (!StreamHub.Updates.InstallTrace.ValidId(id)) throw new ArgumentException("Invalid update attempt ID.");
+                    result.AttemptId = id; break;
                 case "--cleanup-parent" when i + 1 < args.Length: result.CleanupParent = int.Parse(args[++i]); break;
             }
         }

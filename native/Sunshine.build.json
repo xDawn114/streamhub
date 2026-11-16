@@ -1,11 +1,11 @@
 {
   "upstreamCommit": "63d35f702ee9e362e43263742981836ec0710384",
-  "version": "2026.914.233613+streamhub.4",
-  "binarySha256": "43988C7DD0AB077F31366FDFC81F4F1002BBBC7A50C7F1B8A6CD2A483B43ECEA",
+  "version": "2026.914.233613+streamhub.4.trace1",
+  "binarySha256": "5BE561362ACDD8A8D3B2483E37B134F85C70520EF178FFB2982FEB7A30BBB66F",
   "sourceArchive": "Sunshine-streamhub-source.tar.gz",
-  "sourceArchiveSha256": "C5474405414809F29D459E99173196E83534C76859A6D005BF0D98BFB99443FA",
-  "sourceFileCount": 1500,
-  "patchSha256": "5D0A49D3A55D6284457623D0DD1F9BAA490600A05FBDC5EC12CD1F09112302E4",
+  "sourceArchiveSha256": "255AD3AE64EF40B711008BD0442E734CBCE41298F2E0719D17544A3928E04D13",
+  "sourceFileCount": 1501,
+  "patchSha256": "242EFA602A948650748E6988F7F885C6A646000B310F86F870250314D630F89D",
   "compiler": "GCC 16.2.0 UCRT64",
   "cmake": "4.5.0",
   "configuration": "Release; assets relative; no native tray; no CUDA; static libraries",
@@ -47,6 +47,14 @@
       "sha256": "1D381D802453F3F929D5FB52ED7B0E2D8C0A10AA4C533AB22706E7279080BC37"
     },
     {
+      "path": "src/stream.cpp",
+      "sha256": "CF71CB39E8ABDFEA6283A2E61DA30839FC9A97A086A8E29EB9280D25E86EEFF8"
+    },
+    {
+      "path": "src/streamhub_first_frame.h",
+      "sha256": "3DDADE342CF8E706DC8C5BA08C80B1072C08C29DB9D3E3A971AFF0F2835BA976"
+    },
+    {
       "path": "src/streamhub_probe_cache.h",
       "sha256": "76A81150FF013454978B59A581DD9C3E08B99F4675566F114F82F58181DCB929"
     },
@@ -60,7 +68,7 @@
     },
     {
       "path": "src/video.cpp",
-      "sha256": "7B15F7879AD475837685632A5CC45BBA959B3CCBF07EF53D6D5A4DAD972B39B8"
+      "sha256": "AEA252FE2C534F2986B95AF62BD19B7F5568E7540362B7D892664434F52F6EEE"
     },
     {
       "path": "third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp",
@@ -173,5 +181,13 @@
       "url": "https://codeload.github.com/FFmpeg/nv-codec-headers/tar.gz/refs/tags/n13.0.19.1",
       "sha256": "C293161BD92DAC53F2F8FAB08ABCD4F96773C3644A57B23C2260B4BE2311AB2F"
     }
-  ]
+  ],
+  "firstFrameTrace": {
+    "baseVersion": "2026.914.233613+streamhub.4",
+    "baseBinarySha256": "43988C7DD0AB077F31366FDFC81F4F1002BBBC7A50C7F1B8A6CD2A483B43ECEA",
+    "baseSourceArchiveSha256": "C5474405414809F29D459E99173196E83534C76859A6D005BF0D98BFB99443FA",
+    "supplementalPatchSha256": "12E57C5449D592B24D5615157645CE51B09367FAA6E0EC2E39B59679210B28B8",
+    "maximumStagesPerSession": 16,
+    "performanceBehaviorChanged": false
+  }
 }

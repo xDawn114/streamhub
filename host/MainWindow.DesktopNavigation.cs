@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using StreamHub.Host.Runtime;
 using Button = System.Windows.Controls.Button;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using Point = System.Windows.Point;
 
 namespace StreamHub.Host;
 
@@ -58,7 +59,26 @@ public partial class MainWindow
     {
         if (button.ContextMenu is not { } menu) return;
         FocusInput.SetKeyboardMode(menu, FocusInput.GetKeyboardMode(button));
-        menu.PlacementTarget = button; menu.IsOpen = true;
+        menu.PlacementTarget = button;
+        if (Window.GetWindow(button) is { } owner)
+        {
+            menu.MaxWidth = Math.Max(1, owner.ActualWidth - 16);
+            menu.MaxHeight = Math.Max(1, owner.ActualHeight - 16);
+            menu.Placement = PlacementMode.Custom;
+            menu.CustomPopupPlacementCallback = (size, target, offset) =>
+            {
+                var origin = owner.TranslatePoint(new Point(), button);
+                double left = origin.X + 8, top = origin.Y + 8;
+                double right = origin.X + owner.ActualWidth - size.Width - 8;
+                double bottom = origin.Y + owner.ActualHeight - size.Height - 8;
+                double x = Math.Clamp(target.Width - size.Width, left, Math.Max(left, right));
+                double y = target.Height + 4;
+                if (y > bottom) y = -size.Height - 4;
+                y = Math.Clamp(y, top, Math.Max(top, bottom));
+                return [new CustomPopupPlacement(new Point(x, y), PopupPrimaryAxis.None)];
+            };
+        }
+        menu.IsOpen = true;
     }
     private void OpenLegacyPairing_Click(object sender, RoutedEventArgs args)
     {

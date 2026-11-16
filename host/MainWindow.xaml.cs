@@ -47,8 +47,7 @@ public partial class MainWindow : Window
         _uiPreferencesPath = uiPreferencesPath ?? DefaultUiPreferencesPath;
         InitializeComponent();
         InitializeDesktopFeedback();
-        Title = $"我控制 · iControl {ProductVersion.Name}" + (ProductVersion.IsInternal ? " · 内测版" : "");
-        BrandVersion.Text = ProductVersion.Name + (ProductVersion.IsInternal ? " · 内测版" : "");
+        Title = "我控制";
         InitializeUpdates();
         ComputerNameText.Text = Environment.MachineName;
         AutoStartCheck.IsChecked = GetAutoStart();
@@ -307,7 +306,14 @@ public partial class MainWindow : Window
     private async Task RefreshReceiversAsync()
     {
         var response = await _runtime.SendAsync(new("receiver-list"), _closing.Token);
-        if (!response.Success || response.PayloadJson is null) { ReceiverEmptyText.Text = response.Message; return; }
+        if (!response.Success || response.PayloadJson is null)
+        {
+            _receiverSnapshot = null;
+            RenderReceiverChoices();
+            RenderUnifiedDevices();
+            ReceiverEmptyText.Text = response.Message;
+            return;
+        }
         RenderReceivers(JsonSerializer.Deserialize<ReceiverSnapshot>(response.PayloadJson, RuntimeProtocol.JsonOptions));
     }
 
@@ -326,9 +332,10 @@ public partial class MainWindow : Window
         CancelTabletRequestButton.IsEnabled = active;
         CancelTabletRequestButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         CancelTabletRequestButton.Content = _tabletRequest?.State == "connected" ? "断开连接" : "取消请求";
-        TabletRequestStateText.Text = _tabletRequest is null ? "尚未发起连接" : _tabletRequest.Message;
+        TabletRequestStateText.Text = _tabletRequest?.Message ?? "";
+        TabletRequestStateText.Visibility = string.IsNullOrWhiteSpace(TabletRequestStateText.Text) ? Visibility.Collapsed : Visibility.Visible;
         RefreshServiceControls();
-        TabletRequestStateText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, _tabletRequest?.State is "failed" or "rejected" or "expired" ? "DangerText" : "AccentText");
+        TabletRequestStateText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, _tabletRequest?.State is "failed" or "rejected" or "expired" ? "DangerText" : "Muted");
     }
 
     private async void SendTabletRequest_Click(object sender, RoutedEventArgs e) => await SendTabletRequestAsync();

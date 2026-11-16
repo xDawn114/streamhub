@@ -205,7 +205,8 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$stage\组件清单.json" -Encoding utf8
 $archive = Join-Path $packageWork '串流中心-payload.zip'
-Compress-Archive -Path "$stage\*" -DestinationPath $archive -CompressionLevel Optimal
+& dotnet run --project "$PSScriptRoot\PayloadPacker\PayloadPacker.csproj" -c Release -- $stage $archive
+if ($LASTEXITCODE -ne 0) { throw '安装载荷去重打包失败。' }
 $installerObj = Join-Path $packageWork 'obj-installer\'
 $installerBin = Join-Path $packageWork 'bin-installer\'
 Publish-Project "$sourceRoot\installer\StreamHub.Installer.csproj" $installerOutput @('-t:Rebuild','-p:PayloadMode=Installer',"-p:PayloadArchive=$archive","-p:BaseIntermediateOutputPath=$installerObj","-p:MSBuildProjectExtensionsPath=$installerObj","-p:BaseOutputPath=$installerBin")

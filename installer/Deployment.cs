@@ -49,6 +49,7 @@ internal sealed partial class Deployment
         Log("正在验证和展开安装资源……");
         Extract(payload, stage);
         VerifyManifest(stage);
+        Stage("payload-ready");
         using var maintenance = _options.RequireIdle ? AcquireMaintenance() : null;
         var serviceWasRunning = ServiceRunning();
         var committed = false;
@@ -57,10 +58,12 @@ internal sealed partial class Deployment
         try
         {
             Log("正在更新我控制程序……");
+            Stage("stopping");
             StopOwnedProcesses();
             Directory.CreateDirectory(_root);
-            if (existing) { CopyTree(_root, backup); rollbackRecord = catalog.Capture(transaction); }
+            if (existing) { Stage("backup"); CopyTree(_root, backup); rollbackRecord = catalog.Capture(transaction); }
             filesTouched = true;
+            Stage("replacing");
             if (existing) DeleteOwnedTree(_root);
             CopyTree(stage, _root);
             File.WriteAllText(Path.Combine(_root, Marker), JsonSerializer.Serialize(new { productId = ProductId, version = ProductVersion.Name, versionCode = ProductVersion.Code, installedUtc = DateTimeOffset.UtcNow, root = _root }), Encoding.UTF8);
@@ -71,6 +74,7 @@ internal sealed partial class Deployment
             RegisterUninstall();
             if (_options.InstallDriver) EnsureDriver();
             Log("正在启动我控制后台……");
+            Stage("starting");
             using (var service = new ServiceController(ServiceName))
             {
                 if (service.Status != ServiceControllerStatus.Running) service.Start();
@@ -378,15 +382,7 @@ internal sealed partial class Deployment
     private static void Extract(Stream stream, string destination)
     {
         using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
-        var prefix = Path.GetFullPath(destination) + Path.DirectorySeparatorChar;
-        foreach (var entry in zip.Entries)
-        {
-            var target = Path.GetFullPath(Path.Combine(destination, entry.FullName));
-            if (!target.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new IOException("安装资源含有无效路径。");
-            if (entry.FullName.EndsWith('/')) { Directory.CreateDirectory(target); continue; }
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            entry.ExtractToFile(target, true);
-        }
+        StreamHub.Packaging.PayloadArchive.Open(zip).Extract(destination);
     }
 
     private static void VerifyManifest(string stage)
@@ -414,6 +410,7 @@ internal sealed partial class Deployment
             var file = Path.GetFullPath(Path.Combine(stage, relative));
             if (!file.StartsWith(Path.GetFullPath(stage) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new IOException("清单包含无效路径。");
             using var content = File.OpenRead(file);
+            if (content.Length != item.GetProperty("size").GetInt64()) throw new IOException("安装资源大小不符：" + relative);
             var actual = Convert.ToHexString(SHA256.HashData(content));
             if (!actual.Equals(item.GetProperty("sha256").GetString(), StringComparison.OrdinalIgnoreCase)) throw new IOException("安装资源校验失败：" + relative);
         }
@@ -475,9 +472,10 @@ internal sealed partial class Deployment
 
     private void EnsureProtectedData()
     {
-        if (_dataProtected) return;
+        if (_dataProtected || _options.DataProtected) return;
         InstallationSecurity.ProtectData(_dataRoot, _ownerSid);
         _dataProtected = true;
+        _options.DataProtected = true;
     }
 
     private void RestoreLegacyNetwork()
@@ -492,7 +490,8 @@ internal sealed partial class Deployment
 
     internal static void WriteFailure(InstallOptions options, Exception exception)
     {
-        try { new Deployment(options, _ => { }).Log(exception.ToString()); } catch { }
+        if (!options.OwnsTransaction) return;
+        try { var deployment = new Deployment(options, _ => { }); deployment.Stage("failed", 1); deployment.Log(exception.ToString()); } catch { }
     }
 
     internal static int Cleanup(InstallOptions options)

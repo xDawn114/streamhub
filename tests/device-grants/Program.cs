@@ -37,6 +37,43 @@ Check(failing.Authenticate(Bearer(a.Token), legacy) is not null, "save failure p
 try { _ = new ControlDeviceRegistry(Encoding.UTF8.GetBytes("{\"version\":1,\"legacyAllowed\":true,\"devices\":[null]}")); throw new Exception("null record accepted"); }
 catch (InvalidDataException) { checks.Add("malformed persisted record fails closed"); }
 
+// Deleting revoked history removes personal presentation data, never its deny fence.
+byte[]? historySaved = null;
+var history = new ControlDeviceRegistry(save: bytes => historySaved = bytes.ToArray());
+var historyGrant = history.Issue("history-fixture", "History Model");
+history.Rename(historyGrant.Principal.Id, "Private Alias");
+history.Seen(historyGrant.Principal, "tablet");
+try { history.DeleteHistory(historyGrant.Principal.Id); throw new Exception("active history deleted"); }
+catch (InvalidOperationException error) when (error.Message.Contains("先撤销")) { checks.Add("history deletion rejects active grants"); }
+using (var historyKey = RSA.Create(2048))
+using (var historyCertificate = new CertificateRequest("CN=HistoryFixture", historyKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+    .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1)))
+{
+    string historyCert = Convert.ToBase64String(historyCertificate.RawData);
+    history.BindMedia(historyGrant.Principal.Id, "remote", historyCert);
+    history.Revoke(historyGrant.Principal.Id);
+    long beforeDeleteRevision = history.Revision;
+    var historyFailing = new ControlDeviceRegistry(historySaved, _ => throw new IOException("history-save-failure"));
+    try { historyFailing.DeleteHistory(historyGrant.Principal.Id); } catch (IOException) { }
+    Check(historyFailing.Snapshot().Devices.Length == 1, "history deletion save failure retains visible record");
+    history.DeleteHistory(historyGrant.Principal.Id);
+    history.DeleteHistory(historyGrant.Principal.Id);
+    Check(history.Snapshot().Devices.Length == 0 && history.Revision == beforeDeleteRevision,
+        "history deletion is idempotent and does not trigger grant reconciliation");
+    Check(!Encoding.UTF8.GetString(historySaved!).Contains("Private Alias") && !Encoding.UTF8.GetString(historySaved!).Contains("History Model"),
+        "deleted history no longer retains display name or alias");
+    var historyReloaded = new ControlDeviceRegistry(historySaved);
+    Check(historyReloaded.Snapshot().Devices.Length == 0 && historyReloaded.Authenticate(Bearer(historyGrant.Token), legacy) is null &&
+        historyReloaded.FilePermission(historyGrant.Principal.ClientId!) == false && historyReloaded.BlockedMedia("remote").Contains(historyCert),
+        "restart retains revoked token, file deny and media fence after deleting history");
+    Denied(() => historyReloaded.Resolve(historyGrant.Principal.Id), "deleted history cannot resolve an old principal");
+    var renewedHistory = historyReloaded.Issue(historyGrant.Principal.ClientId!, "New Model");
+    Check(historyReloaded.Snapshot().Devices.Length == 1 && historyReloaded.Resolve(renewedHistory.Principal.Id) is not null &&
+        historyReloaded.Authenticate(Bearer(historyGrant.Token), legacy) is null, "confirmed new enrollment remains possible without reviving deleted credentials");
+    historyReloaded.BindMedia(renewedHistory.Principal.Id, "remote", historyCert);
+    Check(historyReloaded.BlockedMedia("remote").Length == 0, "new confirmed grant can authorize the same media identity");
+}
+
 // Device presentation metadata must never rotate credentials or widen grants.
 byte[]? metadataSaved = null; int metadataWrites = 0;
 var metadata = new ControlDeviceRegistry(save: bytes => { metadataSaved = bytes.ToArray(); metadataWrites++; });
@@ -147,6 +184,9 @@ devices.Revoke(a.Principal.Id);
 Check((await Send(a.Token,"/v1/info")).Status == 401,"revoked token rejected by production handler");
 Denied(() => devices.EnsureCurrent(a.Principal,a.Principal.ClientId,ControlScope.Remote),"in-flight principal is revalidated");
 Check(devices.BlockedMedia("remote").SequenceEqual(new[]{cert}),"revoked media certificate queued for removal");
+var deletedSnapshot=JsonSerializer.Deserialize<ControlDeviceList>(api.DeviceCommand(new("control-device-delete-history",RequestId:a.Principal.Id)),RuntimeProtocol.JsonOptions)!;
+Check(deletedSnapshot.Devices.All(d=>d.Id!=a.Principal.Id)&&devices.BlockedMedia("remote").Contains(cert),"owner device command deletes history while keeping media revocation");
+Check((await Send(a.Token,"/v1/info")).Status==401,"production handler still rejects deleted credential");
 var newGrant = devices.Issue(a.Principal.ClientId!,"平板夹具");
 Check(devices.Authenticate(Bearer(a.Token),legacy) is null && devices.Authenticate(Bearer(newGrant.Token),legacy) is not null,"confirmed re-enrollment rotates token");
 
