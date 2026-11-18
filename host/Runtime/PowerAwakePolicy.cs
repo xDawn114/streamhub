@@ -20,7 +20,7 @@ public static class PowerAwakePolicy
         : active ? "正在防止电脑自动睡眠，屏幕仍可自动熄灭。"
         : mode switch
         {
-            Streaming => "连接远控或扩展屏后保持唤醒，断开后跟随系统。",
+            Streaming => "连接远控或副屏后保持唤醒，断开后跟随系统。",
             PluggedIn => "插电时保持远程在线；使用电池时仅在串流期间防休眠。",
             _ => "电脑按 Windows 电源设置自动睡眠。"
         };

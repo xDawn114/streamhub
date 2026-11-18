@@ -260,16 +260,18 @@ public final class HubSessionDiagnostics {
             JSONArray rows = new JSONArray();
             addMetric(rows, "请求帧率", number(value.requestedFps) + " FPS");
             addMetric(rows, "主机编码准备", number(value.hostPreparedFps) + " FPS");
-            addMetric(rows, "实际接收", number(value.receivedFps) + " FPS（中位数）");
-            addMetric(rows, "实际渲染", number(value.renderedFps) + " FPS（中位数）");
-            addMetric(rows, "渲染均值", number(value.renderedMean) + " FPS");
-            addMetric(rows, "实际面板", number(value.panelHz) + " Hz · mode " + value.panelModeId);
-            addMetric(rows, "请求面板", number(value.requestedPanelHz) + " Hz" + requestedModeLabel(value.requestedPanelModeId)
-                    + " · 状态：" + panelState(value));
-            addMetric(rows, "解码耗时", number(value.decodeMs) + " ms（中位数）");
-            addMetric(rows, "网络 RTT", integer(value.rttMs) + " ms（中位数）");
-            addMetric(rows, "渲染范围", number(value.renderedMin) + "–" + number(value.renderedMax) + " FPS");
-            addMetric(rows, "采样", value.count + " 个 · 丢帧 " + value.lostTotal + "（单点最多 " + value.lostMax + "）");
+            String statistic = value.count > 1 ? "（中位数）" : "";
+            addMetric(rows, "实际接收", number(value.receivedFps) + " FPS" + statistic);
+            addMetric(rows, "实际渲染", number(value.renderedFps) + " FPS" + statistic);
+            addMetric(rows, "屏幕刷新率", number(value.panelHz) + " Hz");
+            addMetric(rows, "请求刷新率", number(value.requestedPanelHz) + " Hz");
+            addMetric(rows, "解码耗时", number(value.decodeMs) + " ms" + statistic);
+            addMetric(rows, "网络往返", integer(value.rttMs) + " ms" + statistic);
+            if (value.count > 1) {
+                addMetric(rows, "渲染均值", number(value.renderedMean) + " FPS");
+                addMetric(rows, "渲染范围", number(value.renderedMin) + "–" + number(value.renderedMax) + " FPS");
+            }
+            addMetric(rows, "采样", value.count + " 个 · 丢帧 " + value.lostTotal);
             return result.put("available", true).put("rows", rows);
         } catch (Exception ignored) { return result; }
     }
@@ -280,7 +282,7 @@ public final class HubSessionDiagnostics {
             JSONObject phases = value.optJSONObject("phases");
             JSONArray samples = value.optJSONArray("samples");
             PerformanceSummary performance = PerformanceSummary.from(samples);
-            String mode = "tablet".equals(value.optString("mode")) ? "扩展屏" : "远程控制";
+            String mode = "tablet".equals(value.optString("mode")) ? "副屏" : "远程控制";
             String route = routeLabel(value.optString("route"));
             StringBuilder out = new StringBuilder();
             if (!detailed) {
@@ -507,9 +509,9 @@ public final class HubSessionDiagnostics {
     }
 
     private static String routeLabel(String route) {
-        if ("usb".equals(route)) return "USB 有线";
+        if ("usb".equals(route)) return "局域网/USB";
         if ("remote".equals(route)) return "异地网络";
-        if ("lan".equals(route)) return "局域网 / Wi-Fi";
+        if ("lan".equals(route)) return "局域网/USB";
         return "历史记录 · 通道未知";
     }
 }

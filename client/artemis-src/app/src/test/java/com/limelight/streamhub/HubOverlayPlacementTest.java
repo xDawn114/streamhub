@@ -4,6 +4,21 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class HubOverlayPlacementTest {
+    @Test public void threeExpansionModesPreferSideOrActualLetterboxAndClampFloating(){
+        var safe=new HubOverlayPlacement.Box(8,24,1264,752);
+        var button=new HubOverlayPlacement.Box(16,80,48,48);
+        var side=HubOverlayPlacement.sidePanel(button,440,620,safe,8);
+        assertEquals(72,side.x);contained(side,safe);
+        var portrait=new HubOverlayPlacement.Box(8,24,784,1152);
+        var video=new HubOverlayPlacement.Box(0,280,800,500);
+        var lower=HubOverlayPlacement.blackBars(440,620,portrait,video,280);
+        assertEquals(556,lower.y);assertEquals(620,lower.height);assertEquals(784,lower.width);contained(lower,portrait);
+        var upper=HubOverlayPlacement.blackBars(440,620,portrait,new HubOverlayPlacement.Box(0,650,800,500),280);
+        assertEquals(24,upper.y);assertTrue(upper.y+upper.height<=650);contained(upper,portrait);
+        var floating=HubOverlayPlacement.anchor(1400,1200,440,620,portrait);contained(floating,portrait);
+        var noBars=HubOverlayPlacement.blackBars(440,620,safe,safe,280);contained(noBars,safe);
+        assertEquals(safe.y+safe.height,noBars.y+noBars.height);
+    }
     private void contained(HubOverlayPlacement.Box child,HubOverlayPlacement.Box safe) {
         assertTrue(child.x>=safe.x && child.y>=safe.y);
         assertTrue(child.x+child.width<=safe.x+safe.width);

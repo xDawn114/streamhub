@@ -22,11 +22,11 @@
       <ToggleButton x:Name="HeaderToggle" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" FocusVisualStyle="{x:Null}" HorizontalContentAlignment="Stretch" Content="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}" FontWeight="{TemplateBinding FontWeight}">
        <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
         <Border x:Name="HeaderFrame" Padding="2,8" BorderBrush="Transparent" BorderThickness="1" CornerRadius="4">
-         <DockPanel><TextBlock x:Name="Arrow" DockPanel.Dock="Left" Text="›" FontSize="18" Margin="0,0,8,0" Foreground="{TemplateBinding Foreground}"/><ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{TemplateBinding Foreground}"/></DockPanel>
+         <DockPanel><Path x:Name="Arrow" DockPanel.Dock="Left" Data="M1,1 L6,6 L1,11" Width="8" Height="12" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Margin="0,0,10,0" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"><Path.RenderTransform><RotateTransform Angle="0"/></Path.RenderTransform></Path><ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{TemplateBinding Foreground}"/></DockPanel>
         </Border>
         <ControlTemplate.Triggers>
          <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocused" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions><Setter TargetName="HeaderFrame" Property="BorderBrush" Value="{DynamicResource Accent}"/></MultiTrigger>
-         <Trigger Property="IsChecked" Value="True"><Setter TargetName="Arrow" Property="Text" Value="⌄"/></Trigger>
+         <Trigger Property="IsChecked" Value="True"><Setter TargetName="Arrow" Property="RenderTransform"><Setter.Value><RotateTransform Angle="90"/></Setter.Value></Setter></Trigger>
         </ControlTemplate.Triggers>
        </ControlTemplate></ToggleButton.Template>
       </ToggleButton>
@@ -81,7 +81,7 @@
          <Setter TargetName="Frame" Property="BorderThickness" Value="2" />
         </MultiTrigger>
         <Trigger Property="IsEnabled" Value="False">
-         <Setter TargetName="Frame" Property="Opacity" Value="0.42" />
+         <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Background" Value="{DynamicResource InsetSurface}"/>
         </Trigger>
        </ControlTemplate.Triggers>
       </ControlTemplate>
@@ -93,6 +93,7 @@
     <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
    </Style>
+   <Style x:Key="DangerAction" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Foreground" Value="{DynamicResource DangerText}"/><Setter Property="BorderBrush" Value="{DynamicResource DangerText}"/></Style>
    <Style TargetType="TextBox"><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     <Setter Property="Padding" Value="10,8" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderDefault}" />
@@ -259,7 +260,7 @@
      </Setter.Value>
     </Setter>
    </Style>
-   <Style x:Key="SettingsCategoryItem" TargetType="TabItem"><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+   <Style x:Key="SettingsCategoryItem" TargetType="TabItem"><Setter Property="FocusVisualStyle" Value="{x:Null}"/><Setter Property="Focusable" Value="True"/><Setter Property="IsTabStop" Value="True"/><Setter Property="AutomationProperties.Name" Value="{Binding Header, RelativeSource={RelativeSource Self}}"/><Setter Property="AutomationProperties.AutomationId" Value="{Binding Header, RelativeSource={RelativeSource Self}}"/>
     <Setter Property="MinHeight" Value="42" />
     <Setter Property="Margin" Value="0,0,24,0" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
@@ -293,7 +294,7 @@
          <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <WrapPanel IsItemsHost="True" KeyboardNavigation.TabIndex="0" Margin="0" />
-        <ContentPresenter Grid.Row="1" ContentSource="SelectedContent" Margin="0,8,0,0" Focusable="False" />
+        <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1" ContentSource="SelectedContent" Margin="0,8,0,0" Focusable="False" />
        </Grid>
       </ControlTemplate>
      </Setter.Value>
@@ -313,11 +314,12 @@
         <StackPanel Orientation="Horizontal" Margin="0,0,12,0"><Ellipse Width="6" Height="6" Margin="0,0,6,0" VerticalAlignment="Center"><Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource Muted}"/><Style.Triggers><DataTrigger Binding="{Binding Online}" Value="True"><Setter Property="Fill" Value="{DynamicResource SuccessText}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style></Ellipse><TextBlock Text="{Binding OnlineText}" Style="{StaticResource Caption}"/></StackPanel>
         <TextBlock Text="{Binding LastContact}" Style="{StaticResource Caption}" TextWrapping="NoWrap"/>
        </WrapPanel>
+       <TextBlock Text="{Binding RequestMessage}" Visibility="{Binding RequestVisibility}" TextWrapping="Wrap" Margin="0,6,0,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Caption}"><Style.Triggers><DataTrigger Binding="{Binding RequestFailed}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerText}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
       </StackPanel>
       <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-       <Button Content="连接副屏" Style="{StaticResource HeaderAction}" Tag="{Binding Id}" Click="ConnectListedReceiver_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanConnect}" ToolTip="{Binding ConnectReason}" ToolTipService.ShowOnDisabled="True" Margin="0,0,4,0"/>
-       <Button Content="发送文件" Style="{StaticResource HeaderAction}" Tag="{Binding Id}" Click="OpenListedFiles_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanOpenFiles}" ToolTip="{Binding FileReason}" ToolTipService.ShowOnDisabled="True" Margin="0,0,4,0"/>
-       <Button Content="⋯" Style="{StaticResource HeaderAction}" Tag="{Binding Id}" Click="OpenDeviceMenu_Click" AutomationProperties.Name="设备操作" ToolTip="设备操作">
+       <Button Content="{Binding ConnectLabel}" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="ConnectListedReceiver_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanConnect}" ToolTip="{Binding ConnectReason}" ToolTipService.ShowOnDisabled="True" Margin="0,0,4,0"/>
+       <Button Content="发送文件" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="OpenListedFiles_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanOpenFiles}" ToolTip="{Binding FileReason}" ToolTipService.ShowOnDisabled="True" Margin="0,0,4,0"/>
+       <Button Content="重新绑定" Style="{StaticResource HeaderAction}" Click="OpenDevices_Click" Visibility="{Binding BindingVisibility}" ToolTip="使用短码建立独立设备绑定"/><Button Content="⋯" Style="{StaticResource HeaderAction}" Tag="{Binding Id}" Click="OpenDeviceMenu_Click" AutomationProperties.Name="设备操作" ToolTip="设备操作" Visibility="{Binding ManagementVisibility}">
         <Button.ContextMenu><ContextMenu Style="{StaticResource DesktopMenu}" DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
          <MenuItem Header="设备详情" Style="{StaticResource DesktopMenuItem}" Tag="{Binding Id}" Click="OpenBoundDeviceDetails_Click"/>
          <MenuItem Header="备注名称" Style="{StaticResource DesktopMenuItem}" Tag="{Binding Id}" Click="OpenDeviceAlias_Click" Visibility="{Binding ActionVisibility}"/>
@@ -362,10 +364,7 @@
     </Button>
    </StackPanel>
    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,12,0" shell:WindowChrome.IsHitTestVisibleInChrome="True" IsEnabled="{Binding IsEnabled, ElementName=Pages}">
-    <Button x:Name="AcceptanceButton" Style="{StaticResource HeaderAction}" Click="OpenAcceptance_Click" ToolTip="接受连接状态与暂停" AutomationProperties.Name="接受连接状态"><StackPanel Orientation="Horizontal"><Ellipse x:Name="AcceptanceDot" Width="7" Height="7" Fill="{DynamicResource Muted}" Margin="0,0,6,0"/><TextBlock x:Name="AcceptanceLabel" Text="读取中" VerticalAlignment="Center" FontSize="12"/></StackPanel></Button>
-    <Button x:Name="TabletPopoverButton" Style="{StaticResource HeaderIconAction}" Click="OpenTabletPopover_Click" ToolTip="连接副屏" AutomationProperties.Name="连接副屏">
-     <Grid Width="20" Height="20"><Path Style="{StaticResource HeaderIconPath}" Data="M7,4 V3 Q7,1 9,1 H17 Q19,1 19,3 V11 Q19,13 17,13 H16 M3,6 H11 Q13,6 13,8 V16 Q13,18 11,18 H3 Q1,18 1,16 V8 Q1,6 3,6 Z"/></Grid>
-    </Button>
+    <Button x:Name="AcceptanceButton" Style="{StaticResource HeaderAction}" Background="{DynamicResource InsetSurface}" Click="OpenAcceptance_Click" ToolTip="接受连接状态与暂停" AutomationProperties.Name="接受连接状态"><StackPanel Orientation="Horizontal"><Ellipse x:Name="AcceptanceDot" Width="7" Height="7" Fill="{DynamicResource Muted}" Margin="0,0,6,0"/><TextBlock x:Name="AcceptanceLabel" Text="读取中" VerticalAlignment="Center" FontSize="12"/><Path Data="M0,0 L4,4 L8,0" Stroke="{DynamicResource Muted}" StrokeThickness="1.5" Width="8" Height="5" Margin="8,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
     <Button x:Name="AccountButton" Style="{StaticResource HeaderIconAction}" Click="OpenAccountPopover_Click" ToolTip="网络连接" AutomationProperties.Name="网络连接">
      <Grid Width="20" Height="20"><Path Style="{StaticResource HeaderIconPath}" Data="M19,10 A9,9 0 1 1 1,10 A9,9 0 1 1 19,10 M1,10 H19 M10,1 C5,5 5,15 10,19 M10,1 C15,5 15,15 10,19"/></Grid>
     </Button>
@@ -373,17 +372,15 @@
      <Grid Width="20" Height="20"><Path Style="{StaticResource HeaderIconPath}" Data="M3,5 H17 M3,10 H17 M3,15 H17"/></Grid>
      <Button.ContextMenu>
       <ContextMenu Style="{StaticResource DesktopMenu}">
-       <MenuItem Header="诊断与维护" Click="OpenDiagnostics_Click" Style="{StaticResource DesktopMenuItem}" />
        <MenuItem Header="使用手册" Click="OpenHelp_Click" Style="{StaticResource DesktopMenuItem}" />
        <Separator Style="{StaticResource DesktopMenuSeparator}" />
        <MenuItem Header="最近提示" Click="OpenFeedbackHistory_Click" Style="{StaticResource DesktopMenuItem}" />
-       <MenuItem Header="开源许可" Click="OpenLicenses_Click" Style="{StaticResource DesktopMenuItem}" />
       </ContextMenu>
      </Button.ContextMenu>
     </Button>
    </StackPanel>
   </Grid>
-  <TabControl x:Name="Pages" Grid.Row="1" Background="Transparent" BorderThickness="0" TabStripPlacement="Left" Margin="24,20,24,16" SelectionChanged="Pages_SelectionChanged" Grid.Column="1">
+  <local:PageContentHost x:Name="Pages" AutomationProperties.Name="页面内容" Grid.Row="1" Background="Transparent" BorderThickness="0" TabStripPlacement="Left" Margin="24,20,24,16" SelectionChanged="Pages_SelectionChanged" Grid.Column="1">
    <TabControl.Template>
     <ControlTemplate TargetType="TabControl">
      <Border x:Name="PageViewport" Background="{DynamicResource Surface}">
@@ -405,7 +402,7 @@
       </Grid>
       <Button x:Name="ReadinessReasonButton" Content="查看原因" Click="OpenReadinessReason_Click" Style="{StaticResource HeaderAction}" Visibility="Collapsed"/>
       <TextBlock x:Name="HomePrivacyText" Text="" Margin="0,0,0,18" Foreground="{DynamicResource WarningText}" Visibility="Collapsed"/>
-      <Grid Margin="0,0,0,10"><TextBlock Text="已绑定设备" Style="{StaticResource Heading}" VerticalAlignment="Center"/><Button Content="+ 绑定设备" HorizontalAlignment="Right" Style="{StaticResource HeaderAction}" Click="OpenDevices_Click" AutomationProperties.Name="绑定设备"/></Grid>
+      <Grid Margin="0,0,0,10"><TextBlock Text="我的设备" Style="{StaticResource Heading}" VerticalAlignment="Center"/><StackPanel HorizontalAlignment="Right" Orientation="Horizontal"><Button x:Name="RefreshDeviceCardsButton" Content="刷新" Click="RefreshDeviceCards_Click" AutomationProperties.Name="刷新设备" Margin="0,0,8,0"/><Button Content="+ 绑定设备" Style="{StaticResource Primary}" Click="OpenDevices_Click" AutomationProperties.Name="绑定设备"/></StackPanel></Grid>
       <TextBlock x:Name="BoundDevicesEmptyText" Text="还没有绑定设备，点右侧“+ 绑定设备”添加" Style="{StaticResource Caption}" Margin="0,8,0,16"/>
       <ItemsControl x:Name="BoundDevicesList" ItemTemplate="{StaticResource UnifiedDeviceTemplate}"/>
       <Expander x:Name="DeviceHistoryExpander" Header="历史设备" Margin="0,12,0,0" Visibility="Collapsed"><ItemsControl x:Name="HistoricalDevicesList" ItemTemplate="{StaticResource UnifiedDeviceTemplate}"/></Expander>
@@ -417,19 +414,17 @@
    <TabItem Header="账号" Tag="" x:Name="AccountPage">
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
      <StackPanel>
-      <TextBlock Text="账号与连接" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,24" />
+      <TextBlock Text="账号与连接" Style="{StaticResource PageTitle}" />
       <Border Style="{StaticResource Card}">
        <StackPanel>
-        <TextBlock Text="配置的连接通道" Style="{StaticResource Heading}" />
-        <TextBlock x:Name="ProviderSavedText" Text="正在读取通道设置…" Style="{StaticResource Caption}" Margin="0,0,0,16" />
-        <local:SettingRow Header="连接通道" ToolTip="电脑与接收端使用同一服务区" Tag="">
-         <ComboBox x:Name="ProviderBox" SelectionChanged="ProviderSelectionChanged" AutomationProperties.Name="连接通道" Width="224">
-          <ComboBoxItem Content="Tailscale 官方" Tag="tailscale" />
+        <TextBlock x:Name="ConnectionMethodHeading" Text="连接方式" Style="{StaticResource Heading}" />
+        <TextBlock x:Name="ProviderSavedText" Text="正在读取连接设置…" Style="{StaticResource Caption}" Margin="0,0,0,8" />
+        <ComboBox x:Name="ProviderBox" SelectionChanged="ProviderSelectionChanged" AutomationProperties.Name="连接方式" Width="280" HorizontalAlignment="Left" Margin="0,8,0,12" ToolTip="电脑与平板需选择相同方式">
+          <ComboBoxItem Content="Tailscale" Tag="tailscale" />
           <ComboBoxItem Content="自建服务区" Tag="self-hosted" />
-          <ComboBoxItem Content="局域网 / USB" Tag="lan" />
+          <ComboBoxItem Content="局域网/USB" Tag="lan" />
           <ComboBoxItem Content="手动地址" Tag="manual" />
-         </ComboBox>
-        </local:SettingRow>
+        </ComboBox>
         <StackPanel x:Name="ProviderServerPanel" Visibility="Collapsed">
          <TextBlock Text="服务区 HTTPS 地址" Margin="0,0,0,8" />
          <TextBox x:Name="ProviderServerBox" MaxLength="2048" TextChanged="ProviderInputChanged" AutomationProperties.Name="服务区 HTTPS 地址" Width="440" HorizontalAlignment="Left" />
@@ -440,14 +435,14 @@
          <TextBox x:Name="ProviderManualBox" MaxLength="512" TextChanged="ProviderInputChanged" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="70" AutomationProperties.Name="本机手动发布地址" Width="440" HorizontalAlignment="Left" />
          <TextBlock Text="最多 8 个，逗号或换行分隔。将发布给已绑定接收端；接收端也需填写对应地址。此通道不自动启用 VPN。" Style="{StaticResource Caption}" Margin="0,8,0,16" />
         </StackPanel>
-        <TextBlock x:Name="ProviderMessage" Style="{StaticResource Caption}" Text="保存会暂停异地连接。更换服务区前须先退出当前连接账号，电脑绑定保留。" />
-        <Button x:Name="ApplyProviderButton" IsEnabled="False" Content="保存并应用通道" Style="{StaticResource Primary}" Click="SaveProvider_Click" Margin="0,16,0,0" />
+        <TextBlock x:Name="ProviderMessage" Style="{StaticResource Caption}" Text="选择后自动应用；地址输入需保存。更换服务区前请先退出连接账号。" />
+        <Button x:Name="ApplyProviderButton" IsEnabled="False" Content="保存地址" Click="SaveProvider_Click" Margin="0,16,0,0" />
        </StackPanel>
       </Border>
       <Border Style="{StaticResource Card}">
        <StackPanel>
-        <TextBlock Text="远程连接账号" Style="{StaticResource Heading}" />
-        <TextBlock x:Name="NetworkStateText" Text="正在检查内置网络" FontSize="18" FontWeight="SemiBold" Margin="0,4,0,12" />
+        <TextBlock x:Name="ConnectionStatusHeading" Text="连接状态" Style="{StaticResource Heading}" />
+        <TextBlock x:Name="NetworkStateText" Text="正在检查连接状态" FontSize="14" FontWeight="Normal" Margin="0,4,0,8" />
         <TextBlock x:Name="NetworkDetailText" Style="{StaticResource Caption}" />
         <Expander Header="更多连接操作" Margin="0,16,0,0"><WrapPanel x:Name="RemoteNetworkActions">
          <Button Content="启用内置连接" Style="{StaticResource Primary}" Click="NetworkStart_Click" Margin="0,0,8,8" />
@@ -457,12 +452,12 @@
         </WrapPanel></Expander>
         <TextBox x:Name="LoginUrlBox" IsReadOnly="True" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="账号授权地址" />
         <Button x:Name="CopyLoginButton" Content="复制授权链接" Click="CopyLogin_Click" Visibility="Collapsed" Margin="0,8,0,0" />
-        <TextBlock Style="{StaticResource Caption}" FontSize="12" Text="通过浏览器完成授权。" Margin="0,16,0,0" />
+        <TextBlock x:Name="LoginBrowserHint" Style="{StaticResource Caption}" FontSize="12" Text="通过浏览器完成授权。" Visibility="Collapsed" Margin="0,16,0,0" />
        </StackPanel>
       </Border>
       <Border Style="{StaticResource Card}">
        <StackPanel>
-        <TextBlock Text="账号内的设备" Style="{StaticResource Heading}" />
+        <TextBlock x:Name="AccountDevicesHeading" Text="账号内设备" Style="{StaticResource Heading}" />
         <ItemsControl x:Name="PeerList">
          <ItemsControl.ItemTemplate>
           <DataTemplate>
@@ -499,8 +494,8 @@
       <Border BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1" Padding="0,0,0,14">
        <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="260"/><ColumnDefinition Width="*" MinWidth="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <Grid VerticalAlignment="Center">
-         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Grid VerticalAlignment="Center" HorizontalAlignment="Left">
+         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
          <StackPanel VerticalAlignment="Center" Margin="0,0,4,0" MaxWidth="190">
          <TextBlock Text="接收目录" Style="{StaticResource Caption}"/>
          <TextBlock x:Name="FileDirectoryText" Text="未选择" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
@@ -511,7 +506,7 @@
         <ComboBox x:Name="FileDeviceBox" Width="280" SelectedValuePath="ClientId" SelectionChanged="FileDevice_SelectionChanged" AutomationProperties.Name="文件传输设备">
          <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}"/></DataTemplate></ComboBox.ItemTemplate>
         </ComboBox>
-        <Button Content="设备权限" Style="{StaticResource HeaderAction}" Click="OpenFileAccessSettings_Click" Margin="6,0"/>
+        <Button Content="设备权限" Click="OpenFileAccessSettings_Click" Margin="6,0"/>
         <Button x:Name="SendFileButton" Content="发送文件" Style="{StaticResource Primary}" Click="SendFile_Click" Padding="12,8" ToolTipService.ShowOnDisabled="True"/>
         </StackPanel>
        </Grid>
@@ -562,7 +557,7 @@
       <RowDefinition Height="*" />
      </Grid.RowDefinitions>
      <TextBlock Text="设置" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,20" />
-     <TabControl x:Name="SettingsCategories" Grid.Row="1" Style="{StaticResource SettingsCategoryControl}" AutomationProperties.Name="电脑设置分类">
+     <TabControl x:Name="SettingsCategories" Grid.Row="1" KeyboardNavigation.TabNavigation="Continue" KeyboardNavigation.DirectionalNavigation="Contained" Style="{StaticResource SettingsCategoryControl}" AutomationProperties.Name="电脑设置分类">
       <TabItem Header="常规" Style="{StaticResource SettingsCategoryItem}">
        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>
@@ -573,21 +568,20 @@
            <ComboBoxItem Content="深色" />
           </ComboBox>
          </local:SettingRow>
-         <local:SettingRow Header="减少页面动画" ToolTip="系统关闭动画时也会停用过渡" Tag="">
+         <local:SettingRow Header="减少页面动画" ToolTip="系统关闭动画时也会停用过渡" Tag="&#xE7C4;">
           <CheckBox x:Name="ReduceMotionCheck" Click="Appearance_Changed" MinHeight="40" AutomationProperties.Name="减少页面动画" />
          </local:SettingRow>
          <local:SettingRow Header="防止电脑自动睡眠" ToolTip="允许屏幕熄灭；合盖和手动睡眠遵循 Windows 设置" Tag="">
           <ComboBox x:Name="PreventSleepChoice" SelectedIndex="1" SelectionChanged="PreventSleep_Changed" AutomationProperties.Name="防止电脑自动睡眠" Width="224">
            <ComboBoxItem Content="跟随 Windows 电源设置" />
-           <ComboBoxItem Content="仅远控或扩展屏连接期间" />
+           <ComboBoxItem Content="仅远控或副屏连接期间" />
            <ComboBoxItem Content="插电时持续保持远程在线" />
           </ComboBox>
          </local:SettingRow>
          <local:SettingRow Header="登录后显示托盘入口" ToolTip="后台服务随系统启动，关闭窗口后仍可连接" Tag="">
           <CheckBox x:Name="AutoStartCheck" FontSize="14" Click="AutoStart_Click" AutomationProperties.Name="登录后显示托盘入口" />
          </local:SettingRow>
-         <TextBlock x:Name="PowerStateText" Visibility="Collapsed" Style="{StaticResource Caption}" Margin="0,12,0,0" AutomationProperties.LiveSetting="Polite" />
-         <Button Content="停止所有远程服务" Margin="0,20,0,0" Click="StopAll_Click" />
+         <Button Style="{StaticResource DangerAction}" Content="停止所有远程服务" Margin="0,20,0,0" Click="StopAll_Click" />
         </StackPanel>
        </ScrollViewer>
       </TabItem>
@@ -600,8 +594,7 @@
            <local:SettingRow Header="远控隐私保护" ToolTip="主屏连接时遮住本机画面；Ctrl+Alt+F12 可恢复" Tag="">
             <CheckBox x:Name="PrivacyModeCheck" Click="PrivacyMode_Click" AutomationProperties.Name="远控隐私保护" />
            </local:SettingRow>
-           <TextBlock x:Name="PrivacyModeStateText" Visibility="Collapsed" Style="{StaticResource Caption}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
-           <Button x:Name="PrivacyRecoverButton" Content="立即恢复屏幕" Click="PrivacyRecoverButton_Click" Margin="0,8,0,0" Padding="12,8" AutomationProperties.Name="立即恢复本机屏幕" />
+           <Button x:Name="PrivacyRecoverButton" Content="立即恢复屏幕" Click="PrivacyRecoverButton_Click" Margin="0,8,0,0" Padding="12,8" AutomationProperties.Name="立即恢复本机屏幕" ToolTipService.ShowOnDisabled="True" />
 
            <Border Height="1" Background="{DynamicResource Divider}" Margin="0,20,0,16" />
            <Expander x:Name="LoginSettingsSection" Header="锁屏与登录">
@@ -618,11 +611,16 @@
         <StackPanel>
          <Border Style="{StaticResource Card}">
           <StackPanel>
-           <TextBlock Text="快捷键" Style="{StaticResource Heading}" />
-           <TextBlock Text="本机操作" FontWeight="SemiBold" Margin="0,0,0,8" />
-           <TextBlock Text="Ctrl + Alt + F12    立即恢复隐私屏" Margin="0,0,0,16" />
-           <TextBlock Text="发送到电脑" FontWeight="SemiBold" Margin="0,0,0,8" />
-           <TextBlock Text="Alt + Tab    切换上一个窗口&#10;Win + Tab    查看 Windows 任务视图&#10;Win + D    显示桌面&#10;Ctrl + C / V / X    复制、粘贴、剪切&#10;Ctrl + Z    撤销&#10;Esc    取消当前操作" LineHeight="30" />
+           <TextBlock Text="快捷键" Style="{StaticResource Heading}" ToolTip="平板的系统快捷键需在平板授权。" />
+           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + Alt + F12" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="0" Grid.Column="1" Text="立即恢复隐私屏（本机）" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="1" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Alt + Tab" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="1" Grid.Column="1" Text="切换上一个窗口" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="2" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Win + Tab" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="2" Grid.Column="1" Text="查看 Windows 任务视图" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="3" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Win + D" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="3" Grid.Column="1" Text="显示桌面" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="4" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + C / V / X" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="4" Grid.Column="1" Text="复制、粘贴、剪切" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="5" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + Z" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="5" Grid.Column="1" Text="撤销" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="6" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Esc" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="6" Grid.Column="1" Text="取消当前操作" VerticalAlignment="Center" Margin="0,0,0,10"/>
+           </Grid>
           </StackPanel>
          </Border>
         </StackPanel>
@@ -635,23 +633,51 @@
           <StackPanel>
            <TextBlock Text="网络访问" Style="{StaticResource Heading}" />
            <local:SettingRow Header="允许公共网络局域网连接" ToolTip="仅在确认网络可信时开启，设备仍需绑定" Tag="">
-            <CheckBox x:Name="PublicLanAccessCheck" Click="NetworkAccess_Changed" MinHeight="40" AutomationProperties.Name="允许公共网络局域网连接" />
+            <CheckBox x:Name="PublicLanAccessCheck" IsEnabled="False" Click="NetworkAccess_Changed" MinHeight="40" AutomationProperties.Name="允许公共网络局域网连接" />
            </local:SettingRow>
            <TextBlock x:Name="NetworkAccessStateText" Text="读取中…" Style="{StaticResource Caption}" FontSize="12" AutomationProperties.LiveSetting="Polite" />
-           <Button x:Name="SaveNetworkAccessButton" Content="保存网络访问" Click="SaveNetworkAccess_Click" Margin="0,12,0,0" />
+           <Button x:Name="RetryNetworkAccessButton" Content="重新读取" Click="RetryNetworkAccess_Click" HorizontalAlignment="Left" Margin="0,12,0,0" />
           </StackPanel>
          </Border>
         </StackPanel>
        </ScrollViewer>
       </TabItem>
-      <TabItem Header="更新与维护" Style="{StaticResource SettingsCategoryItem}">
+
+           <TabItem x:Name="TabletSettingsCategory" Header="副屏" Style="{StaticResource SettingsCategoryItem}"><ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12"><StackPanel>
+       <TextBlock Text="电脑发起副屏" Style="{StaticResource Heading}"/>
+        <Grid Margin="0,12,0,0">
+         <Grid.ColumnDefinitions>
+          <ColumnDefinition />
+          <ColumnDefinition Width="16" />
+          <ColumnDefinition />
+         </Grid.ColumnDefinitions>
+         <StackPanel>
+          <TextBlock Text="电脑发起时的方向" Margin="0,0,0,8" ToolTip="仅用于电脑发起副屏请求；平板主动连接时采用平板端方向" />
+          <ComboBox x:Name="OrientationBox" SelectedIndex="0" SelectionChanged="TabletPreference_Changed" AutomationProperties.Name="电脑发起副屏时的方向">
+           <ComboBoxItem Content="横屏 · 0°" Tag="0" />
+           <ComboBoxItem Content="竖屏 · 90°" Tag="90" />
+           <ComboBoxItem Content="反向横屏 · 180°" Tag="180" />
+           <ComboBoxItem Content="反向竖屏 · 270°" Tag="270" />
+          </ComboBox>
+         </StackPanel>
+         <StackPanel Grid.Column="2">
+          <TextBlock Text="连接方式" Margin="0,0,0,8" />
+          <ComboBox x:Name="RequestLinkBox" SelectedIndex="0" SelectionChanged="TabletPreference_Changed" AutomationProperties.Name="电脑发起副屏的连接方式" ToolTip="USB 直连需在平板开启 USB 网络共享">
+           <ComboBoxItem Content="自动选择" Tag="auto" />
+           <ComboBoxItem Content="无线网络" Tag="lan" />
+           <ComboBoxItem Content="USB 直连" Tag="usb" />
+          </ComboBox>
+         </StackPanel>
+        </Grid>
+
+      </StackPanel></ScrollViewer></TabItem>
+      <TabItem x:Name="MaintenanceSettingsCategory" Header="更新与维护" Style="{StaticResource SettingsCategoryItem}">
        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>
          <Border Style="{StaticResource Card}">
           <StackPanel>
            <TextBlock Text="版本与更新" Style="{StaticResource Heading}" />
            <TextBlock x:Name="UpdateVersionText" TextWrapping="Wrap" Margin="0,0,0,8" />
-           <TextBlock x:Name="UpdateStateText" Style="{StaticResource Caption}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
            <TextBlock x:Name="UpdateNotesText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed" />
            <local:SettingRow Header="自动检查更新" ToolTip="每12小时检查一次；连接期间不安装" Tag="">
             <CheckBox x:Name="AutoCheckUpdateCheck" Click="UpdatePreferences_Changed" AutomationProperties.Name="自动检查更新" />
@@ -661,13 +687,23 @@
            </local:SettingRow>
            <ProgressBar x:Name="UpdateProgress" Height="6" Minimum="0" Maximum="100" Margin="0,8,0,8" Visibility="Collapsed" AutomationProperties.Name="更新下载进度" />
            <WrapPanel Margin="0,16,0,0">
-            <Button x:Name="CheckUpdateButton" Content="检查更新" Click="CheckUpdate_Click" Margin="0,0,8,8" />
+            <Button x:Name="CheckUpdateButton" Content="检查更新" Style="{StaticResource Primary}" Click="CheckUpdate_Click" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
             <Button x:Name="DownloadUpdateButton" Content="下载更新" Click="DownloadUpdate_Click" Visibility="Collapsed" Margin="0,0,8,8" />
             <Button x:Name="InstallUpdateButton" Content="安装更新" Click="InstallUpdate_Click" Visibility="Collapsed" Margin="0,0,8,8" />
             <Button x:Name="CancelUpdateButton" Content="取消" Click="CancelUpdate_Click" Visibility="Collapsed" Margin="0,0,8,8" />
-            <Button Content="恢复上个版本" Click="RollbackUpdate_Click" Margin="0,0,8,8" />
+            <Button Style="{StaticResource DangerAction}" Content="恢复上个版本" Click="RollbackUpdate_Click" Margin="0,0,8,8" />
            </WrapPanel>
-
+           <TextBlock x:Name="UpdateStateText" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite">
+            <TextBlock.Style>
+             <Style TargetType="TextBlock" BasedOn="{StaticResource Caption}">
+              <Style.Triggers>
+               <Trigger Property="Text" Value="">
+                <Setter Property="Visibility" Value="Collapsed" />
+               </Trigger>
+              </Style.Triggers>
+             </Style>
+            </TextBlock.Style>
+           </TextBlock>
           </StackPanel>
          </Border>
          <Border Style="{StaticResource Card}">
@@ -683,34 +719,6 @@
         </StackPanel>
        </ScrollViewer>
       </TabItem>
-           <TabItem x:Name="TabletSettingsCategory" Header="副屏" Style="{StaticResource SettingsCategoryItem}"><ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12"><StackPanel>
-       <TextBlock Text="副屏偏好" Style="{StaticResource Heading}"/>
-        <Grid Margin="0,12,0,0">
-         <Grid.ColumnDefinitions>
-          <ColumnDefinition />
-          <ColumnDefinition Width="16" />
-          <ColumnDefinition />
-         </Grid.ColumnDefinitions>
-         <StackPanel>
-          <TextBlock Text="屏幕方向" Margin="0,0,0,8" />
-          <ComboBox x:Name="OrientationBox" SelectedIndex="0">
-           <ComboBoxItem Content="横屏 · 0°" Tag="0" />
-           <ComboBoxItem Content="竖屏 · 90°" Tag="90" />
-           <ComboBoxItem Content="反向横屏 · 180°" Tag="180" />
-           <ComboBoxItem Content="反向竖屏 · 270°" Tag="270" />
-          </ComboBox>
-         </StackPanel>
-         <StackPanel Grid.Column="2">
-          <TextBlock Text="连接方式" Margin="0,0,0,8" />
-          <ComboBox x:Name="RequestLinkBox" SelectedIndex="0" ToolTip="USB 直连需在安卓开启 USB 网络共享">
-           <ComboBoxItem Content="自动选择" Tag="auto" />
-           <ComboBoxItem Content="无线网络" Tag="lan" />
-           <ComboBoxItem Content="USB 直连" Tag="usb" />
-          </ComboBox>
-         </StackPanel>
-        </Grid>
-
-      </StackPanel></ScrollViewer></TabItem>
 </TabControl>
     </Grid>
    </TabItem>
@@ -741,7 +749,7 @@
      </StackPanel>
     </ScrollViewer>
    </TabItem>
-  </TabControl>
+  </local:PageContentHost>
   <Border Grid.Row="1" Background="{DynamicResource SidebarSurface}" BorderBrush="{DynamicResource Divider}" BorderThickness="0,1,1,0">
    <Grid IsEnabled="{Binding IsEnabled, ElementName=Pages}">
     <Grid.RowDefinitions>
@@ -767,26 +775,6 @@
      <Button Content="复制连接地址" Click="CopyAddress_Click" Margin="0,16,0,0" />
     </StackPanel>
    </Border>
-  </Popup>
-  <Popup x:Name="TabletPopover" PlacementTarget="{Binding ElementName=TabletPopoverButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" VerticalOffset="8" HorizontalOffset="-264" Opened="TransientPopover_Opened" PreviewKeyDown="TransientPopover_KeyDown">
-   <Border local:FocusInput.Track="True" Style="{StaticResource PopoverFrame}" Width="304" Padding="12" KeyboardNavigation.TabNavigation="Cycle" IsEnabled="{Binding IsEnabled, ElementName=Pages}"><StackPanel>
-    <TextBlock Text="连接副屏" Style="{StaticResource Heading}"/>
-    <TextBlock x:Name="ReceiverEmptyText" Style="{StaticResource Caption}" Margin="0,4,0,8"/>
-    <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto"><ItemsControl x:Name="TabletReceiverList"><ItemsControl.ItemTemplate><DataTemplate>
-     <Button Style="{StaticResource ReceiverListAction}" Tag="{Binding ClientId}" Click="ConnectReceiver_Click" IsEnabled="{Binding CanConnect}" ToolTip="{Binding Detail}" ToolTipService.ShowOnDisabled="True" AutomationProperties.Name="{Binding Name}">
-      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-       <Path Width="16" Height="21" Stretch="Uniform" VerticalAlignment="Center" HorizontalAlignment="Left" Stroke="{DynamicResource Muted}" StrokeThickness="1.5" StrokeLineJoin="Round" Data="M3,1 H13 Q15,1 15,3 V19 Q15,21 13,21 H3 Q1,21 1,19 V3 Q1,1 3,1 Z M6,18 H10"/>
-       <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock x:Name="ReceiverReason" Text="{Binding Detail}" Style="{StaticResource Caption}" Margin="0,4,8,0"/></StackPanel>
-       <TextBlock x:Name="ReceiverConnectLabel" Grid.Column="2" Text="连接" Foreground="{DynamicResource AccentText}" VerticalAlignment="Center" Margin="12,0,0,0"/>
-      </Grid>
-     </Button>
-     <DataTemplate.Triggers><DataTrigger Binding="{Binding CanConnect}" Value="True"><Setter TargetName="ReceiverReason" Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding CanConnect}" Value="False"><Setter TargetName="ReceiverConnectLabel" Property="Visibility" Value="Collapsed"/></DataTrigger></DataTemplate.Triggers>
-    </DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
-    <TextBlock x:Name="TabletRequestStateText" Text="" Style="{StaticResource Caption}" Margin="8,6,8,0" Visibility="Collapsed"/>
-    <Button x:Name="CancelTabletRequestButton" Style="{StaticResource PopoverMenuAction}" Content="取消请求" Click="CancelTabletRequest_Click" Visibility="Collapsed" Margin="0,4,0,0"/>
-    <Border BorderBrush="{DynamicResource Divider}" BorderThickness="0,1,0,0" Margin="0,8,0,0" Padding="0,4,0,0"><DockPanel LastChildFill="False"><Button DockPanel.Dock="Right" Content="副屏设置 ›" Style="{StaticResource HeaderAction}" Height="32" Click="OpenTabletSettings_Click"/><Button DockPanel.Dock="Left" Content="刷新" Style="{StaticResource HeaderAction}" Height="32" Click="RefreshReceiverList_Click"/></DockPanel></Border>
-    <ComboBox x:Name="ReceiverBox" SelectedValuePath="ClientId" Visibility="Collapsed"/><Button x:Name="SendTabletRequestButton" Visibility="Collapsed"/>
-   </StackPanel></Border>
   </Popup>
   <Popup x:Name="BoundDeviceDetailsPopover" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" VerticalOffset="6" Opened="TransientPopover_Opened" PreviewKeyDown="TransientPopover_KeyDown">
    <Border local:FocusInput.Track="True" Style="{StaticResource PopoverFrame}" Width="344" Focusable="True" KeyboardNavigation.TabNavigation="Cycle"><StackPanel>
@@ -872,7 +860,7 @@
          </ComboBox>
         </local:SettingRow>
         <local:SettingRow Header="设备名称" ToolTip="" Tag="">
-         <TextBox x:Name="PairName" Text="我的安卓设备" MaxLength="40" AutomationProperties.Name="设备名称" Width="224" />
+         <TextBox x:Name="PairName" Text="我的平板" MaxLength="40" AutomationProperties.Name="设备名称" Width="224" />
         </local:SettingRow>
         <local:SettingRow Header="四位配对码" ToolTip="" Tag="">
          <TextBox x:Name="PairPin" MaxLength="4" FontSize="22" FontFamily="Consolas" AutomationProperties.Name="四位配对码" Width="224" />
@@ -974,8 +962,8 @@
              <local:SettingRow Header="远程主屏" ToolTip="允许此设备控制主屏" Tag="">
               <CheckBox x:Name="ControlRemoteCheck" AutomationProperties.Name="远程主屏" />
              </local:SettingRow>
-             <local:SettingRow Header="扩展屏" ToolTip="允许此设备作为电脑副屏" Tag="">
-              <CheckBox x:Name="ControlTabletCheck" AutomationProperties.Name="扩展屏" />
+             <local:SettingRow Header="副屏" ToolTip="允许此设备作为电脑副屏" Tag="">
+              <CheckBox x:Name="ControlTabletCheck" AutomationProperties.Name="副屏" />
              </local:SettingRow>
              <local:SettingRow Header="文件" ToolTip="浏览和下载电脑选定的目录；上传与删除分别控制" Tag="">
               <CheckBox x:Name="ControlFilesCheck" AutomationProperties.Name="文件" />
@@ -1000,6 +988,16 @@
 
           </StackPanel>
          </Border></StackPanel></ScrollViewer></DockPanel></Border></Grid>
+  <Grid x:Name="TransportDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="66" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="TransportDialog_KeyDown">
+   <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="10" Padding="24" MaxWidth="520" Margin="24" VerticalAlignment="Center"><StackPanel>
+    <TextBlock x:Name="TransportDialogTitle" Style="{StaticResource Heading}"/>
+    <TextBlock x:Name="TransportAddressLabel" Margin="0,12,0,8"/>
+    <TextBox x:Name="TransportAddressBox" MaxLength="2048" AutomationProperties.Name="连接通道地址"/>
+    <TextBlock Text="保存后应用；更换服务区前请先退出连接账号。" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+    <TextBlock x:Name="TransportDialogError" Foreground="{DynamicResource DangerText}" AutomationProperties.LiveSetting="Polite" Margin="0,8,0,0"/>
+    <WrapPanel Margin="0,16,0,0"><Button Content="保存" Style="{StaticResource Primary}" Click="SaveTransportDialog_Click" Margin="0,0,8,0"/><Button Content="取消" Click="CloseTransportDialog_Click"/></WrapPanel>
+   </StackPanel></Border>
+  </Grid>
   <Grid x:Name="AliasDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="65" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="AliasDialog_KeyDown"><Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="10" Padding="24" Width="400" VerticalAlignment="Center"><StackPanel><TextBlock Text="设备备注" Style="{StaticResource Heading}"/><TextBlock x:Name="AliasDeviceText" Style="{StaticResource Caption}"/><TextBox x:Name="DeviceAliasBox" MaxLength="40" Margin="0,14,0,8" AutomationProperties.Name="设备备注"/><TextBlock Text="备注只保存在这台电脑；留空恢复设备原名。" Style="{StaticResource Caption}"/><WrapPanel Margin="0,18,0,0"><Button Content="保存" Style="{StaticResource Primary}" Click="SaveDeviceAlias_Click" Margin="0,0,8,0"/><Button Content="取消" Click="CloseDeviceAlias_Click"/></WrapPanel></StackPanel></Border></Grid>
   <Popup x:Name="AcceptancePopover" PlacementTarget="{Binding ElementName=AcceptanceButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" Opened="TransientPopover_Opened" PreviewKeyDown="TransientPopover_KeyDown">
    <Border local:FocusInput.Track="True" Style="{StaticResource PopoverFrame}" Width="208" Padding="4" KeyboardNavigation.TabNavigation="Cycle"><StackPanel>

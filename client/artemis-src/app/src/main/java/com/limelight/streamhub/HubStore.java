@@ -158,6 +158,7 @@ public final class HubStore {
             if (HubRoutes.isUsableIpv4(reported.optString(i))) addresses.add(reported.optString(i));
         synchronized (HubStore.class) {
             checkBindingCancelled(cancelled);
+            String previousDevice=get("deviceId","");
             boolean sameTrust = false;
             if (deviceId.equals(get("deviceId", "")) && bound()) {
                 try { sameTrust = invitation.equals(codec.open(get("invitation", ""))); }
@@ -175,6 +176,7 @@ public final class HubStore {
             for (String address : addresses) edit.putLong("seen-" + address, now).putString("network-" + address, network);
             checkBindingCancelled(cancelled);
             if (!edit.commit()) throw new java.io.IOException("绑定保存失败，请重试。");
+            if(!sameTrust)HubDevicePreview.forget(context,previousDevice);
             rememberHostPolicy(info);
         }
     }
@@ -184,6 +186,7 @@ public final class HubStore {
     }
     public void clearBinding() {
         synchronized (HubStore.class) {
+            HubDevicePreview.forget(context,get("deviceId",""));
             new HubLoginSecrets(context).forget();
             SharedPreferences.Editor edit = preferences.edit();
             for (String name : preferences.getAll().keySet())

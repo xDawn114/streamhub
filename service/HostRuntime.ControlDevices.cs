@@ -75,7 +75,7 @@ internal sealed partial class HostRuntime
 
     private async Task DisconnectRemoteAsync(CancellationToken token)
     {
-        _remoteSession.Reset(); _remoteController = null;
+        ResetRemoteSession(); _remoteController = null;
         await StopPrivacyScreenAsync(token);
         await StopEngineAsync(_remote, token);
         _remote.RetryAt = DateTimeOffset.UtcNow;

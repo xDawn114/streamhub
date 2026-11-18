@@ -29,4 +29,44 @@ public final class HubOverlayPlacement {
         }
         return chosen;
     }
+
+    /** Prefer a usable lower letterbox; otherwise dock to the lower window edge. */
+    public static Box bottomSheet(int width,int height,Box safe,Box video,int minimumHeight) {
+        width=Math.min(width,safe.width);height=Math.min(height,safe.height);
+        int top=safe.y;
+        if(video!=null) {
+            int videoBottom=Math.max(safe.y,video.y+video.height);
+            int lowerGap=safe.y+safe.height-videoBottom;
+            if(lowerGap>=minimumHeight){top=videoBottom;height=Math.min(height,lowerGap);}
+        }
+        return anchor(safe.x+(safe.width-width)/2,safe.y+safe.height-height,width,height,
+                new Box(safe.x,top,safe.width,safe.y+safe.height-top));
+    }
+
+    public static Box sidePanel(Box anchor,int width,int height,Box safe,int gap) {
+        if(safe.width<safe.height)return bottomSheet(width,height,safe,null,1);
+        width=Math.min(width,safe.width);height=Math.min(height,safe.height);
+        int right=safe.x+safe.width-(anchor.x+anchor.width+gap),left=anchor.x-gap-safe.x;
+        // Expand away from the nearest edge, preserving a whole panel when possible.
+        int x=right>=width?anchor.x+anchor.width+gap:left>=width?anchor.x-width-gap:
+                right>=left?safe.x+safe.width-width:safe.x;
+        return anchor(x,anchor.y,width,height,safe);
+    }
+
+    public static Box blackBars(int width,int height,Box safe,Box video,int minimumHeight) {
+        // A real letterbox is useful only when it also leaves room for the scrolling body.
+        minimumHeight=Math.min(safe.height,Math.max(minimumHeight,Math.round(safe.height*.45f)));
+        height=Math.min(safe.height,Math.max(height,minimumHeight));
+        if(video!=null){
+            int upper=Math.max(0,Math.min(safe.height,video.y-safe.y));
+            int lower=Math.max(0,Math.min(safe.height,safe.y+safe.height-video.y-video.height));
+            if(Math.max(upper,lower)>=minimumHeight){
+                Box bar=upper>lower?new Box(safe.x,safe.y,safe.width,upper):
+                        new Box(safe.x,safe.y+safe.height-lower,safe.width,lower);
+                // Use the bar's full width, leaving its opposite bar available for remote input.
+                return anchor(bar.x,bar.y,bar.width,Math.min(height,bar.height),bar);
+            }
+        }
+        return bottomSheet(safe.width<safe.height?safe.width:width,height,safe,null,minimumHeight);
+    }
 }

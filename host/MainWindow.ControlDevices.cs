@@ -18,7 +18,6 @@ public partial class MainWindow
         {
             _controlDeviceList = null;
             RenderUnifiedDevices();
-            RenderReceiverChoices();
             ControlDeviceStateText.Text = result.Message;
             return;
         }

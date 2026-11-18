@@ -48,7 +48,19 @@ public final class RtInputToolbar {
         default void toggleStats() { }
         default void showDiagnostics() { }
         default void showAudioSettings() { }
+        default boolean audioAvailable() { return false; }
+        default boolean audioMuted() { return false; }
+        default void toggleAudio() { }
+        default boolean viewOnly() { return false; }
+        default void toggleViewOnly() { }
+        default boolean pipAvailable() { return false; }
+        default void enterPip() { }
+        default boolean fullscreen(){return true;}
+        default void toggleFullscreen(){}
+        default Rect videoBounds() { return null; }
         default void showMouseMode() { }
+        default boolean trackpadMode(){return false;}
+        default void setTrackpadMode(boolean value){}
         default void showDisplaySettings() { }
         default void showResolutionSettings() { }
         default void showPrivacySettings() { }
@@ -70,15 +82,24 @@ public final class RtInputToolbar {
     private static final int SURFACE = HubStreamUi.SURFACE, CARD = HubStreamUi.CARD, BORDER = HubStreamUi.BORDER;
     private static final int TEXT = HubStreamUi.TEXT, MUTED = HubStreamUi.MUTED, ACCENT = HubStreamUi.ACCENT;
     private static final int SELECTED = HubStreamUi.SELECTED, DANGER = HubStreamUi.DANGER;
+    private static final int CONTROL_GAP = 8;
     private final Activity activity;
     private final FrameLayout parent;
     private final Callbacks callbacks;
     private final LinearLayout panel, pages, fixed, footer, tabRow;
+    private final android.widget.HorizontalScrollView quickActions;
+    private final Button audioQuick, watchQuick, desktopQuick, windowsQuick;
+    private final Button diagnosticsQuick;
+    private final HubControlGlyph diagnosticGlyph = new HubControlGlyph("diagnostics", TEXT);
+    private final Button directTouch,trackpadTouch;
+    private final HubControlGlyph entryGlyph = new HubControlGlyph("controls", TEXT);
+    private final Runnable fadeEntry = this::fadeEntry;
     private final FrameLayout handleArea;
     private final ScrollView body;
     private final Button entry, quickDisconnect, statsButton, keyboardEntry, compactClose;
     private final android.widget.Switch viewportSwitch;
-    private final LinearLayout viewportControls;
+    private final LinearLayout viewportControls,importedShortcuts;
+    private String importedValue;
     private final TextView viewportLabel, viewportHint;
     private final Button viewportSmaller, viewportLarger, viewportReset, viewportDone, resetView;
     private final Button[] tabs = new Button[3];
@@ -97,7 +118,8 @@ public final class RtInputToolbar {
     private boolean customPosition;
     private float toolbarX = Float.NaN, toolbarY = Float.NaN;
     private float dragDownX, dragDownY, dragOriginX, dragOriginY;
-    private boolean dragging;
+    private boolean dragging,draggingPanel;
+    private float floatingX=Float.NaN,floatingY=Float.NaN;
     private int selectedTab;
     private final int[] scrollPositions = new int[3];
 
@@ -106,6 +128,7 @@ public final class RtInputToolbar {
         this.parent = parent;
         this.callbacks = callbacks;
         positionPrefs = activity.getSharedPreferences("streamhub_controls", Context.MODE_PRIVATE);
+        floatingX=positionPrefs.getFloat("panel_x",Float.NaN);floatingY=positionPrefs.getFloat("panel_y",Float.NaN);
         if (positionPrefs.contains("toolbar_x") && positionPrefs.contains("toolbar_y")) {
             customPosition = true;
             toolbarX = positionPrefs.getFloat("toolbar_x", 0f);
@@ -129,28 +152,41 @@ public final class RtInputToolbar {
         handleArea.setOnTouchListener(this::handleDrag);
         panel.addView(handleArea, new LinearLayout.LayoutParams(-1, dp(20)));
 
+        quickActions = new android.widget.HorizontalScrollView(activity);
+        quickActions.setFillViewport(true);
+        LinearLayout quickRow = new LinearLayout(activity);
+        quickActions.addView(quickRow);
+        quickAction(quickRow,"退出","exit",this::confirmDisconnect).setTextColor(DANGER);
+        diagnosticsQuick = quickAction(quickRow, "诊断", diagnosticGlyph, () -> { collapse(); callbacks.showDiagnostics(); });
+        diagnosticsQuick.setTooltipText("查看串流诊断");
+        quickAction(quickRow,"旋转","rotate",() -> {collapse();callbacks.rotateScreen();});
+        audioQuick=quickAction(quickRow,"声音","audio",() -> {callbacks.toggleAudio();refreshQuickState();});
+        audioQuick.setEnabled(callbacks.audioAvailable());
+        if(!callbacks.audioAvailable())audioQuick.setContentDescription("本次声音仅在电脑输出；可在音频输出设置中选择下次输出设备");
+        watchQuick=quickAction(quickRow,"仅观看","watch",() -> {callbacks.toggleViewOnly();refreshQuickState();});
+        Button pipQuick=quickAction(quickRow,"小窗","pip",() -> {collapse();callbacks.enterPip();});
+        pipQuick.setEnabled(callbacks.pipAvailable());
+        quickAction(quickRow,"全屏","fullscreen",() -> {callbacks.toggleFullscreen();refreshLayout();});
+        panel.addView(quickActions,new LinearLayout.LayoutParams(-1,-2));
+
         tabRow = new LinearLayout(activity);
-        tabRow.setPadding(0, dp(4), 0, dp(12));
+        tabRow.setPadding(0, dp(CONTROL_GAP), 0, dp(CONTROL_GAP));
         String[] labels = {"快捷键", "输入", "画面"};
         for (int i = 0; i < labels.length; i++) {
             final int index = i;
             Button tab = action(labels[i], () -> selectTab(index), false);
             tabs[i] = tab;
             tab.setContentDescription(labels[i] + "，电脑控制选项");
-            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, -2, 1);
-            if (i > 0) size.leftMargin = dp(8);
-            tabRow.addView(tab, size);
+            addRowControl(tabRow, tab, 0, -2, 1);
         }
         Button close = action("收起", this::collapse, false);
         close.setContentDescription("收起控制面板");
-        LinearLayout.LayoutParams closeSize = new LinearLayout.LayoutParams(dp(64), -2);
-        closeSize.leftMargin = dp(8);
-        tabRow.addView(close, closeSize);
+        addRowControl(tabRow, close, dp(56), -2, 0);
         panel.addView(tabRow);
 
         body = new ScrollView(activity);
         body.setFillViewport(false);
-        body.setClipToPadding(false);
+        body.setClipToPadding(true);
         body.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         body.setVerticalScrollBarEnabled(true);
         pages = column();
@@ -162,6 +198,10 @@ public final class RtInputToolbar {
         }
 
         LinearLayout input = sections[1];
+        sectionHeading(input,"触控模式");AdaptiveGrid modes=grid(input,128,2,0);
+        directTouch=action("屏幕触控",()->{callbacks.setTrackpadMode(false);refreshQuickState();},false);
+        trackpadTouch=action("鼠标指针",()->{callbacks.setTrackpadMode(true);refreshQuickState();},false);
+        modes.addView(directTouch);modes.addView(trackpadTouch);
         sectionHeading(input, "文字与键盘");
         addWide(input, action("中文文本", this::showTextDialog, true));
         addHint(input, "先在电脑上点选输入位置，再输入或粘贴文字。", 8);
@@ -183,7 +223,6 @@ public final class RtInputToolbar {
         plainKey(plainKeys, "Home", KeyboardTranslator.VK_HOME);
         plainKey(plainKeys, "End", KeyboardTranslator.VK_END);
         plainKey(plainKeys, "删除", 0x2E);
-        addHint(input, "常用组合键在“快捷键”页，长按组合可置顶。", 12);
 
         sectionHeading(input, "虚拟鼠标");
         AdaptiveGrid mouseButtons = grid(input, 96, 3, 0);
@@ -203,9 +242,6 @@ public final class RtInputToolbar {
         // Shortcuts have their own first page; input options no longer push them below the fold.
         LinearLayout shortcuts = sections[0];
         sectionHeading(shortcuts, "常用组合");
-        addHint(shortcuts, "以下组合键发送到远端 Windows；键盘开关与控制菜单仅操作本机。", 0);
-        addHint(shortcuts, "外接键盘可用 Ctrl+Alt+Tab；Alt+Tab / Win+Tab 可在“系统快捷键”中启用。", 0);
-        addHint(shortcuts, "长按任意组合键可置顶或取消置顶。", 6);
         AdaptiveGrid combinations = grid(shortcuts, 128, 2, 0);
         shortcut(combinations, "切换窗口 · Alt+Tab", KeyboardTranslator.VK_LMENU, KeyboardTranslator.VK_TAB);
         shortcut(combinations, "窗口列表 · Ctrl+Alt+Tab", KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LMENU, KeyboardTranslator.VK_TAB);
@@ -217,6 +253,7 @@ public final class RtInputToolbar {
         shortcut(combinations, "保存 · Ctrl+S", KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_S);
         shortcut(combinations, "显示桌面 · Win+D", KeyboardTranslator.VK_LWIN, KeyboardTranslator.VK_D);
         shortcut(combinations, "任务管理器", KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_ESCAPE);
+        importedShortcuts=column();shortcuts.addView(importedShortcuts);refreshImportedShortcuts();
         sectionHeading(shortcuts, "自定义组合");
         addHint(shortcuts, "选中修饰键，再点下方按键；发送后自动释放。", 0);
         AdaptiveGrid modifierGrid = grid(shortcuts, 56, 4, 10);
@@ -260,7 +297,7 @@ public final class RtInputToolbar {
         sectionHeading(settings, "当前画面");
         AdaptiveGrid display = grid(settings, 128, 2, 0);
         display.addView(action("旋转屏幕", () -> { collapse(); callbacks.rotateScreen(); }, false));
-        viewportSwitch = new android.widget.Switch(activity);
+        viewportSwitch = new HubSwitch(activity,true);
         viewportSwitch.setText("调整视图（暂停触控）");
         viewportSwitch.setTextColor(TEXT); viewportSwitch.setTextSize(14); viewportSwitch.setMinHeight(dp(48));
         viewportSwitch.setOnCheckedChangeListener((view, enabled) -> {
@@ -282,11 +319,11 @@ public final class RtInputToolbar {
         addWide(settings, action("音频输出", () -> { collapse(); callbacks.showAudioSettings(); }, false), 8);
         addWide(settings, action("串流提示", callbacks::showWarningSettings, false), 8);
         if (callbacks.privacyAvailable()) addWide(settings, action("锁屏与退出", callbacks::showLockSettings, false), 8);
-        android.widget.Switch adaptive = new android.widget.Switch(activity);
-        adaptive.setText("菜单自适应展开"); adaptive.setTextColor(TEXT); adaptive.setMinHeight(dp(48));
-        adaptive.setChecked(positionPrefs.getBoolean("adaptive_expand", true));
-        adaptive.setOnCheckedChangeListener((v, enabled) -> { positionPrefs.edit().putBoolean("adaptive_expand", enabled).apply(); refreshLayout(); });
-        addWide(settings, adaptive, 8);
+        Button panelLayout=action("面板展开方式 · "+HubPanelLayout.label(activity),()->{},false);
+        panelLayout.setOnClickListener(v->HubPanelLayout.show(activity,true,()->{
+            panelLayout.setText("面板展开方式 · "+HubPanelLayout.label(activity));refreshLayout();
+        }));addWide(settings,panelLayout,8);
+        addHint(settings,"侧边模式适合横屏；黑边不足时停靠底部；自由浮动可拖动顶部手柄。",6);
         sectionHeading(settings, "下次连接");
         addWide(settings, action("画质与编码设置", () -> { collapse(); callbacks.showDisplaySettings(); }, false));
         addHint(settings, "可在串流中选择画质预设，下次连接生效。", 6);
@@ -295,9 +332,12 @@ public final class RtInputToolbar {
         fixed = new LinearLayout(activity);
         keyboardEntry=action("键盘", () -> { collapse(); if (keyboardVisible) callbacks.hideKeyboard(); else callbacks.showKeyboard(); }, false);
         Button clipboardEntry=action("剪贴板", this::showClipboardActions, false);
-        fixed.addView(keyboardEntry,new LinearLayout.LayoutParams(0,-2,1));
-        LinearLayout.LayoutParams clipSize=new LinearLayout.LayoutParams(0,-2,1);clipSize.leftMargin=dp(8);fixed.addView(clipboardEntry,clipSize);
-        LinearLayout.LayoutParams fixedSize=new LinearLayout.LayoutParams(-1,-2);fixedSize.topMargin=dp(8);footer.addView(fixed,fixedSize);
+        windowsQuick=action("窗口",()->callbacks.sendKeys(new short[]{KeyboardTranslator.VK_LWIN,KeyboardTranslator.VK_TAB}),false);
+        desktopQuick=action("桌面",()->callbacks.sendKeys(new short[]{KeyboardTranslator.VK_LWIN,KeyboardTranslator.VK_D}),false);
+        for (Button action : new Button[]{windowsQuick, desktopQuick, keyboardEntry, clipboardEntry}) {
+            addRowControl(fixed, action, 0, -2, 1);
+        }
+        LinearLayout.LayoutParams fixedSize=new LinearLayout.LayoutParams(-1,-2);fixedSize.topMargin=dp(CONTROL_GAP);footer.addView(fixed,fixedSize);
         // The persistent exit action is separate from the scrolling pages.
         quickDisconnect = action("断开连接", this::confirmDisconnect, false);
         quickDisconnect.setTextColor(DANGER);
@@ -314,14 +354,17 @@ public final class RtInputToolbar {
         footer.addView(compactClose, compactCloseSize);
         panel.addView(footer, new LinearLayout.LayoutParams(-1, -2));
 
-        entry = action("控制", this::show, false);
+        entry = action("", this::show, false);
+        entryGlyph.setBounds(0,0,dp(24),dp(24));
+        entry.setCompoundDrawables(null,entryGlyph,null,null);
+        entry.setPadding(dp(12),dp(12),dp(12),dp(12));
         entry.setTextSize(14);
         entry.setTypeface(null, Typeface.BOLD);
         entry.setContentDescription("展开电脑控制：输入、快捷键和画面设置");
         entry.setElevation(dp(20));
-        entry.setBackground(new RippleDrawable(ColorStateList.valueOf(0x336F9DFF), shape(SURFACE, BORDER, 24), null));
+        entry.setBackground(new RippleDrawable(ColorStateList.valueOf(0x332F59D6),shape(0xB31A212C,0x669DAFC7,24),null));
         entry.setOnTouchListener(this::handleDrag);
-        parent.addView(entry, new FrameLayout.LayoutParams(dp(88), dp(48), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        parent.addView(entry, new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
 
         viewportControls = column();
         HubStreamUi.keepColors(viewportControls);
@@ -364,9 +407,59 @@ public final class RtInputToolbar {
             }
             return false;
         });
-        parent.post(this::refreshLayout);
+        parent.post(this::refreshLayout); wakeEntry();
     }
 
+    private void fadeEntry(){ if(!disposed && entry.getVisibility()==View.VISIBLE)entry.setAlpha(0.45f); }
+    private void wakeEntry(){entry.setAlpha(0.95f);entry.removeCallbacks(fadeEntry);entry.postDelayed(fadeEntry,4000);}
+    private Button quickAction(LinearLayout row,String label,String glyph,Runnable callback) {
+        return quickAction(row, label, new HubControlGlyph(glyph, "exit".equals(glyph) ? DANGER : TEXT), callback);
+    }
+    private Button quickAction(LinearLayout row, String label, HubControlGlyph icon, Runnable callback) {
+        Button button=action(label,callback,false);button.setTextSize(12);
+        button.setPadding(dp(4), dp(8), dp(4), dp(8));
+        icon.setBounds(0,0,dp(20),dp(20));button.setCompoundDrawables(null,icon,null,null);
+        button.setCompoundDrawablePadding(dp(4));button.setBackground(buttonBackground(CARD,CARD));
+        int width = Math.max(dp(50), (int)Math.ceil(button.getTextSize() * 3) + dp(8));
+        addRowControl(row, button, width, dp(64), 1);
+        return button;
+    }
+    private void addRowControl(LinearLayout row, Button button, int width, int height, float weight) {
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(width, height, weight);
+        if (row.getChildCount() > 0) size.setMarginStart(dp(CONTROL_GAP));
+        row.addView(button, size);
+    }
+    private void refreshImportedShortcuts(){
+        String json=activity.getSharedPreferences(HubShortcutBindings.PREFS,Context.MODE_PRIVATE).getString(HubShortcutBindings.KEY,"");
+        if(json.equals(importedValue))return;importedValue=json;importedShortcuts.removeAllViews();
+        if(json.isEmpty())return;
+        try{
+            List<HubShortcutBindings.Binding> bindings=HubShortcutBindings.parse(json);if(bindings.isEmpty())return;
+            sectionHeading(importedShortcuts,"导入的快捷键");AdaptiveGrid grid=grid(importedShortcuts,128,2,0);
+            for(HubShortcutBindings.Binding binding:bindings)shortcut(grid,binding.name,binding.keys);
+        }catch(Exception error){com.limelight.LimeLog.warning("Custom shortcuts: "+error);addHint(importedShortcuts,"已保存的快捷键文件格式无效，请在设置中重新导入。",8);}
+    }
+    private void refreshQuickState(){
+        boolean audible=callbacks.audioAvailable()&&!callbacks.audioMuted(),viewOnly=callbacks.viewOnly();
+        audioQuick.setSelected(audible);audioQuick.setText(audible?"声音开":"声音关");
+        audioQuick.setBackground(buttonBackground(audible?HubStreamUi.PRIMARY:CARD,audible?HubStreamUi.PRIMARY:CARD));
+        watchQuick.setSelected(viewOnly);watchQuick.setText(viewOnly?"观看中":"仅观看");
+        watchQuick.setBackground(buttonBackground(viewOnly?HubStreamUi.PRIMARY:CARD,viewOnly?HubStreamUi.PRIMARY:CARD));
+        boolean trackpad=callbacks.trackpadMode();directTouch.setSelected(!trackpad);trackpadTouch.setSelected(trackpad);
+        directTouch.setBackground(buttonBackground(!trackpad?SELECTED:CARD,!trackpad?ACCENT:BORDER));
+        trackpadTouch.setBackground(buttonBackground(trackpad?SELECTED:CARD,trackpad?ACCENT:BORDER));
+    }
+    public void setWarning(boolean visible,String detail){
+        entryGlyph.warning(visible);
+        diagnosticGlyph.warning(visible);
+        diagnosticsQuick.setTextColor(visible ? HubStreamUi.WARNING : TEXT);
+        String label = visible ? detail + " · 查看串流诊断" : "查看串流诊断";
+        if (!label.contentEquals(diagnosticsQuick.getContentDescription() == null ? "" : diagnosticsQuick.getContentDescription())) {
+            diagnosticsQuick.setContentDescription(label);
+            diagnosticsQuick.setTooltipText(label);
+        }
+        entry.setContentDescription("展开电脑控制：输入、快捷键和画面设置"+(visible?"，"+detail:""));
+    }
     private LinearLayout column() { LinearLayout view = new LinearLayout(activity); view.setOrientation(LinearLayout.VERTICAL); return view; }
     private TextView text(String value, int size, int color) {
         TextView view = new TextView(activity);
@@ -390,7 +483,7 @@ public final class RtInputToolbar {
         section.addView(view, params);
     }
     private AdaptiveGrid grid(LinearLayout section, int minimumCell, int maxColumns, int top) {
-        AdaptiveGrid grid = new AdaptiveGrid(activity, dp(minimumCell), maxColumns, dp(8));
+        AdaptiveGrid grid = new AdaptiveGrid(activity, dp(minimumCell), maxColumns, dp(CONTROL_GAP));
         addWide(section, grid, top);
         return grid;
     }
@@ -406,7 +499,7 @@ public final class RtInputToolbar {
         Button button = new Button(activity);
         configureButton(button);
         button.setText(label);
-        button.setTextColor(primary ? 0xFFFFFFFF : TEXT);
+        button.setTextColor(new ColorStateList(new int[][]{{-android.R.attr.state_enabled},{}},new int[]{MUTED,primary?0xFFFFFFFF:TEXT}));
         button.setBackground(buttonBackground(primary ? HubStreamUi.PRIMARY : CARD, primary ? HubStreamUi.PRIMARY : BORDER));
         button.setOnClickListener(view -> action.run());
         return button;
@@ -448,6 +541,7 @@ public final class RtInputToolbar {
     private void selectTab(int index) {
         scrollPositions[selectedTab]=body.getScrollY(); selectedTab=index;
         clearModifiers();
+        refreshQuickState();
         for (int i = 0; i < sections.length; i++) {
             sections[i].setVisibility(i == index ? View.VISIBLE : View.GONE);
             tabs[i].setSelected(i == index);
@@ -482,24 +576,34 @@ public final class RtInputToolbar {
     private boolean handleDrag(View view, MotionEvent event) {
         switch(event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                wakeEntry();
                 dragDownX=event.getRawX();dragDownY=event.getRawY();
                 // Start a new drag from the visible anchor, which may currently
                 // be clamped by the keyboard or a different orientation.
+                draggingPanel=view==handleArea && HubPanelLayout.FLOAT.equals(HubPanelLayout.mode(activity));
                 FrameLayout.LayoutParams anchor=(FrameLayout.LayoutParams)
-                        (view.getParent() == viewportControls ? viewportControls : entry).getLayoutParams();
+                        (draggingPanel?panel:view.getParent() == viewportControls ? viewportControls : entry).getLayoutParams();
                 dragOriginX=anchor.leftMargin;
                 dragOriginY=anchor.topMargin;
                 dragging=false;return true;
             case MotionEvent.ACTION_MOVE:
                 float dx=event.getRawX()-dragDownX,dy=event.getRawY()-dragDownY;
                 if(!dragging && Math.hypot(dx,dy)<dp(8))return true;
-                dragging=true;setToolbarPosition(dragOriginX+dx,dragOriginY+dy,false);return true;
+                dragging=true;
+                if(draggingPanel){floatingX=dragOriginX+dx;floatingY=dragOriginY+dy;refreshLayout();}
+                else setToolbarPosition(dragOriginX+dx,dragOriginY+dy,false);return true;
             case MotionEvent.ACTION_UP:
-                if(dragging)setToolbarPosition(toolbarX,toolbarY,true);
+                if(dragging){
+                    if(draggingPanel)positionPrefs.edit().putFloat("panel_x",floatingX).putFloat("panel_y",floatingY).apply();
+                    else setToolbarPosition(toolbarX,toolbarY,true);
+                }
                 else if(view==entry)show();
                 dragging=false;return true;
             case MotionEvent.ACTION_CANCEL:
-                if(dragging)setToolbarPosition(toolbarX,toolbarY,true);
+                if(dragging){
+                    if(draggingPanel)positionPrefs.edit().putFloat("panel_x",floatingX).putFloat("panel_y",floatingY).apply();
+                    else setToolbarPosition(toolbarX,toolbarY,true);
+                }
                 dragging=false;return true;
             default:return true;
         }
@@ -522,7 +626,7 @@ public final class RtInputToolbar {
         setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale());
         if (adjustingViewport) return;
         refreshLayout();
-        panel.setVisibility(View.VISIBLE);
+        panel.setVisibility(View.VISIBLE);refreshQuickState();refreshImportedShortcuts();
         entry.setVisibility(View.GONE);
         quickDisconnect.setVisibility(View.VISIBLE);
         refreshLayout();
@@ -531,7 +635,7 @@ public final class RtInputToolbar {
         panel.setVisibility(View.GONE);
         entry.setVisibility(pictureInPicture || disposed || adjustingViewport ? View.GONE : View.VISIBLE);
         quickDisconnect.setVisibility(View.GONE);
-        clearModifiers();
+        clearModifiers();wakeEntry();
     }
     /** True means the Back action closed local controls and should not leave the stream. */
     public boolean collapseOrConsumeBack() {
@@ -609,14 +713,41 @@ public final class RtInputToolbar {
                 || parent.getHeight() - usableBottom > dp(100));
         String keyboardLabel = keyboardVisible ? "收起键盘" : "键盘";
         if (!keyboardLabel.contentEquals(keyboardEntry.getText())) keyboardEntry.setText(keyboardLabel);
+        HubOverlayPlacement.Box anchor=HubOverlayPlacement.anchor(
+                Math.round(customPosition&&!Float.isNaN(toolbarX)?toolbarX:safe.x+(safe.width-dp(48))),
+                Math.round(customPosition&&!Float.isNaN(toolbarY)?toolbarY:safe.y+dp(12)),
+                dp(48),dp(48),safe);
+        Rect video=callbacks.videoBounds();
+        HubOverlayPlacement.Box picture=video==null||video.isEmpty()?null:new HubOverlayPlacement.Box(video.left,video.top,video.width(),video.height());
+        String expansion=HubPanelLayout.mode(activity);
+        int menuHeight=dp(minimalWindow?104:620);
+        HubOverlayPlacement.Box menu=HubPanelLayout.SIDE.equals(expansion)
+            ?HubOverlayPlacement.sidePanel(anchor,dp(440),menuHeight,safe,dp(8)):
+            HubPanelLayout.FLOAT.equals(expansion)
+            ?HubOverlayPlacement.anchor(Math.round(Float.isNaN(floatingX)?safe.x+(safe.width-Math.min(dp(440),safe.width))/2f:floatingX),
+                Math.round(Float.isNaN(floatingY)?safe.y+(safe.height-Math.min(menuHeight,safe.height))/2f:floatingY),dp(440),menuHeight,safe)
+            :HubOverlayPlacement.blackBars(dp(440),menuHeight,safe,picture,dp(280));
         // A landscape IME can leave less room than the two fixed action rows.
         // Keep complete touch targets and the exit reachable; hide the keyboard
         // to restore tabs and scrolling controls instead of clipping them.
         tabRow.setVisibility(minimalWindow ? View.GONE : View.VISIBLE);
+        quickActions.setVisibility(minimalWindow ? View.GONE : View.VISIBLE);
+        quickDisconnect.setVisibility(panel.getVisibility()==View.VISIBLE && minimalWindow ? View.VISIBLE : View.GONE);
+        desktopQuick.setVisibility(minimalWindow?View.GONE:View.VISIBLE);
+        windowsQuick.setVisibility(minimalWindow?View.GONE:View.VISIBLE);
+        LinearLayout.LayoutParams keyboardSize=(LinearLayout.LayoutParams)keyboardEntry.getLayoutParams();
+        int keyboardStart=dp(minimalWindow ? 0 : CONTROL_GAP);
+        if(keyboardSize.getMarginStart()!=keyboardStart){keyboardSize.setMarginStart(keyboardStart);keyboardEntry.setLayoutParams(keyboardSize);}
         body.setVisibility(minimalWindow ? View.GONE : View.VISIBLE);
         compactClose.setVisibility(minimalWindow ? View.VISIBLE : View.GONE);
         // Keep a useful scrolling viewport on phones in landscape or above a docked IME.
-        boolean shortWindow = safe.height < dp(480);
+        boolean shortWindow = menu.height < dp(480);
+        LinearLayout quickRow=(LinearLayout)quickActions.getChildAt(0);
+        for(int i=0;i<quickRow.getChildCount();i++){
+            Button quick=(Button)quickRow.getChildAt(i);LinearLayout.LayoutParams size=(LinearLayout.LayoutParams)quick.getLayoutParams();
+            int height=dp(shortWindow?52:64);
+            if(size.height!=height){size.height=height;quick.setLayoutParams(size);quick.setPadding(dp(4),dp(shortWindow?4:8),dp(4),dp(shortWindow?4:8));}
+        }
         int footerDirection = shortWindow ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL;
         if (footer.getOrientation() != footerDirection) {
             footer.setOrientation(footerDirection);
@@ -626,13 +757,12 @@ public final class RtInputToolbar {
             exitSize.topMargin = dp(shortWindow ? 8 : 12); exitSize.leftMargin = dp(shortWindow ? 8 : 0);
             quickDisconnect.setLayoutParams(exitSize);
         }
-        handleArea.setVisibility(shortWindow ? View.GONE : View.VISIBLE);
+        boolean floating=HubPanelLayout.FLOAT.equals(HubPanelLayout.mode(activity));
+        handleArea.setVisibility(minimalWindow || (shortWindow&&!floating) ? View.GONE : View.VISIBLE);
+        handleArea.setContentDescription(floating?"拖动自由浮动面板":"控制面板");
+        handleArea.setOnTouchListener(floating?this::handleDrag:null);
         int verticalPadding = dp(shortWindow ? 8 : 16);
         if (panel.getPaddingBottom() != verticalPadding) panel.setPadding(dp(16), dp(shortWindow ? 8 : 14), dp(16), verticalPadding);
-        HubOverlayPlacement.Box anchor=HubOverlayPlacement.anchor(
-                Math.round(customPosition&&!Float.isNaN(toolbarX)?toolbarX:safe.x+(safe.width-dp(88))/2f),
-                Math.round(customPosition&&!Float.isNaN(toolbarY)?toolbarY:safe.y),
-                dp(88),dp(48),safe);
         // Keep the user's preferred position. A temporary IME/rotation clamp
         // must not permanently move the floating control button.
         place(entry,anchor);
@@ -642,8 +772,6 @@ public final class RtInputToolbar {
         HubOverlayPlacement.Box viewportBounds = HubOverlayPlacement.anchor(anchor.x, anchor.y,
                 viewportWidth, viewportControls.getMeasuredHeight(), safe);
         place(viewportControls, viewportBounds);
-        HubOverlayPlacement.Box menu=HubOverlayPlacement.menu(anchor,dp(420),dp(minimalWindow ? 104 : 620),safe,dp(8),
-                positionPrefs.getBoolean("adaptive_expand",true));
         place(panel,menu);
     }
     public void setPictureInPicture(boolean active) {
@@ -778,6 +906,7 @@ public final class RtInputToolbar {
         if (disconnect != null) { disconnect.setTextColor(DANGER); disconnect.setMinHeight(dp(48)); }
     }
     public void dispose() {
+        entry.removeCallbacks(fadeEntry);
         disposed = true;
         viewportControls.setVisibility(View.GONE);
         if (parent.getViewTreeObserver().isAlive()) parent.getViewTreeObserver().removeOnGlobalLayoutListener(layoutListener);

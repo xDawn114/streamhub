@@ -9,7 +9,7 @@ import java.util.Locale;
 public final class HubTransports {
     public static final String OFFICIAL_URL = "https://controlplane.tailscale.com";
     public static final String[] IDS = {"tailscale", "self-hosted", "lan", "manual"};
-    public static final String[] LABELS = {"Tailscale 官方", "自建服务区", "局域网 / USB", "手动地址"};
+    public static final String[] LABELS = {"Tailscale", "自建服务区", "局域网/USB", "手动地址"};
     private HubTransports() { }
 
     public static final class Settings {

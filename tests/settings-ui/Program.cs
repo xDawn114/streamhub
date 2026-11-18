@@ -42,11 +42,11 @@ internal static class Program
             {
                 var pages=(TabControl)window.FindName("Pages"); pages.SelectedItem=window.FindName("SettingsPage");
                 var categories=(TabControl)window.FindName("SettingsCategories");
-                Check(categories.Items.Count==5,"five distinct settings categories");
+                Check(categories.Items.Count==6,"six distinct settings categories");
                 foreach (int theme in new[]{1,2})
                 {
                     ((ComboBox)window.FindName("ThemeChoice")).SelectedIndex=theme;
-                    foreach(int category in Enumerable.Range(0,5))
+                    foreach(int category in Enumerable.Range(0,6))
                     {
                         categories.SelectedIndex=category; window.UpdateLayout(); Pump();
                         var item=(TabItem)categories.SelectedItem;
@@ -65,7 +65,7 @@ internal static class Program
                 categories.SelectedIndex=0;
                 typeof(MainWindow).GetMethod("OpenFileAccessSettings_Click",BindingFlags.Instance|BindingFlags.NonPublic)!
                     .Invoke(window,[window,new RoutedEventArgs()]); window.UpdateLayout();Pump();
-                Check(categories.SelectedIndex==1 && ((Expander)window.FindName("FileAccessDetails")).IsExpanded,"file settings shortcut selects security category");
+                Check(((Grid)window.FindName("DevicePermissionsDialog")).Visibility==Visibility.Visible && ((Expander)window.FindName("FileAccessDetails")).IsExpanded,"file settings shortcut opens device permission dialog");
                 Check(((TextBlock)window.FindName("ReceiveDirectoryText")).Text=="请选择电脑接收文件夹","receive-directory entry follows file state");
 
                 // Real bubbling event: the child handles MouseMove, the viewer must still receive it.

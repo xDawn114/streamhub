@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.view.Gravity;
 import android.widget.Button;
 
@@ -21,7 +22,14 @@ final class HubButtons {
         surface.setColor(primary ? HubTheme.primary(context) : HubTheme.field(context));
         surface.setCornerRadius(dp(context, 12));
         surface.setStroke(dp(context, 1), primary ? HubTheme.primary(context) : HubTheme.border(context));
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(HubTheme.ripple(context)), surface, null));
+        GradientDrawable disabled = new GradientDrawable();
+        disabled.setColor(HubTheme.field(context)); disabled.setCornerRadius(dp(context, 12));
+        disabled.setStroke(dp(context, 1), HubTheme.border(context));
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{-android.R.attr.state_enabled}, disabled);
+        states.addState(new int[]{}, new RippleDrawable(ColorStateList.valueOf(HubTheme.ripple(context)), surface, null));
+        button.setBackgroundTintList(null);
+        button.setBackground(states);
     }
 
     static void settingAction(Button button) {
@@ -35,6 +43,11 @@ final class HubButtons {
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(HubTheme.ripple(context)), surface, null));
         button.setPadding(0, dp(context, 8), 0, dp(context, 8));
         button.setMinHeight(dp(context, 56));
+    }
+
+    static void danger(Button button) {
+        apply(button, false);
+        button.setTextColor(colors(button.getContext(), HubTheme.danger(button.getContext())));
     }
 
     private static void base(Button button) {

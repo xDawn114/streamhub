@@ -17,6 +17,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 import org.robolectric.android.controller.ActivityController;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 /** Real Activity, generated file listing, unbound store: no network or user documents. */
 @RunWith(RobolectricTestRunner.class)
@@ -38,11 +39,56 @@ public class HubFilesUiTest {
         render.invoke(activity,new JSONObject().put("path","").put("rootName","样本目录").put("entries",entries),"");
     }
     private JSONObject file(String name,long size) throws Exception {return new JSONObject().put("name",name).put("path",name).put("size",size);}
+    private void waitForRead(HubFilesActivity activity) throws Exception {
+        ((java.util.concurrent.ExecutorService)field(activity,"worker")).submit(()->{}).get(5,java.util.concurrent.TimeUnit.SECONDS);
+    }
+    private void publishRead() {org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();}
     private void snapshot(View root,String name) throws Exception {
         String target=System.getenv("STREAMHUB_RENDER_ROOT");if(target==null)return;
         java.io.File directory=new java.io.File(target);assertTrue(directory.isDirectory()||directory.mkdirs());
         android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(root.getWidth(),root.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
         root.draw(new android.graphics.Canvas(image));try(java.io.OutputStream out=new java.io.FileOutputStream(new java.io.File(directory,name))){image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}image.recycle();
+    }
+    @Test public void enteringAndLeavingFoldersOnlyReadTheDirectoryAndDiscardAnOldBindingResult() throws Exception {
+        Bundle saved=new Bundle();saved.putBoolean("showingTasks",true);
+        try(var controller=Robolectric.buildActivity(HubFilesActivity.class).create(saved)){
+            HubFilesActivity activity=controller.get();
+            HubStore store=(HubStore)field(activity,"store");
+            store.put("invitation","fixture");store.put("deviceId","old-pc");store.put("bindingRevision","old");
+            HubFileClient client=mock(HubFileClient.class);
+            when(client.isCurrent()).thenReturn(true);
+            when(client.supportsBrowse()).thenReturn(true);when(client.supportsRoots()).thenReturn(true);
+            when(client.register()).thenReturn(new JSONObject().put("allowed",true).put("enabled",true));
+            when(client.json("tasks",null)).thenReturn(new JSONObject().put("tasks",new JSONArray()));
+            when(client.json("roots",null)).thenReturn(new JSONObject().put("roots",new JSONArray()
+                    .put(new JSONObject().put("id","shared").put("name","共享目录"))));
+            when(client.json(eq("browse"),any(JSONObject.class))).thenAnswer(call->{
+                JSONObject request=call.getArgument(1);String path=request.getString("path");
+                assertEquals("shared",request.getString("rootId"));
+                JSONArray entries=path.isEmpty()?new JSONArray().put(new JSONObject().put("name","子目录")
+                        .put("path","sub").put("directory",true)):new JSONArray();
+                return new JSONObject().put("listing",new JSONObject().put("path",path).put("rootName","共享目录").put("entries",entries));
+            });
+            set(activity,"browser",new HubFileBrowser(()->client));
+            controller.start().resume().visible();waitForRead(activity);publishRead();
+            verify(client,never()).json("roots",null);verify(client,never()).json(eq("browse"),any(JSONObject.class));
+            find(activity.getWindow().getDecorView(),"电脑文件").performClick();waitForRead(activity);publishRead();
+            LinearLayout list=(LinearLayout)field(activity,"browseList");
+            list.getChildAt(0).performClick();waitForRead(activity);publishRead();
+            Button up=find(list,"‹ 上一级");assertNotNull(up);up.performClick();waitForRead(activity);publishRead();
+            verify(client).connect();verify(client).register();verify(client).json("roots",null);verify(client).json("tasks",null);
+            var requests=org.mockito.ArgumentCaptor.forClass(JSONObject.class);
+            verify(client,times(3)).json(eq("browse"),requests.capture());
+            assertEquals("",requests.getAllValues().get(0).getString("path"));
+            assertEquals("sub",requests.getAllValues().get(1).getString("path"));
+            assertEquals("",requests.getAllValues().get(2).getString("path"));
+
+            list.getChildAt(0).performClick();waitForRead(activity);
+            store.put("deviceId","new-pc");store.put("bindingRevision","new");publishRead();
+            assertFalse((boolean)field(activity,"fileTransferAllowed"));
+            assertEquals("",((TextView)field(activity,"browseLocation")).getText().toString());
+            assertEquals(View.GONE,((View)field(activity,"browserContent")).getVisibility());
+        }
     }
     @Test public void selectionBarTracksChecksSelectAllRefreshAndTabs() throws Exception {
         ActivityController<HubFilesActivity> controller=Robolectric.buildActivity(HubFilesActivity.class).setup();
@@ -61,7 +107,7 @@ public class HubFilesUiTest {
         java.util.List<CheckBox> checks=(java.util.List<CheckBox>)field(activity,"fileChecks");checks.get(0).performClick();
         assertEquals(View.VISIBLE,((View)field(activity,"selectionBar")).getVisibility());assertTrue(find(root,"下载（1）").isEnabled());
         find(root,"全选").performClick();assertNotNull(find(root,"下载（2）"));assertFalse(checks.get(2).isChecked());
-        find(root,"传输任务").performClick();assertEquals(View.GONE,((View)field(activity,"selectionBar")).getVisibility());assertFalse(((View)field(activity,"sendButton")).isShown());
+        find(root,"传输任务").performClick();assertEquals(View.GONE,((View)field(activity,"selectionBar")).getVisibility());assertTrue(((View)field(activity,"sendButton")).isShown());assertFalse(((View)field(activity,"sendButton")).isEnabled());
         find(root,"电脑文件").performClick();assertEquals(View.VISIBLE,((View)field(activity,"selectionBar")).getVisibility());
         // A changed listing cannot leave an invisible, stale file selected.
         listing(activity,new JSONArray().put(file("sample.txt",125)));assertNotNull(find(root,"下载（1）"));
@@ -83,10 +129,18 @@ public class HubFilesUiTest {
                 for(int i=0;i<3;i++){root.measure(View.MeasureSpec.makeMeasureSpec(size[0],View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(size[1],View.MeasureSpec.EXACTLY));root.layout(0,0,size[0],size[1]);}
                 View send=(View)field(activity,"sendButton"),sort=(View)field(activity,"sortButton"),destination=(View)field(activity,"destinationButton"),refresh=(View)field(activity,"refreshButton");
                 android.graphics.Rect a=new android.graphics.Rect(),b=new android.graphics.Rect(),c=new android.graphics.Rect();
-                assertTrue(send.getGlobalVisibleRect(a));assertTrue(sort.getGlobalVisibleRect(b));assertTrue(destination.getGlobalVisibleRect(c));
-                assertTrue(a.right<=size[0]);assertTrue(b.right<=c.left);assertTrue(c.right<=a.left);assertEquals(b.top,c.top);
-                assertTrue(send.getHeight()>=48);assertTrue(sort.getHeight()>=48);
-                android.graphics.Rect refreshBounds=new android.graphics.Rect();assertTrue(refresh.getGlobalVisibleRect(refreshBounds));assertTrue(refreshBounds.right<=b.left);assertEquals(b.top,refreshBounds.top);assertEquals(a.top,refreshBounds.top);
+                assertTrue(send.getGlobalVisibleRect(a));assertTrue(a.right<=size[0]);
+                android.graphics.Rect refreshBounds=new android.graphics.Rect();assertTrue(refresh.getGlobalVisibleRect(refreshBounds));
+                if ((Boolean)field(activity,"compactToolbar")) {
+                    View more=(View)field(activity,"moreButton");assertTrue(more.getGlobalVisibleRect(b));
+                    assertEquals(View.GONE,sort.getVisibility());assertEquals(View.GONE,destination.getVisibility());
+                    assertTrue(refreshBounds.right<=b.left);assertTrue(b.right<=a.left);assertEquals(a.top,b.top);
+                } else {
+                    assertTrue(sort.getGlobalVisibleRect(b));assertTrue(destination.getGlobalVisibleRect(c));
+                    assertTrue(b.right<=c.left);assertTrue(c.right<=a.left);assertEquals(b.top,c.top);
+                    assertTrue(refreshBounds.right<=b.left);assertEquals(b.top,refreshBounds.top);
+                }
+                assertTrue(send.getHeight()>=48);assertEquals(a.top,refreshBounds.top);
                 assertTrue(find(root,"下载（1）").getGlobalVisibleRect(a));assertTrue(a.bottom<=size[1]);
                 snapshot(root,"files-"+size[0]+"-theme"+theme+"-font"+scale+".png");
             }
@@ -96,7 +150,7 @@ public class HubFilesUiTest {
     @Test public void emptyStatesAndRootChoicesUseOnePlace() throws Exception {
         try(ActivityController<HubFilesActivity> controller=Robolectric.buildActivity(HubFilesActivity.class).setup()){
             HubFilesActivity activity=controller.get();View root=activity.getWindow().getDecorView();
-            assertEquals(View.GONE,((View)field(activity,"state")).getVisibility());
+            assertEquals(View.VISIBLE,((View)field(activity,"state")).getVisibility());
             assertTrue(((TextView)field(activity,"authorizationMessage")).getText().toString().contains("添加电脑"));
             find(root,"传输任务").performClick();assertEquals(View.VISIBLE,((View)field(activity,"transferEmpty")).getVisibility());assertEquals(View.GONE,((View)field(activity,"transferPane")).getVisibility());
             find(root,"电脑文件").performClick();assertEquals(View.GONE,((View)field(activity,"transferEmpty")).getVisibility());
@@ -107,7 +161,7 @@ public class HubFilesUiTest {
             ((View)field(activity,"rootChoice")).performClick();android.app.AlertDialog choice=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertEquals(2,choice.getListView().getCount());choice.dismiss();
             renderRoots.invoke(activity,new JSONArray());
             java.lang.reflect.Method render=HubFilesActivity.class.getDeclaredMethod("renderBrowse",JSONObject.class,String.class);render.setAccessible(true);render.invoke(activity,null,"请在电脑的设备权限中添加可浏览目录。");invoke(activity,"renderControls");
-            assertEquals(View.GONE,((View)field(activity,"state")).getVisibility());assertEquals(View.VISIBLE,((View)field(activity,"authorizationPane")).getVisibility());assertTrue(((TextView)field(activity,"authorizationMessage")).getText().toString().contains("添加可浏览目录"));
+            assertEquals(View.VISIBLE,((View)field(activity,"state")).getVisibility());assertEquals(View.VISIBLE,((View)field(activity,"authorizationPane")).getVisibility());assertTrue(((TextView)field(activity,"authorizationMessage")).getText().toString().contains("添加可浏览目录"));
         }
     }
     @Test public void selectedLastRowCanScrollFullyAboveSelectionBarInLandscape() throws Exception {

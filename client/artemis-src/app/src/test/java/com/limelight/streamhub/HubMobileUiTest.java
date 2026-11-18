@@ -106,7 +106,7 @@ public class HubMobileUiTest {
             window(size[0],size[1],1.5f);HubTheme.setMode(RuntimeEnvironment.getApplication(),theme);
             try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {
                 View root=content(c.get());layout(root,size[0],size[1]);
-                TextView remote=text(root,"远程控制"),extended=text(root,"用作扩展屏");
+                TextView remote=text(root,"远程控制"),extended=text(root,"用作副屏");
                 assertNotNull(remote);assertNotNull(extended);
                 View first=(View)remote.getParent(),second=(View)extended.getParent();
                 assertTrue(second.getTop()>=first.getBottom()+8);readable(root);
@@ -115,6 +115,7 @@ public class HubMobileUiTest {
                 assertEquals(remote.getTypeface().getStyle(),extended.getTypeface().getStyle());
                 assertTrue(first.isEnabled() && second.isEnabled());
                 assertNotEquals(((android.graphics.drawable.GradientDrawable)((android.graphics.drawable.RippleDrawable)first.getBackground()).getDrawable(0)).getColor(),((android.graphics.drawable.GradientDrawable)((android.graphics.drawable.RippleDrawable)second.getBackground()).getDrawable(0)).getColor());
+                assertTrue(androidx.core.graphics.ColorUtils.calculateContrast(remote.getCurrentTextColor(),HubTheme.primary(c.get()))>=4.5);
                 assertNotNull(text(root,"全部设备"));
                 snapshot(root,"phone-home-"+size[0]+"-"+(theme==HubTheme.LIGHT?"light":"dark")+"-font150.png");
             }finally{HubTheme.setMode(RuntimeEnvironment.getApplication(),HubTheme.SYSTEM);}
@@ -126,7 +127,7 @@ public class HubMobileUiTest {
             View root=content(c.get());layout(root,1280,800);
             LinearLayout nav=(LinearLayout)((ViewGroup)root).getChildAt(0);
             assertEquals(132,nav.getChildAt(0).getWidth());
-            View first=(View)text(root,"远程控制").getParent(),second=(View)text(root,"用作扩展屏").getParent();
+            View first=(View)text(root,"远程控制").getParent(),second=(View)text(root,"用作副屏").getParent();
             assertEquals(first.getTop(),second.getTop());assertTrue(second.getLeft()>=first.getRight()+8);readable(root);
             java.lang.reflect.Field slotField=HubActivity.class.getDeclaredField("pageSlot");slotField.setAccessible(true);
             ScrollView home=(ScrollView)((FrameLayout)slotField.get(c.get())).getChildAt(0);
@@ -146,7 +147,7 @@ public class HubMobileUiTest {
             java.lang.reflect.Field slotField=HubActivity.class.getDeclaredField("pageSlot");slotField.setAccessible(true);
             ScrollView home=(ScrollView)((FrameLayout)slotField.get(c.get())).getChildAt(0);
             View page=((FrameLayout)home.getChildAt(0)).getChildAt(0),viewport=(View)page.getParent();
-            assertEquals(640,page.getWidth());assertEquals(0,page.getTop());
+            assertEquals(720,page.getWidth());assertEquals(0,page.getTop());
             assertEquals(24,page.getPaddingTop());
             assertEquals((viewport.getWidth()-page.getWidth())/2,page.getLeft(),1);
             assertNull(text(root,"使用提示"));assertNull(text(root,"连接历史"));readable(root);
@@ -175,19 +176,18 @@ public class HubMobileUiTest {
         }
     }
     private EditText findCode(View root) {
-        if(root instanceof EditText && ((EditText)root).getHint()!=null && ((EditText)root).getHint().toString().contains("012345"))return (EditText)root;
+        if(root instanceof EditText && ((EditText)root).getHint()!=null && ((EditText)root).getHint().toString().contains("六位数字"))return (EditText)root;
         if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++) {EditText result=findCode(((ViewGroup)root).getChildAt(i));if(result!=null)return result;}
         return null;
     }
-    @Test public void filePageTabsAndHeaderFitACompactLargeTextWindow() {
+    @Test public void filePageTabsAndHeaderFitACompactLargeTextWindow() throws Exception {
         window(320,640,1.5f);
         try(org.robolectric.android.controller.ActivityController<HubFilesActivity> c=Robolectric.buildActivity(HubFilesActivity.class).setup()) {
             View root=content(c.get());layout(root,320,640);readable(root);
-            assertNotNull(text(root,"文件"));Button send=button(root,"发送文件");assertNotNull(send);assertTrue(send.isShown());
-            assertEquals(1,send.getLayout().getLineCount());
-            assertTrue(send.getLayout().getLineWidth(0)<=send.getWidth()-send.getCompoundPaddingLeft()-send.getCompoundPaddingRight());
+            assertNotNull(text(root,"文件"));java.lang.reflect.Field field=HubFilesActivity.class.getDeclaredField("sendButton");field.setAccessible(true);View send=(View)field.get(c.get());assertNotNull(send);assertTrue(send.isShown());
+            assertTrue(send.getWidth()>=48);assertNotNull(send.getContentDescription());
             text(root,"传输任务").performClick();layout(root,320,640);
-            assertNull(button(root,"发送文件"));readable(root);
+            assertTrue(send.isShown());assertFalse(send.isEnabled());readable(root);
             snapshot(root,"phone-files-font150.png");
         }
     }
@@ -198,8 +198,8 @@ public class HubMobileUiTest {
             View root=content(c.get());layout(root,800,1200);
             View input=(View)text(root,"系统快捷键").getParent().getParent().getParent();
             View help=(View)text(root,"使用手册").getParent().getParent().getParent();
-            View compatible=(View)text(root,"兼容主机列表").getParent().getParent().getParent();
-            assertNotNull(text(input,"输入"));assertNotNull(text(help,"帮助"));assertNotNull(text(compatible,"高级与兼容"));
+            View compatible=(View)text(root,"音视频与输入高级设置").getParent().getParent().getParent();
+            assertNotNull(text((View)input.getParent(),"输入"));assertNotNull(text((View)help.getParent(),"帮助"));assertNotNull(text((View)compatible.getParent(),"高级"));
             assertNull(text(compatible,"系统快捷键"));assertNull(text(compatible,"使用手册"));
             ((View)text(root,"使用手册").getParent().getParent()).performClick();
             AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();assertTrue(dialog.isShowing());dialog.dismiss();
@@ -215,9 +215,9 @@ public class HubMobileUiTest {
             java.lang.reflect.Field slotField=HubActivity.class.getDeclaredField("pageSlot");slotField.setAccessible(true);
             FrameLayout slot=(FrameLayout)slotField.get(activity);ScrollView scroll=(ScrollView)slot.getChildAt(2);
             View page=((FrameLayout)scroll.getChildAt(0)).getChildAt(0);
-            assertEquals(680,page.getWidth());assertEquals((scroll.getWidth()-page.getWidth())/2,page.getLeft());
+            assertEquals(720,page.getWidth());assertEquals((scroll.getWidth()-page.getWidth())/2,page.getLeft());
             assertEquals(0,viewsOfType(page,android.widget.Spinner.class));
-            ((View)text(root,"副屏方向").getParent().getParent()).performClick();
+            ((View)text(root,"平板发起时的方向").getParent().getParent()).performClick();
             AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();dialog.getListView().performItemClick(null,2,2);
             java.lang.reflect.Method degrees=HubActivity.class.getDeclaredMethod("selectedOrientation");degrees.setAccessible(true);assertEquals(90,degrees.invoke(activity));
             ((View)text(root,"输出设备").getParent().getParent()).performClick();
@@ -235,11 +235,11 @@ public class HubMobileUiTest {
         window(320,640,1.5f);
         try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {
             View root=content(c.get());layout(root,320,640);
-            for(int page:new int[]{1,2}) {
+            for(int page:new int[]{1,2,4}) {
                 try{java.lang.reflect.Method show=HubActivity.class.getDeclaredMethod("showPage",int.class);show.setAccessible(true);show.invoke(c.get(),page);}
                 catch(Exception error){throw new AssertionError(error);}
                 layout(root,320,640);readable(root);
-                snapshot(root,"phone-"+(page==1?"connection":"settings")+"-font150.png");
+                snapshot(root,"phone-"+(page==1?"connection":page==4?"account":"settings")+"-font150.png");
             }
         }
     }
@@ -281,7 +281,7 @@ public class HubMobileUiTest {
             layout(root,800,320);toolbar.show();layout(root,800,320);toolbar.refreshLayout();layout(root,800,320);
             for(String name:new String[]{"快捷键","输入","画面"}) {
                 text(root,name).performClick();layout(root,800,320);
-                for(String action:new String[]{"收起","键盘","剪贴板","断开连接"}) {
+                for(String action:new String[]{"收起","键盘","剪贴板","退出"}) {
                     TextView button=button(root,action);Rect bounds=new Rect();
                     assertTrue("not visible: "+action,button.getGlobalVisibleRect(bounds));assertTrue("clipped target: "+action+" height="+bounds.height()+" scale="+activity.getResources().getDisplayMetrics().density,bounds.height()>=48);
                 }

@@ -18,11 +18,11 @@ import org.json.JSONObject;
 
 /** One explicit dark palette for streaming controls and their secondary menus. */
 public final class HubStreamUi {
-    public static final int BACKGROUND = 0xFF111821, SURFACE = 0xFF1B2432, CARD = 0xFF263244, BORDER = 0xFF3C4B60;
-    public static final int TEXT = 0xFFEEF3FA, MUTED = 0xFFB5C2D4, ACCENT = 0xFF9AC1FF;
-    public static final int SELECTED = 0xFF304766, DANGER = 0xFFFFB4BC, SUCCESS = 0xFF77DCB2;
+    public static final int BACKGROUND = 0xFF12171F, SURFACE = 0xFF1A212C, CARD = 0xFF232B38, BORDER = 0xFF3C4B60;
+    public static final int TEXT = 0xFFEEF3FA, MUTED = 0xFFB5C2D4, ACCENT = 0xFFA3BFFA;
+    public static final int SELECTED = 0xFF22345A, DANGER = 0xFFFFB4BC, SUCCESS = 0xFF77DCB2;
     public static final int WARNING = 0xFFFFCD70;
-    public static final int PRIMARY = 0xFF2D61B4;
+    public static final int PRIMARY = 0xFF2F59D6;
 
     private HubStreamUi() { }
     public static Context context(Context source) { return new ContextThemeWrapper(source, R.style.HubControlDialog); }
@@ -39,15 +39,20 @@ public final class HubStreamUi {
     }
     private static AlertDialog.Builder builder(Context source, Context themed, int theme) {
         return new AlertDialog.Builder(themed, theme) {
-            @Override public AlertDialog show() {
-                AlertDialog dialog = super.show();
-                if (dialog.getWindow() != null) {
-                    keepColors(dialog.getWindow().getDecorView());
-                    android.util.DisplayMetrics metrics = source.getResources().getDisplayMetrics();
-                    int width = Math.round(HubWindowLayout.of(source).widthDp * metrics.density);
-                    dialog.getWindow().setLayout(Math.max(1, Math.min(Math.round(520 * metrics.density),
-                            width - Math.round(32 * metrics.density))), -2);
-                }
+            @Override public AlertDialog create() {
+                AlertDialog dialog = super.create();
+                // Works for both builder.show() and create()/setOnShowListener()/show().
+                // A caller's validation listener must not bypass shared sizing and colors.
+                dialog.getWindow().getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+                    @Override public void onViewAttachedToWindow(View view) {
+                        keepColors(view);
+                        android.util.DisplayMetrics metrics = source.getResources().getDisplayMetrics();
+                        int width = Math.round(HubWindowLayout.of(source).widthDp * metrics.density);
+                        dialog.getWindow().setLayout(Math.max(1, Math.min(Math.round(520 * metrics.density),
+                                width - Math.round(32 * metrics.density))), -2);
+                    }
+                    @Override public void onViewDetachedFromWindow(View view) { }
+                });
                 return dialog;
             }
         };
@@ -62,7 +67,7 @@ public final class HubStreamUi {
         float density = source.getResources().getDisplayMetrics().density;
         ScrollView scroll = new ScrollView(source);
         scroll.setFillViewport(false);
-        scroll.setClipToPadding(false);
+        scroll.setClipToPadding(true);
         scroll.setPadding(dp(density, 8), 0, dp(density, 8), 0);
         int maxHeight = Math.min(dp(density, 520), Math.round(HubWindowLayout.of(source).heightDp * density * 0.56f));
         scroll.setLayoutParams(new ViewGroup.LayoutParams(-1, Math.max(dp(density, 160), maxHeight)));
@@ -70,8 +75,11 @@ public final class HubStreamUi {
         LinearLayout content = new LinearLayout(source);
         content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+        boolean missingBreakdown = false;
         try {
             JSONObject diagnostic = new JSONObject(HubSessionDiagnostics.read(source));
+            JSONObject coverage = HubSessionDiagnostics.startupCoverage(diagnostic);
+            missingBreakdown = coverage.optBoolean("available") && coverage.optLong("measuredMs") == 0;
             JSONObject phases = diagnostic.optJSONObject("phases");
             long firstFrame = phases == null ? -1 : phases.optLong("first-frame", -1);
             if (firstFrame >= 0) {
@@ -90,12 +98,15 @@ public final class HubStreamUi {
         if (timeline.length() == 0) {
             content.addView(text(source, "暂无阶段记录。完成一次连接后会显示各阶段耗时。", 14, muted), spaced(density, 0, 0, 8));
         } else {
+            if (missingBreakdown) content.addView(text(source, "阶段记录不完整，暂无可用的连接耗时分段。", 14, muted), spaced(density, 0, 0, 8));
             for (int i = 0; i < timeline.length(); i++) {
                 JSONObject row = timeline.optJSONObject(i);
-                if (row == null) continue;
+                if (row == null || row.optBoolean("summary") || "首帧出画".equals(row.optString("label")) || "首帧".equals(row.optString("label")) || (row.has("durationMs") && row.optLong("durationMs") == 0)) continue;
+                if (missingBreakdown && "尚未归因的等待".equals(row.optString("label"))) continue;
                 String kind = row.optString("kind");
                 String value = "event".equals(kind)
                         ? "连接后 " + duration(row.optLong("eventMs", -1))
+                        : "checkpoint".equals(kind) ? "检查时 " + duration(row.optLong("checkpointMs", -1))
                         : duration(row.optLong("durationMs", -1));
                 boolean slowest = row.optBoolean("slowest");
                 String label = row.optString("label") + (slowest ? " · 最慢" : "");
@@ -173,7 +184,6 @@ public final class HubStreamUi {
 
     private static String duration(long millis) {
         if (millis < 0) return "暂无";
-        if (millis < 1000) return millis + " ms";
-        return String.format(java.util.Locale.ROOT, "%.1f 秒", millis / 1000d);
+        return millis + " ms";
     }
 }

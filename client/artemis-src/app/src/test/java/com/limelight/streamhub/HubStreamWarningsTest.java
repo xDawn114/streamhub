@@ -11,6 +11,16 @@ import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=28,manifest=Config.NONE,application=Application.class)
 public class HubStreamWarningsTest {
+    @Test public void bannerExpiresWithoutResettingAndDismissalPreservesIndicator(){
+        Application app=RuntimeEnvironment.getApplication();
+        app.getSharedPreferences("streamhub_controls",0).edit().putBoolean("warning_network",true).putBoolean("warning_load",true).commit();
+        HubStreamWarnings warnings=new HubStreamWarnings(app);int mask=warnings.activeMask(false,true);
+        assertEquals(2,mask);assertTrue(warnings.bannerVisible(mask,100));assertTrue(warnings.bannerVisible(mask,6099));
+        assertFalse(warnings.bannerVisible(mask,6100));assertFalse(warnings.bannerVisible(mask,9000));
+        assertTrue(warnings.bannerVisible(3,9100));warnings.dismissForSession();
+        assertFalse(warnings.bannerVisible(3,9200));assertEquals(3,warnings.activeMask(true,true));
+        assertTrue(new HubStreamWarnings(app).bannerVisible(3,9300));
+    }
     @Test public void sessionMuteSurvivesReopeningAndDoneUntilExplicitlyRestored() {
         android.app.Activity activity=org.robolectric.Robolectric.buildActivity(android.app.Activity.class).setup().get();
         activity.getSharedPreferences("streamhub_controls",0).edit().putBoolean("warning_network",true).putBoolean("warning_load",true).commit();

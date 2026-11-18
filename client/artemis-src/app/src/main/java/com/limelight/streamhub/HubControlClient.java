@@ -111,6 +111,14 @@ public final class HubControlClient {
                 .readTimeout(3, TimeUnit.SECONDS).callTimeout(3, TimeUnit.SECONDS).build());
     }
 
+    /** Backend release includes an acknowledged close and a positive idle probe. */
+    public JSONObject requestSessionEnd(JSONObject body) throws Exception {
+        JSONObject answer = request("session/end", body, client.newBuilder().connectTimeout(2, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS).callTimeout(8, TimeUnit.SECONDS).build());
+        if (body.optBoolean("endBackend")) HubSessionEndQueue.confirmReceipt(body, answer);
+        return answer;
+    }
+
     /** Bounded independently from preparation, requests and cleanup. */
     public JSONObject requestHeartbeat(JSONObject body) throws Exception {
         return request("session/heartbeat", body, client.newBuilder().connectTimeout(1, TimeUnit.SECONDS)

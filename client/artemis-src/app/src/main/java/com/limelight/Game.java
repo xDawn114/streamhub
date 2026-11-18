@@ -295,6 +295,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     public static final String EXTRA_STREAMHUB_MODE = RtStreamSession.EXTRA_MODE;
     private String streamHubMode;
     private RtInputToolbar streamHubInputToolbar;
+    private AndroidAudioRenderer hubAudioRenderer;
+    private String hubPreviewDeviceId="";
+    private boolean hubFullscreen=true;
     private String hubConnectionState = "正在连接电脑…";
     /** Latest renderer statistics, reused by the in-stream diagnostics panel. */
     private Display hubStreamingDisplay;
@@ -423,6 +426,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // Read the stream preferences
         prefConfig = PreferenceConfiguration.readPreferences(this);
         streamHubMode = RtStreamSession.mode(getIntent());
+        if(isHubManagedSession())hubPreviewDeviceId=new com.limelight.streamhub.HubStore(this).get("deviceId","");
         quitOnStop = getIntent().getBooleanExtra("HubManaged", false);
         tombstonePrefs = Game.this.getSharedPreferences("DecoderTombstone", 0);
 
@@ -490,7 +494,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 prefConfig.height = preparedHeight;
                 displayWidth = preparedWidth;
                 displayHeight = preparedHeight;
-                prefConfig.videoScaleMode = PreferenceConfiguration.ScaleMode.FIT;
             }
             applyHubQualityPreset();
             displayWidth = prefConfig.width; displayHeight = prefConfig.height;
@@ -766,6 +769,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 this);
         if (hubSessionLease != null) decoderRenderer.setFirstFrameRenderedListener(() -> {
             hubSessionLease.firstFrame(hubStartupTrace);
+            if("remote".equals(streamHubMode))runOnUiThread(()->streamView.postDelayed(()->{
+                if(connected&&!isFinishing())com.limelight.streamhub.HubDevicePreview.capture(Game.this,streamView,hubPreviewDeviceId);
+            },1500));
             android.util.Log.i("HubConnection", "stream-first-frame elapsedMs=" +
                     hubSessionLease.connectionElapsedMs());
             if (getIntent().getBooleanExtra("HubCustomResolution", false) && getIntent().getBooleanExtra("HubPreparedDegraded", false))
@@ -977,7 +983,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         overlayToggleButton = findViewById(R.id.overlayToggleZoomButton);
         setupOverlayToggleButton();
-        if (streamHubMode != null && !onExternelDisplay) {
+        if ((streamHubMode != null || getIntent().getBooleanExtra("HubCompatibleUi",false)) && !onExternelDisplay) {
             hubLiveControls = new HubLiveControls(this);
             if ("remote".equals(streamHubMode) && isHubManagedSession())
                 hubDesktopInput = new HubDesktopInput(this, getIntent().getStringExtra(EXTRA_HOST), getIntent().getStringExtra("HubLeaseId"));
@@ -1003,7 +1009,41 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 @Override public void toggleStats() { Game.this.toggleHUD(); }
                 @Override public void showDiagnostics() { Game.this.showStreamDiagnostics(); }
                 @Override public void showAudioSettings() { Game.this.showAudioOutputSettings(); }
+                @Override public boolean audioAvailable() { return !RtStreamSession.TABLET.equals(streamHubMode)
+                        && (!isHubManagedSession() || com.limelight.streamhub.HubAudioPolicy.playOnAndroid(streamHubMode,prefConfig.audioOutputMode)); }
+                @Override public boolean audioMuted() { return hubAudioRenderer!=null && hubAudioRenderer.isMuted(); }
+                @Override public void toggleAudio() { if(hubAudioRenderer!=null)hubAudioRenderer.setMuted(!hubAudioRenderer.isMuted()); }
+                @Override public boolean viewOnly() { return conn!=null && !conn.isInputEnabled(); }
+                @Override public void toggleViewOnly() {
+                    if(conn==null||!connected){Toast.makeText(Game.this,"连接成功后可切换仅观看",Toast.LENGTH_SHORT).show();return;}
+                    boolean allow=!conn.isInputEnabled();
+                    if(hubDesktopInput!=null)hubDesktopInput.setInputEnabled(allow);
+                    try {conn.setInputEnabled(allow);}
+                    catch(RuntimeException error){LimeLog.warning("Input mode release: "+error);Toast.makeText(Game.this,"已停止输入，部分按键未能释放，建议断开后重连",Toast.LENGTH_LONG).show();}
+                    commitTextHandler.removeCallbacks(flushCommitTextQueue);commitTextQueue.clear();
+                }
+                @Override public boolean pipAvailable() { return Build.VERSION.SDK_INT>=26 && getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE); }
+                @Override public void enterPip() {
+                    if(Build.VERSION.SDK_INT<26||!connected)return;
+                    try { if(!enterPictureInPictureMode(getPictureInPictureParams(false)))Toast.makeText(Game.this,"系统未允许显示小窗",Toast.LENGTH_SHORT).show(); }
+                    catch(IllegalStateException|IllegalArgumentException error){LimeLog.warning("PiP: "+error);Toast.makeText(Game.this,"当前窗口无法进入小窗",Toast.LENGTH_SHORT).show();}
+                }
+                @Override public boolean fullscreen(){return hubFullscreen;}
+                @Override public void toggleFullscreen(){
+                    hubFullscreen=!hubFullscreen;
+                    if(hubFullscreen)getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                    else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                    hideSystemUi.run();
+                }
+                @Override public Rect videoBounds() { return hubVideoBounds(); }
                 @Override public void showMouseMode() { showHubTouchModes(); }
+                @Override public boolean trackpadMode(){return prefConfig.touchscreenTrackpad;}
+                @Override public void setTrackpadMode(boolean value){
+                    releaseHubTouches();
+                    android.content.SharedPreferences controls=getSharedPreferences("streamhub_controls",MODE_PRIVATE);
+                    int mode=value?2:controls.getBoolean("touch_compatibility",true)?0:1;
+                    controls.edit().putInt("input_mode",mode).apply();applyMouseMode(value?2:mode==1?0:1);
+                }
                 @Override public void showWarningSettings() { hubWarnings.show(Game.this,Game.this::updateHubManagedNetworkWarning); }
                 @Override public void showLockSettings() { if(hubLiveControls!=null)hubLiveControls.showLockSettings(); }
                 @Override public void showDisplaySettings() {
@@ -1027,7 +1067,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             String frameRate = Math.abs(chosenFrameRate - Math.round(chosenFrameRate)) < 0.01f
                     ? Integer.toString(Math.round(chosenFrameRate)) : String.format(Locale.CHINA, "%.1f", chosenFrameRate);
             streamHubInputToolbar.setSessionInfo(targetName + " · " + modeTitle,
-                    "目标 " + displayWidth + " × " + displayHeight + " · " + frameRate + " 帧/秒 · " + HubRoutes.label(host));
+                    "目标 " + displayWidth + " × " + displayHeight + " · " + frameRate + " 帧/秒 · " + hubActualRoute(host) + " · " + host);
             streamHubInputToolbar.setStatsVisible(prefConfig.enablePerfOverlay);
             if (isHubManagedSession()) positionHubOverlays();
         }
@@ -1079,7 +1119,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @SuppressLint("ClickableViewAccessibility")
     private void setupOverlayToggleButton() {
         if (overlayToggleButton != null) {
-            if (prefConfig.showOverlayZoomToggleButton && !(isHubManagedSession() && !onExternelDisplay)) {
+            if (prefConfig.showOverlayZoomToggleButton && !(streamHubInputToolbar != null && !onExternelDisplay)) {
                 overlayToggleButton.setVisibility(View.VISIBLE);
 
                 // Set initial appearance based on current state
@@ -1404,6 +1444,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         notificationOverlayView.setTextSize(12);
         notificationOverlayView.setMaxWidth(Math.max(1, getResources().getDisplayMetrics().widthPixels - Math.round(UiHelper.dpToPx(this, 32))));
         notificationOverlayView.setElevation(UiHelper.dpToPx(this, 26));
+        android.graphics.drawable.GradientDrawable warningBackground=new android.graphics.drawable.GradientDrawable();
+        warningBackground.setColor(0xE61A212C);warningBackground.setCornerRadius(UiHelper.dpToPx(this,12));
+        notificationOverlayView.setBackground(warningBackground);
+        notificationOverlayView.setPadding((int)UiHelper.dpToPx(this,16),(int)UiHelper.dpToPx(this,12),(int)UiHelper.dpToPx(this,16),(int)UiHelper.dpToPx(this,12));
+        notificationOverlayView.setTextColor(com.limelight.streamhub.HubStreamUi.TEXT);
+        notificationOverlayView.setMinHeight((int)UiHelper.dpToPx(this,48));
+        notificationOverlayView.setOnClickListener(v->{if(hubWarnings!=null)hubWarnings.dismissForSession();updateHubManagedNetworkWarning();});
+        notificationOverlayView.setContentDescription("串流提示，点按后本次不再提示");
         if (!prefConfig.enablePerfOverlayBottom) {
             FrameLayout.LayoutParams statsParams = (FrameLayout.LayoutParams) performanceOverlayView.getLayoutParams();
             statsParams.topMargin = Math.round(UiHelper.dpToPx(this, 64));
@@ -2049,7 +2097,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
             // In multi-window mode on N+, we need to drop our layout flags or we'll
             // be drawing underneath the system UI.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode()) {
+            if (!hubFullscreen || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode())) {
                 Game.this.getWindow().getDecorView().setSystemUiVisibility(
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
             }
@@ -2084,7 +2132,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // flag. It will cause us to collide with the system UI.
         // This function will also be called for PiP so we can cover
         // that case here too.
-        if (isInMultiWindowMode) {
+        if (isInMultiWindowMode || !hubFullscreen) {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             decoderRenderer.notifyVideoBackground();
         }
@@ -2101,7 +2149,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     protected void onDestroy() {
         com.limelight.streamhub.HubSystemShortcuts.deactivate(hubShortcutTarget);
         super.onDestroy();
-        if (hubSessionLease != null && !connectionStopRequested) {
+        if (hubSessionLease != null && !connectionStopRequested && !hubRotationReconnect) {
             if (conn != null && attemptedConnection) stopConnection();
             else new Thread(hubSessionLease::end, "Hub-EndUnusedLease").start();
         }
@@ -2109,6 +2157,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (hubLiveControls != null) hubLiveControls.close();
         if (hubDesktopInput != null) hubDesktopInput.close();
         if (streamHubInputToolbar != null) streamHubInputToolbar.dispose();
+        if (notificationOverlayView != null) notificationOverlayView.removeCallbacks(hubHideAdvisory);
         commitTextHandler.removeCallbacks(flushCommitTextQueue);
         commitTextQueue.clear();
 
@@ -2162,6 +2211,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
             // Ungrab input to prevent further input device notifications
             setInputGrabState(false);
+            // Home can resume before onStop; publish the cleanup barrier first.
+            if (isHubManagedSession() && !hubRotationReconnect) stopConnection();
         }
 
         super.onPause();
@@ -2191,7 +2242,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             displayedFailureDialog = true;
             stopConnection();
         }
-        if (hubSessionLease != null && !connectionStopRequested) new Thread(hubSessionLease::end, "Hub-EndLease").start();
+        if (hubSessionLease != null && !connectionStopRequested && !hubRotationReconnect)
+            new Thread(hubSessionLease::end, "Hub-EndLease").start();
         if (conn != null && decoderRenderer != null && prefConfig != null) {
             int videoFormat = decoderRenderer.getActiveVideoFormat();
             String message = null;
@@ -2772,6 +2824,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     public boolean sendClipboard(boolean force) {
+        if(conn!=null&&!conn.isInputEnabled()){Toast.makeText(this,"仅观看时不向电脑发送剪贴板",Toast.LENGTH_SHORT).show();return false;}
         if (isHubManagedSession()) return sendHubClipboard(force);
         if (httpConn == null) {
             LimeLog.warning("httpConn not ready, cannot send clipboard!");
@@ -2916,6 +2969,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             HubStore store = new HubStore(this);
             control = new HubControlClient(host, store.invitation());
             org.json.JSONObject payload = source == null ? null : HubClipboard.capture(this, source);
+            if("set".equals(action)&&conn!=null&&!conn.isInputEnabled())throw new java.io.IOException("仅观看时不向电脑发送剪贴板。");
             org.json.JSONObject result = control.clipboard(streamHubMode, lease, store.clientId(), action, payload);
             if ("get".equals(action)) {
                 final ClipData clip = HubClipboard.restore(this, result.optJSONObject("payload"));
@@ -3737,7 +3791,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         // A gesture never falls through from partially delivered touch to mouse.
                         if(nativeGesture) {
                             trySendTouchEvent(view,event);
-                            if(event.getActionMasked()==MotionEvent.ACTION_UP && hubDesktopInput!=null)hubDesktopInput.touchedLoginField();
+                            if(event.getActionMasked()==MotionEvent.ACTION_UP && hubDesktopInput!=null && conn.isInputEnabled())hubDesktopInput.touchedLoginField();
                             return true;
                         }
                         return handleTouchInput(event,touchContextMap,view != streamView);
@@ -4150,15 +4204,18 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         return hubConnectionStop.await(timeoutMillis, TimeUnit.MILLISECONDS);
     }
 
+    public static boolean isHubConnectionStopping() {
+        return hubConnectionStop.getCount() != 0;
+    }
+
     private void stopConnection() {
         final boolean hubManaged = getIntent().getBooleanExtra("HubManaged", false);
         if (!connectionStopRequested && conn != null && (connecting || connected || (hubManaged && attemptedConnection))) {
             connectionStopRequested = true;
             final NvConnection stoppingConnection = conn;
             final NvHTTP stoppingHttp = httpConn;
-            // An ordinary tablet exit ends capture before releasing its lease.
-            // The host may then keep the idle engine briefly with its display
-            // detached. Rotation keeps its app and lease exactly as before.
+            // Tablet uses its existing media quit; remote ends are lease-scoped
+            // by the product host. Rotation retains both app and lease.
             final boolean shouldQuit = HubSessionLease.shouldQuitBackend(hubManaged, streamHubMode, quitOnStop, hubRotationReconnect);
             final CountDownLatch stopFinished = hubManaged ? new CountDownLatch(1) : null;
             if (stopFinished != null) hubConnectionStop = stopFinished;
@@ -4203,8 +4260,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         // lease heartbeat alive so the host can reuse the healthy
                         //副屏引擎 and only change its display mode. Ordinary exits
                         // still end the lease and clean the virtual display.
-                        if (hubSessionLease != null && !hubRotationReconnect) hubSessionLease.end();
-                        if (stopFinished != null) stopFinished.countDown();
+                        try {
+                            if (hubSessionLease != null && !hubRotationReconnect) hubSessionLease.endAfterStream();
+                        } finally {
+                            if (stopFinished != null) stopFinished.countDown();
+                        }
                     }
                 }
             }.start();
@@ -4557,7 +4617,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 });
                 hubStartupTrace.event("connection-start-requested");
             }
-            conn.start(muteClientAudio ? new RtStreamSession.MutedAudioRenderer() : new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx),
+            hubAudioRenderer=muteClientAudio?null:new AndroidAudioRenderer(Game.this,prefConfig.enableAudioFx);
+            conn.start(muteClientAudio ? new RtStreamSession.MutedAudioRenderer() : hubAudioRenderer,
                     decoderRenderer, Game.this);
         }
 
@@ -4667,7 +4728,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     public void onSystemUiVisibilityChange(int visibility) {
         // Don't do anything if we're not connected
-        if (!connected) {
+        if (!connected || !hubFullscreen) {
             return;
         }
 
@@ -4697,6 +4758,29 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     }
 
+    private String hubActualRoute(String host) {
+        com.limelight.streamhub.HubStore store=new com.limelight.streamhub.HubStore(this);
+        try {
+            com.limelight.streamhub.HubTransports.Settings settings=store.transport();
+            boolean vpn=false;
+            android.net.ConnectivityManager manager=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+            android.net.NetworkCapabilities caps=manager.getNetworkCapabilities(manager.getActiveNetwork());
+            vpn=caps!=null&&caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN);
+            return com.limelight.streamhub.HubAddressLabels.actualRoute(host,com.limelight.streamhub.HubAddressLabels.currentLinks(),settings.provider,vpn,HubRoutes.usableAddresses(settings.manualAddresses));
+        } catch(IllegalArgumentException error){return com.limelight.streamhub.HubAddressLabels.describe(host,com.limelight.streamhub.HubAddressLabels.currentLinks());}
+    }
+    private Rect hubVideoBounds() {
+        if(streamView==null||streamView.getWidth()==0||displayWidth<=0||displayHeight<=0)return null;
+        float width=streamView.getWidth()*streamView.getScaleX(),height=streamView.getHeight()*streamView.getScaleY();
+        if(prefConfig.videoScaleMode==PreferenceConfiguration.ScaleMode.FIT){
+            float ratio=Math.min(width/displayWidth,height/displayHeight);width=displayWidth*ratio;height=displayHeight*ratio;
+        }
+        float x=streamView.getX()+streamView.getWidth()/2f-width/2f,y=streamView.getY()+streamView.getHeight()/2f-height/2f;
+        return new Rect(Math.round(x),Math.round(y),Math.round(x+width),Math.round(y+height));
+    }
+    private final Runnable hubHideAdvisory=()->{
+        if(notificationOverlayView!=null&&!isFinishing())notificationOverlayView.setVisibility(View.GONE);
+    };
     private void updateHubManagedNetworkWarning() {
         HubNetworkLadder ladder = hubNetworkLadder;
         boolean degraded = ladder != null && ladder.isNetworkDegraded();
@@ -4708,7 +4792,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     : streamLoad ? "已连接 · 串流负载较高" : "已连接");
             boolean networkVisible = hubWarnings == null ? degraded : hubWarnings.networkVisible(degraded);
             boolean loadVisible = hubWarnings == null ? streamLoad : hubWarnings.loadVisible(streamLoad);
-            requestedNotificationOverlayVisibility = (networkVisible || loadVisible) && !prefConfig.disableWarnings
+            int mask=hubWarnings==null?(networkVisible?1:0)|(loadVisible?2:0):hubWarnings.activeMask(degraded,streamLoad);
+            long now=android.os.SystemClock.elapsedRealtime();
+            if(streamHubInputToolbar!=null)streamHubInputToolbar.setWarning(mask!=0,(mask&1)!=0?"网络拥塞":(mask&2)!=0?"解码或渲染负载较高":"");
+            requestedNotificationOverlayVisibility = (hubWarnings==null?mask!=0:hubWarnings.bannerVisible(mask,now)) && !prefConfig.disableWarnings
                     ? View.VISIBLE : View.GONE;
             if (!isHidingOverlays && notificationOverlayView != null) {
                 if (networkVisible) {
@@ -4722,6 +4809,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     notificationOverlayView.setText(getResources().getString(R.string.streamhub_stream_load_msg));
                 }
                 notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
+                notificationOverlayView.removeCallbacks(hubHideAdvisory);
+                if(requestedNotificationOverlayVisibility==View.VISIBLE){
+                    notificationOverlayView.append("  ·  点按关闭");
+                    notificationOverlayView.postDelayed(hubHideAdvisory,hubWarnings==null?6000:hubWarnings.remaining(now));
+                }
             }
         });
     }
@@ -4804,7 +4896,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void onBackPressed() {
-        if (isHubManagedSession() && streamHubInputToolbar != null) {
+        if (streamHubInputToolbar != null) {
             // Back is a session action for the unified client. Close an open
             // local panel first; when the desktop view is unobstructed, leave
             // the session directly instead of opening the legacy game menu.
@@ -5182,7 +5274,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void showGameMenu(GameInputDevice device) {
-        if (isHubManagedSession() && streamHubInputToolbar != null) {
+        if (streamHubInputToolbar != null) {
             if (!streamHubInputToolbar.collapseOrConsumeBack()) streamHubInputToolbar.show();
             return;
         }
@@ -5196,14 +5288,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     public void hideGameMenu() {
-        if (isHubManagedSession() && streamHubInputToolbar != null) streamHubInputToolbar.collapseOrConsumeBack();
+        if (streamHubInputToolbar != null) streamHubInputToolbar.collapseOrConsumeBack();
         if (gameMenuCallbacks != null) {
             gameMenuCallbacks.hideMenu();
         }
     }
 
     private void updateFloatingButtonVisibility(boolean show) {
-        floatingMenuButton.setVisibility(show && !(isHubManagedSession() && !onExternelDisplay) ? View.VISIBLE : View.GONE);
+        floatingMenuButton.setVisibility(show && !(streamHubInputToolbar != null && !onExternelDisplay) ? View.VISIBLE : View.GONE);
     }
 
     public void toggleFloatingButtonVisibility() {
@@ -5263,7 +5355,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     private void enqueueCommitText(String text) {
-        if (text == null || text.length() == 0 || !connected) {
+        if (text == null || text.length() == 0 || !connected || (conn!=null&&!conn.isInputEnabled())) {
             return;
         }
         byte[] utf8 = text.getBytes(StandardCharsets.UTF_8);

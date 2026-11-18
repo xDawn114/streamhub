@@ -82,6 +82,7 @@ internal sealed partial class Deployment
             }
             if (rollbackRecord is not null) catalog.Commit(rollbackRecord);
             committed = true;
+            WaitForEncoderPrewarm();
             Log("安装完成：" + _root);
             if (existing) Log("上个版本备份：" + backup);
         }

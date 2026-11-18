@@ -63,9 +63,9 @@ public final class HubUpdates {
     private final OkHttpClient http = new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
             .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).callTimeout(10, TimeUnit.MINUTES).build();
     private final HubUpdatePolicy.Trust trust;
-    private final String previousInstall;
     private volatile Call currentCall;
     private volatile String message;
+    private volatile String operation = "检查更新";
     private volatile HubUpdatePolicy.Manifest available;
     private volatile File downloaded;
     private volatile int progress = -1;
@@ -80,8 +80,7 @@ public final class HubUpdates {
             loaded = new HubUpdatePolicy.Trust(json.get("feed").getAsString(), json.get("manifestPublicKey").getAsString());
         } catch (Exception error) { loaded = new HubUpdatePolicy.Trust("", ""); }
         trust = loaded;
-        message = trust.configured() ? "尚未检查更新。" : "更新发布源尚未接入，当前使用手动安装。";
-        previousInstall = HubUpdateInstallState.describe(preferences.getInt("installPrevious", 0), preferences.getInt("installTarget", 0),
+        message = HubUpdateInstallState.describe(preferences.getInt("installPrevious", 0), preferences.getInt("installTarget", 0),
                 preferences.getString("installChannel", ""), preferences.getLong("installStarted", 0), BuildConfig.VERSION_CODE,
                 BuildConfig.STREAMHUB_INTERNAL ? "internal" : "stable", System.currentTimeMillis());
         if (trust.configured()) worker.execute(this::restoreCached);
@@ -96,11 +95,9 @@ public final class HubUpdates {
     public boolean ready() { return downloaded != null && available != null; }
     public boolean checkDue() { return HubUpdateSchedule.due(autoCheck(), preferences.getLong("nextCheck", 0), System.currentTimeMillis()); }
     public boolean lastCheckFailed() { return preferences.getInt("failures", 0) > 0; }
-    public String currentVersion() { return "当前\u00A0" + BuildConfig.VERSION_NAME + " / " + BuildConfig.VERSION_CODE + (BuildConfig.STREAMHUB_INTERNAL ? " · 内测渠道" : " · 正式渠道") +
-            (previousInstall.isEmpty() ? "" : "\n" + previousInstall); }
-    public String lastChecked() {
-        long value = preferences.getLong("lastChecked", 0);
-        return value == 0 ? "" : "上次成功检查：" + new java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA).format(new java.util.Date(value));
+    public String currentVersion() {
+        return "当前\u00A0" + BuildConfig.VERSION_NAME + " / " + BuildConfig.VERSION_CODE
+                + (BuildConfig.STREAMHUB_INTERNAL ? " · 内测渠道" : " · 正式渠道");
     }
     public void listen(Runnable listener) { if (!listeners.contains(listener)) listeners.add(listener); }
     public void unlisten(Runnable listener) { listeners.remove(listener); }
@@ -130,7 +127,7 @@ public final class HubUpdates {
         cancelled.set(false); progress = -1; changed();
         worker.execute(() -> {
             try {
-                state("正在检查并验证新版本…");
+                operation="检查更新";state("正在检查并验证新版本…");
                 byte[] envelope;
                 try (Response response = execute(trust.feed, 30)) {
                     requireResponse(response, trust.feed);
@@ -170,6 +167,7 @@ public final class HubUpdates {
         });
     }
     private void downloadCore() throws Exception {
+        operation="下载更新";
         HubUpdatePolicy.Manifest manifest = available;
         if (manifest == null || acceptedEnvelope == null) throw new IOException("请先检查更新。");
         manifest.requireFresh(System.currentTimeMillis());
@@ -265,7 +263,7 @@ public final class HubUpdates {
             activity.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.getPackageName())));
             return;
         }
-        cancelled.set(false); state("正在安装前重新验证更新包…");
+        operation="安装更新";cancelled.set(false); state("正在安装前重新验证更新包…");
         final File target = downloaded; final HubUpdatePolicy.Manifest manifest = available;
         worker.execute(() -> {
             try {
@@ -287,7 +285,7 @@ public final class HubUpdates {
                         try { activity.startActivity(install); }
                         catch (Exception error) { preferences.edit().remove("installTarget").commit(); throw error; }
                         state("已打开系统安装确认；取消后仍可重新安装。绑定和设置保留。");
-                    } catch (Exception error) { state("未开始安装：" + error.getMessage()); }
+                    } catch (Exception error) { com.limelight.LimeLog.warning("Update install preparation failed: "+error);state("暂时无法准备安装，请稍后重试。"); }
                     finally { running.set(false); changed(); }
                 });
             } catch (Exception error) { failed(error); running.set(false); changed(); }
@@ -309,7 +307,8 @@ public final class HubUpdates {
     private void failed(Exception error) {
         int failures = preferences.getInt("failures", 0);
         preferences.edit().putInt("failures", Math.min(4, failures + 1)).putLong("nextCheck", System.currentTimeMillis() + HubUpdateSchedule.retryDelay(failures)).commit();
-        state(cancelled.get() ? "更新操作已取消，可重试。" : "更新未完成，可重试：" + (error.getMessage() == null ? "网络或存储暂时不可用。" : error.getMessage()));
+        com.limelight.LimeLog.warning("Update " + operation + " failed: " + error);
+        state(cancelled.get() ? "更新操作已取消，可重试。" : "暂时无法"+operation+"，请稍后重试。");
     }
     private boolean unmetered() {
         ConnectivityManager manager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);

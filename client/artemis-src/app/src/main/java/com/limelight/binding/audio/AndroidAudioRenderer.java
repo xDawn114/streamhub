@@ -19,7 +19,13 @@ public class AndroidAudioRenderer implements AudioRenderer {
     private final Context context;
     private final boolean enableAudioFx;
 
-    private AudioTrack track;
+    private volatile AudioTrack track;
+    private boolean muted;
+    public synchronized void setMuted(boolean value) {
+        muted = value;
+        if (track != null) track.setVolume(value ? 0f : 1f);
+    }
+    public synchronized boolean isMuted() { return muted; }
     private long lastPendingLogMs;
 
     public AndroidAudioRenderer(Context context, boolean enableAudioFx) {
@@ -161,8 +167,11 @@ public class AndroidAudioRenderer implements AudioRenderer {
             }
 
             try {
-                track = createAudioTrack(channelConfig, sampleRate, bufferSize, lowLatency);
-                track.play();
+                synchronized (this) {
+                    track = createAudioTrack(channelConfig, sampleRate, bufferSize, lowLatency);
+                    track.setVolume(muted ? 0f : 1f);
+                    track.play();
+                }
 
                 // Successfully created working AudioTrack. We're done here.
                 LimeLog.info("Audio track configuration: "+bufferSize+" "+lowLatency);
@@ -230,11 +239,12 @@ public class AndroidAudioRenderer implements AudioRenderer {
     }
 
     @Override
-    public void cleanup() {
+    public synchronized void cleanup() {
         // Immediately drop all pending data
         track.pause();
         track.flush();
 
         track.release();
+        track = null;
     }
 }

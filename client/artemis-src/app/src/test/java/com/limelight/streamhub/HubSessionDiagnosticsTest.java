@@ -14,6 +14,11 @@ import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=28, application=android.app.Application.class)
 public class HubSessionDiagnosticsTest {
+    private static String metric(JSONObject performance,String label) throws Exception {
+        org.json.JSONArray rows=performance.getJSONArray("rows");
+        for(int i=0;i<rows.length();i++)if(label.equals(rows.getJSONObject(i).getString("label")))return rows.getJSONObject(i).getString("value");
+        throw new AssertionError("Missing metric: "+label);
+    }
     @Test public void boundedSamplesRetainRealSeparateRatesWithoutBindingSecrets() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         new HubStore(context).put("invitation", "fixture-binding-secret");
@@ -50,15 +55,15 @@ public class HubSessionDiagnosticsTest {
         assertEquals(1234, value.getJSONObject("phases").getLong("host-ready"));
         assertEquals(10000, value.getJSONObject("phases").getLong("serverinfo-200"));
         assertFalse(exported.contains("fixture-binding-secret")); assertFalse(exported.contains("invitation"));
-        assertTrue(HubSessionDiagnostics.summary(context).contains("扩展屏 · USB 有线"));
+        assertTrue(HubSessionDiagnostics.summary(context).contains("副屏 · 局域网/USB"));
         assertFalse(HubSessionDiagnostics.summary(context).contains("90.0 FPS"));
         JSONObject performance = HubSessionDiagnostics.performanceSummary(context);
-        assertEquals("35.0 FPS（中位数）", performance.getJSONArray("rows").getJSONObject(3).getString("value"));
-        assertEquals("35.9 FPS", performance.getJSONArray("rows").getJSONObject(4).getString("value"));
-        assertEquals("144.0 Hz · mode 7", performance.getJSONArray("rows").getJSONObject(5).getString("value"));
-        assertEquals("90.0 Hz · mode 2 · 状态：系统调度", performance.getJSONArray("rows").getJSONObject(6).getString("value"));
-        assertEquals("35.0–90.0 FPS", performance.getJSONArray("rows").getJSONObject(9).getString("value"));
-        assertEquals("60 个 · 丢帧 0（单点最多 0）", performance.getJSONArray("rows").getJSONObject(10).getString("value"));
+        assertEquals("35.0 FPS（中位数）", metric(performance,"实际渲染"));
+        assertEquals("35.9 FPS", metric(performance,"渲染均值"));
+        assertEquals("144.0 Hz", metric(performance,"屏幕刷新率"));
+        assertEquals("90.0 Hz", metric(performance,"请求刷新率"));
+        assertEquals("35.0–90.0 FPS", metric(performance,"渲染范围"));
+        assertEquals("60 个 · 丢帧 0", metric(performance,"采样"));
         String detail = HubSessionDiagnostics.detail(context);
         assertTrue(detail.contains("实际面板 144.0 Hz（mode 7，请求 90.0 Hz · mode 2 · 状态：系统调度"));
         assertTrue(detail.contains("首帧总耗时 5.4 秒"));

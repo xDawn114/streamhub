@@ -51,7 +51,10 @@ public class HubViewportToolbarTest {
         }
         return null;
     }
-    private static Button button(Fixture f,String text){return (Button)find(f.root,text);}
+    private static Button button(Fixture f,String text){
+        if("控制".equals(text)){try{var field=RtInputToolbar.class.getDeclaredField("entry");field.setAccessible(true);return (Button)field.get(f.toolbar);}catch(Exception error){throw new AssertionError(error);}}
+        return (Button)find(f.root,text);
+    }
     @Test public void adjustmentHasExplicitModeScaleResetAndFinishWithoutScrollingTheMenu() {
         Fixture f=new Fixture();f.start();f.layout(360,720);
         assertTrue(f.zoom);assertEquals(1,f.toggles);

@@ -63,10 +63,8 @@ public final class HubDisplayCapabilities {
             if (nativeMaximum > 0) maximum = nativeMaximum;
         }
         float requested = Math.min(90, maximum);
-        // This product opens the global StreamSettings entry point, which edits
-        // the base preferences. A legacy active game profile must not silently
-        // replace the FPS selected in that visible settings page.
-        android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context);
+        // The custom settings page and decoder read the same active profile.
+        android.content.SharedPreferences prefs = com.limelight.profiles.ProfilesManager.getInstance().getOverlayingSharedPreferences(context);
         // list_fps is the selected entry, including a selected custom numeric value.
         // custom_refresh_rate only remembers the editor's last input.
         if (prefs.contains("list_fps")) {

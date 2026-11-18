@@ -39,7 +39,7 @@ public final class HubTransportProbe {
             catch (Exception error) {
                 failure.addSuppressed(error);
                 String route = routeType.apply(groups.get(i).get(0));
-                details.add(("usb".equals(route) ? "USB 有线" : "remote".equals(route) ? "异地网络" : "局域网 / Wi-Fi") + "：" + explanation(error));
+                details.add(("usb".equals(route) ? "局域网/USB" : "remote".equals(route) ? "异地网络" : "局域网/USB") + "：" + explanation(error));
             }
         }
         IOException result = new IOException(details.isEmpty() ? "地址检测超时，请确认电脑在线后重试。" : String.join("\n", details));

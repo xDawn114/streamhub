@@ -8,8 +8,8 @@ import java.util.List;
 import java.util.Locale;
 
 /** Describes the Android-side path; it never guesses the computer's adapter from an IP. */
-final class HubAddressLabels {
-    static final class Link {
+public final class HubAddressLabels {
+    public static final class Link {
         final String name, address;
         final int prefix;
         Link(String name, String address, int prefix) {
@@ -21,7 +21,7 @@ final class HubAddressLabels {
 
     private HubAddressLabels() { }
 
-    static List<Link> currentLinks() {
+    public static List<Link> currentLinks() {
         List<Link> links = new ArrayList<>();
         try {
             for (NetworkInterface nic : Collections.list(NetworkInterface.getNetworkInterfaces())) {
@@ -36,26 +36,39 @@ final class HubAddressLabels {
         return links;
     }
 
-    static String describe(String host, List<Link> links) {
+    public static String describe(String host, List<Link> links) {
         if (!HubRoutes.isUsableIpv4(host)) return "其他地址";
         long target = ipv4(host);
-        if (target >= ipv4("100.64.0.0") && target <= ipv4("100.127.255.255")) return "异地通道";
+        if (target >= ipv4("100.64.0.0") && target <= ipv4("100.127.255.255")) return "异地地址";
         String result = "其他地址";
         int bestPrefix = -1;
         for (Link link : links) {
             if (!HubRoutes.isUsableIpv4(link.address) || link.prefix <= 0 || link.prefix > 32) continue;
             long mask = (0xffffffffL << (32 - link.prefix)) & 0xffffffffL;
             if ((target & mask) != (ipv4(link.address) & mask)) continue;
-            String label = link.name.contains("rndis") || link.name.contains("usb") || link.name.contains("ncm") ? "USB 共享"
-                    : link.name.startsWith("wlan") || link.name.startsWith("wifi") || link.name.startsWith("swlan") ? "Wi-Fi 通道"
-                    : link.name.startsWith("eth") || link.name.startsWith("en") ? "以太网通道" : "其他地址";
+            String label = link.name.contains("rndis") || link.name.contains("usb") || link.name.contains("ncm") ? "局域网/USB"
+                    : link.name.startsWith("wlan") || link.name.startsWith("wifi") || link.name.startsWith("swlan") ? "局域网/USB"
+                    : link.name.startsWith("eth") || link.name.startsWith("en") ? "局域网/USB" : "其他地址";
             if (link.prefix > bestPrefix) { result = label; bestPrefix = link.prefix; }
         }
         return result;
     }
 
-    static String line(String host, String currentHost, List<Link> links) {
+    public static String line(String host, String currentHost, List<Link> links) {
         return describe(host, links) + (host.equals(currentHost) ? " · 当前使用" : "") + "\n" + host;
+    }
+
+    public static String actualRoute(String host, List<Link> links, String provider,
+            boolean accountTunnelActive, List<String> manualAddresses) {
+        String addressKind = describe(host, links);
+        if ("局域网/USB".equals(addressKind)) return addressKind;
+        if ("manual".equals(provider) && manualAddresses.contains(host)) return "手动地址";
+        if ("异地地址".equals(addressKind) && accountTunnelActive) {
+            if ("tailscale".equals(provider)) return "Tailscale";
+            if ("self-hosted".equals(provider)) return "自建服务区";
+        }
+        // An address alone cannot identify which account provider carried it.
+        return addressKind;
     }
 
     private static long ipv4(String value) {

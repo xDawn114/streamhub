@@ -14,7 +14,8 @@ internal sealed class MediaIdentityException(int status, string message) : Inval
 }
 
 internal sealed class BackendApi(ProfileStore profiles,
-    Func<string, CancellationToken, Task<HttpClient>>? mediaClientFactory = null)
+    Func<string, CancellationToken, Task<HttpClient>>? mediaClientFactory = null,
+    Func<string, CancellationToken, Task<HttpClient>>? releaseClientFactory = null)
 {
     private const int MaximumClientListBytes = 256 * 1024;
     internal static readonly TimeSpan MediaIdentityTimeout = TimeSpan.FromSeconds(3);
@@ -158,6 +159,44 @@ internal sealed class BackendApi(ProfileStore profiles,
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         return value.EnumerateObject().Any(property => !names.Add(property.Name));
+    }
+
+    // Called only while the runtime owns the exact remote lease and its gate.
+    // PostAsync buffers the response: completed means the HTTP response finished,
+    // not merely that headers arrived. A transport failure after sent is ambiguous.
+    internal async Task CloseAppAsync(string profile, Action sent, Action completed, CancellationToken token)
+    {
+        if (profile != "remote") throw new ArgumentException("Only remote backend release is supported.", nameof(profile));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(3));
+        var operation = deadline.Token;
+        using var http = await (releaseClientFactory is null ? CreateClientAsync(profile, operation)
+            : releaseClientFactory(profile, operation));
+        http.MaxResponseContentBufferSize = MaximumClientListBytes;
+        using (var response = await http.GetAsync("api/csrf-token", operation))
+        using (var csrf = await ReadMediaDocumentAsync(response, operation))
+        {
+            if (response.StatusCode != System.Net.HttpStatusCode.OK)
+                throw new InvalidOperationException("串流引擎未确认操作校验令牌。");
+            var root = csrf.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || HasDuplicateProperties(root) ||
+                !root.TryGetProperty("csrf_token", out var item) || item.ValueKind != JsonValueKind.String ||
+                item.GetString() is not { Length: > 0 and <= 512 } value || value.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)))
+                throw new InvalidOperationException("串流引擎未提供有效的操作校验令牌。");
+            http.DefaultRequestHeaders.Add("X-CSRF-Token", value);
+        }
+        operation.ThrowIfCancellationRequested();
+        using var body = new StringContent("{}", Encoding.UTF8, "application/json");
+        sent();
+        using var closed = await http.PostAsync("api/apps/close", body, operation);
+        completed();
+        if (closed.StatusCode != System.Net.HttpStatusCode.OK)
+            throw new InvalidOperationException("串流引擎未确认应用关闭请求。");
+        using var document = await ReadMediaDocumentAsync(closed, operation);
+        var result = document.RootElement;
+        if (result.ValueKind != JsonValueKind.Object || HasDuplicateProperties(result) ||
+            !result.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.True)
+            throw new InvalidOperationException("串流引擎未确认应用已关闭。");
     }
 
     public async Task PairAsync(string profile, string? pin, string? name, CancellationToken cancellationToken)

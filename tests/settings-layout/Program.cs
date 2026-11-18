@@ -102,10 +102,20 @@ internal static class Program
                 if (!observe)
                 {
                     Check(N<Image>("SoftwareIcon").Source is BitmapSource bitmap && bitmap.PixelWidth >= 24, "official icon is embedded and decoded");
+                    categories.SelectedIndex = 5; Pump();
+                    var updateStatus = N<TextBlock>("UpdateStateText");
+                    Check(updateStatus.Visibility == Visibility.Collapsed && updateStatus.ActualHeight == 0, "idle updates have no status subtitle or reserved height");
+                    updateStatus.Text = "暂时无法检查更新，请稍后重试。";
+                    Pump();
+                    Check(updateStatus.IsVisible && updateStatus.ActualHeight > 0, "explicit update feedback is visible");
+                    updateStatus.Text = "";
+                    Pump();
+                    Check(updateStatus.Visibility == Visibility.Collapsed, "cleared update feedback no longer occupies space");
                     categories.SelectedIndex = 3; RenderAccess(); Pump();
+                    Check(N<TextBlock>("NetworkAccessStateText").Visibility == Visibility.Collapsed, "healthy network status is represented by the switch");
                     access = access with { LastError = "模拟防火墙应用失败" }; RenderAccess(); Pump();
                     Check(N<TextBlock>("NetworkAccessStateText").IsVisible && N<TextBlock>("NetworkAccessStateText").Text.Contains("模拟防火墙应用失败"), "real network errors stay visible");
-                    Check(N<Button>("SaveNetworkAccessButton").IsEnabled, "network save remains reachable");
+                    Check(N<Button>("RetryNetworkAccessButton").IsEnabled, "network status retry remains reachable");
                     Check(!requests.Any(x => x is "host-policy-save" or "host-policy-password-save" or "network-access-save" or "privacy-screen-set"), "layout operations do not mutate policies");
                 }
                 File.WriteAllText(Path.Combine(root, "result.json"), JsonSerializer.Serialize(new { passed = true, observe, checks, samples,

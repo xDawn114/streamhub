@@ -21,7 +21,6 @@ public partial class MainWindow
     private CancellationTokenSource? _updateOperation;
     private bool _loadingUpdatePreferences = true, _updateRunning;
     private int _updateNotifiedCode;
-    private string _previousUpdateOutcome = "";
     private Task? _installerWork;
     private bool _installerInFlight, _installerHasProcess;
     private static string InstallTraceDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StreamHub", "logs");
@@ -29,8 +28,7 @@ public partial class MainWindow
     private string UpdateCacheRoot => Path.Combine(Path.GetDirectoryName(UiPreferencesPath)!, "updates");
     private string UpdateReceiptPath => Path.Combine(UpdateCacheRoot, "downloaded-update.json");
     private string UpdateAttemptPath => Path.Combine(UpdateCacheRoot, "install-attempt.json");
-    private string CurrentUpdateVersion => $"当前 {ProductVersion.Name} / {ProductVersion.Code} · " + (ProductVersion.IsInternal ? "内测渠道" : "正式渠道") +
-        (_previousUpdateOutcome.Length == 0 ? "" : "\n" + _previousUpdateOutcome);
+    private string CurrentUpdateVersion => $"当前 {ProductVersion.Name} / {ProductVersion.Code} · " + (ProductVersion.IsInternal ? "内测渠道" : "正式渠道");
     private sealed record DownloadReceipt(int Code, string Sha256, string Path);
 
     private void InitializeUpdates()
@@ -39,24 +37,21 @@ public partial class MainWindow
         AutoCheckUpdateCheck.IsChecked = _updatePreferences.AutoCheck;
         AutoDownloadUpdateCheck.IsChecked = _updatePreferences.AutoDownload;
         _loadingUpdatePreferences = false;
+        UpdateStateText.Text = UpdateInstallAttempt.Describe(UpdateAttemptPath, ProductVersion.Code,
+            ProductVersion.IsInternal ? "internal" : "stable", DateTimeOffset.UtcNow, InstallTraceDirectory);
         try
         {
             using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("StreamHub.UpdateTrust.json") ?? throw new IOException();
             _updateTrust = JsonSerializer.Deserialize<UpdateTrust>(resource, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? throw new IOException();
-            if (!UpdatePolicy.QueryConfigured(_updateTrust))
-                UpdateStateText.Text = "更新源未配置";
-            else
+            if (UpdatePolicy.QueryConfigured(_updateTrust))
             {
                 var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(10) };
                 Closed += (_, _) => http.Dispose();
                 _updates = new UpdateClient(_updateTrust, http, AuthenticodeVerifier.VerifyAsync);
-                UpdateStateText.Text = _updatePreferences.LastCheckedAt is { } last ? "上次检查 " + last.ToLocalTime().ToString("MM-dd HH:mm") : "尚未检查";
-                if (!UpdatePolicy.Configured(_updateTrust)) UpdateStateText.Text += "\nWindows 签名未接入";
             }
         }
-        catch { UpdateStateText.Text = "更新配置不可用"; }
-        _previousUpdateOutcome = UpdateInstallAttempt.Describe(UpdateAttemptPath, ProductVersion.Code,
-            ProductVersion.IsInternal ? "internal" : "stable", DateTimeOffset.UtcNow, InstallTraceDirectory);
+        catch { UpdateStateText.Text = "暂时无法检查更新，请稍后重试。"; }
+        if (_updates is null) CheckUpdateButton.ToolTip = "请使用安装包更新此版本。";
         UpdateVersionText.Text = CurrentUpdateVersion;
         _updateTimer.Tick += async (_, _) => await MaybeCheckUpdateAsync();
         Loaded += async (_, _) =>
@@ -140,16 +135,17 @@ public partial class MainWindow
         catch (Exception error)
         {
             _updatePreferences = _updatePreferences.Failed(DateTimeOffset.UtcNow); SaveUpdatePreferences();
-            UpdateStateText.Text = "更新未完成，可重试：" + error.Message;
+            Trace.WriteLine("Update check failed: " + error);
+            UpdateStateText.Text = "暂时无法检查更新，请稍后重试。";
         }
         finally { EndUpdateOperation(); }
     }
     private void RenderAvailableUpdateState()
     {
         if (_availableUpdate is null) return;
-        UpdateStateText.Text = _downloadedUpdate is not null ? "更新已下载并验证，可在空闲时安装。" :
-            _updateTrust is null || !UpdatePolicy.Configured(_updateTrust) ? "发现新版本；Windows 安装签名尚未接入，暂不能下载并安装。" :
-            "发现新版本，可下载。自动下载仅在空闲、非计费网络进行。";
+        UpdateStateText.Text = _downloadedUpdate is not null ? "更新已下载并验证。" :
+            _updateTrust is null || !UpdatePolicy.Configured(_updateTrust) ? "发现新版本；此版本暂需手动安装。" :
+            "发现新版本，可下载。";
     }
     private void RenderUpdateActions()
     {
@@ -177,7 +173,7 @@ public partial class MainWindow
         BeginUpdateOperation();
         try { await DownloadUpdateCoreAsync(_updateOperation!.Token); RenderAvailableUpdateState(); }
         catch (OperationCanceledException) { UpdateStateText.Text = "已取消下载，可重新下载。"; }
-        catch (Exception error) { _downloadedUpdate = null; UpdateStateText.Text = "下载未完成，可重试：" + error.Message; }
+        catch (Exception error) { _downloadedUpdate = null; Trace.WriteLine("Update download failed: " + error); UpdateStateText.Text = "暂时无法下载更新，请稍后重试。"; }
         finally { EndUpdateOperation(); }
     }
     private async Task DownloadUpdateCoreAsync(CancellationToken token)

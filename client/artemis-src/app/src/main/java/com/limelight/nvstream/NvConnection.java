@@ -44,6 +44,10 @@ import com.limelight.nvstream.input.MouseButtonPacket;
 import com.limelight.nvstream.jni.MoonBridge;
 
 public class NvConnection {
+    private final com.limelight.streamhub.HubInputGate inputGate = new com.limelight.streamhub.HubInputGate();
+    public void setInputEnabled(boolean enabled) { inputGate.setEnabled(enabled); }
+    public boolean isInputEnabled() { return inputGate.enabled(); }
+
     // Context parameters
     private LimelightCryptoProvider cryptoProvider;
     private String uniqueId;
@@ -85,7 +89,7 @@ public class NvConnection {
 
         this.isMonkey = ActivityManager.isUserAMonkey();
     }
-    
+
     private static SecretKey generateRiAesKey() {
         try {
             KeyGenerator keyGen = KeyGenerator.getInstance("AES");
@@ -99,7 +103,7 @@ public class NvConnection {
             throw new RuntimeException(e);
         }
     }
-    
+
     private static int generateRiKeyId() {
         return new SecureRandom().nextInt();
     }
@@ -236,7 +240,7 @@ public class NvConnection {
         // If we can't determine the connection type, let moonlight-common-c decide.
         return StreamConfiguration.STREAM_CFG_AUTO;
     }
-    
+
     private boolean startApp() throws XmlPullParserException, IOException
     {
         NvHTTP h = new NvHTTP(context.serverAddress, context.httpsPort, uniqueId, context.serverCert, cryptoProvider);
@@ -245,7 +249,7 @@ public class NvConnection {
         startupBegin("app-serverinfo");
         try { serverInfo = h.getServerInfo(true); }
         finally { startupEnd("app-serverinfo"); }
-        
+
         context.serverAppVersion = h.getServerVersion(serverInfo);
         if (context.serverAppVersion == null) {
             context.connListener.displayMessage("Server version malformed");
@@ -257,7 +261,7 @@ public class NvConnection {
 
         // May be missing for older servers
         context.serverGfeVersion = h.getGfeVersion(serverInfo);
-                
+
         if (h.getPairState(serverInfo) != PairingManager.PairState.PAIRED) {
             context.connListener.displayMessage("Device not paired with computer");
             return false;
@@ -270,11 +274,11 @@ public class NvConnection {
             context.connListener.displayTransientMessage("Your PC GPU does not support streaming HDR. The stream will be SDR.");
             context.negotiatedHdr = false;
         }
-        
+
         //
         // Decide on negotiated stream parameters now
         //
-        
+
         // Check for a supported stream resolution
         if ((context.streamConfig.getWidth() > 4096 || context.streamConfig.getHeight() > 4096) &&
                 (h.getServerCodecModeSupport(serverInfo) & 0x200) == 0 && context.isNvidiaServerSoftware) {
@@ -289,7 +293,7 @@ public class NvConnection {
         else if (context.streamConfig.getHeight() >= 2160 && !h.supports4K(serverInfo)) {
             // Client wants 4K but the server can't do it
             context.connListener.displayTransientMessage("You must update GeForce Experience to stream in 4K. The stream will be 1080p.");
-            
+
             // Lower resolution to 1080p
             context.negotiatedWidth = 1920;
             context.negotiatedHeight = 1080;
@@ -314,13 +318,13 @@ public class NvConnection {
                 context.negotiatedPacketSize = context.streamConfig.getMaxPacketSize();
             }
         } finally { startupEnd("connection-type"); }
-        
+
         //
         // Video stream format will be decided during the RTSP handshake
         //
-        
+
         NvApp app = context.streamConfig.getApp();
-        
+
         // If the client did not provide an exact app ID, do a lookup with the applist
         if (!context.streamConfig.getApp().isInitialized()) {
             LimeLog.info("Using deprecated app lookup method - Please specify an app ID in your StreamConfiguration instead");
@@ -330,7 +334,7 @@ public class NvConnection {
                 return false;
             }
         }
-        
+
         // If there's a game running, resume it
         if (h.getCurrentGame(serverInfo) != 0 || (h.getCurrentGameUUID(serverInfo) != null && !h.getCurrentGameUUID(serverInfo).isEmpty())) {
             try {
@@ -362,7 +366,7 @@ public class NvConnection {
                     throw e;
                 }
             }
-            
+
             LimeLog.info("Resumed existing game session");
             return true;
         }
@@ -377,7 +381,7 @@ public class NvConnection {
             if (!h.quitApp()) {
                 context.connListener.displayMessage("Failed to quit previous session! You must quit it manually");
                 return false;
-            } 
+            }
         } catch (HostHttpResponseException e) {
             if (e.getErrorCode() == 599) {
                 context.connListener.displayMessage("This session wasn't started by this device," +
@@ -392,7 +396,7 @@ public class NvConnection {
 
         return launchNotRunningApp(h, context);
     }
-    
+
     private boolean launchNotRunningApp(NvHTTP h, ConnectionContext context)
             throws IOException, XmlPullParserException {
         // Launch the app since it's not running
@@ -400,9 +404,9 @@ public class NvConnection {
             context.connListener.displayMessage("Failed to launch application");
             return false;
         }
-        
+
         LimeLog.info("Launched new game session");
-        
+
         return true;
     }
 
@@ -522,45 +526,48 @@ public class NvConnection {
 
     public void sendExecServerCmd(final int cmdId) {
         if (!isMonkey) {
-            MoonBridge.sendExecServerCmd(cmdId);
+            inputGate.run(() -> MoonBridge.sendExecServerCmd(cmdId));
         }
     }
-    
+
     public void sendMouseMove(final short deltaX, final short deltaY)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseMove(deltaX, deltaY);
+            inputGate.run(() -> MoonBridge.sendMouseMove(deltaX, deltaY));
         }
     }
 
     public void sendMousePosition(short x, short y, short referenceWidth, short referenceHeight)
     {
         if (!isMonkey) {
-            MoonBridge.sendMousePosition(x, y, referenceWidth, referenceHeight);
+            inputGate.run(() -> MoonBridge.sendMousePosition(x, y, referenceWidth, referenceHeight));
         }
     }
 
     public void sendMouseMoveAsMousePosition(short deltaX, short deltaY, short referenceWidth, short referenceHeight)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseMoveAsMousePosition(deltaX, deltaY, referenceWidth, referenceHeight);
+            inputGate.run(() -> MoonBridge.sendMouseMoveAsMousePosition(deltaX, deltaY, referenceWidth, referenceHeight));
         }
     }
 
     public void sendMouseButtonDown(final byte mouseButton)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseButton(MouseButtonPacket.PRESS_EVENT, mouseButton);
+            inputGate.press("mouse:" + mouseButton,
+                    () -> MoonBridge.sendMouseButton(MouseButtonPacket.PRESS_EVENT, mouseButton),
+                    () -> MoonBridge.sendMouseButton(MouseButtonPacket.RELEASE_EVENT, mouseButton));
         }
     }
-    
+
     public void sendMouseButtonUp(final byte mouseButton)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseButton(MouseButtonPacket.RELEASE_EVENT, mouseButton);
+            inputGate.release("mouse:" + mouseButton,
+                    () -> MoonBridge.sendMouseButton(MouseButtonPacket.RELEASE_EVENT, mouseButton));
         }
     }
-    
+
     public void sendControllerInput(final short controllerNumber,
             final short activeGamepadMask, final int buttonFlags,
             final byte leftTrigger, final byte rightTrigger,
@@ -568,46 +575,54 @@ public class NvConnection {
             final short rightStickX, final short rightStickY)
     {
         if (!isMonkey) {
-            MoonBridge.sendMultiControllerInput(controllerNumber, activeGamepadMask, buttonFlags,
-                    leftTrigger, rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
+            inputGate.press("controller:" + controllerNumber,
+                    () -> MoonBridge.sendMultiControllerInput(controllerNumber, activeGamepadMask, buttonFlags,
+                            leftTrigger, rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY),
+                    () -> MoonBridge.sendMultiControllerInput(controllerNumber, activeGamepadMask, 0,
+                            (byte) 0, (byte) 0, (short) 0, (short) 0, (short) 0, (short) 0));
         }
     }
 
     public void sendKeyboardInput(final short keyMap, final byte keyDirection, final byte modifier, final byte flags) {
         if (!isMonkey) {
-            MoonBridge.sendKeyboardInput(keyMap, keyDirection, modifier, flags);
+            if (keyDirection == com.limelight.nvstream.input.KeyboardPacket.KEY_DOWN)
+                inputGate.press("key:" + keyMap, () -> MoonBridge.sendKeyboardInput(keyMap, keyDirection, modifier, flags),
+                        () -> MoonBridge.sendKeyboardInput(keyMap, com.limelight.nvstream.input.KeyboardPacket.KEY_UP, (byte) 0, flags));
+            else inputGate.release("key:" + keyMap, () -> MoonBridge.sendKeyboardInput(keyMap, keyDirection, modifier, flags));
         }
     }
-    
+
     public void sendMouseScroll(final byte scrollClicks) {
         if (!isMonkey) {
-            MoonBridge.sendMouseHighResScroll((short)(scrollClicks * 120)); // WHEEL_DELTA
+            inputGate.run(() -> MoonBridge.sendMouseHighResScroll((short)(scrollClicks * 120))); // WHEEL_DELTA
         }
     }
 
     public void sendMouseHScroll(final byte scrollClicks) {
         if (!isMonkey) {
-            MoonBridge.sendMouseHighResHScroll((short)(scrollClicks * 120)); // WHEEL_DELTA
+            inputGate.run(() -> MoonBridge.sendMouseHighResHScroll((short)(scrollClicks * 120))); // WHEEL_DELTA
         }
     }
 
     public void sendMouseHighResScroll(final short scrollAmount) {
         if (!isMonkey) {
-            MoonBridge.sendMouseHighResScroll(scrollAmount);
+            inputGate.run(() -> MoonBridge.sendMouseHighResScroll(scrollAmount));
         }
     }
 
     public void sendMouseHighResHScroll(final short scrollAmount) {
         if (!isMonkey) {
-            MoonBridge.sendMouseHighResHScroll(scrollAmount);
+            inputGate.run(() -> MoonBridge.sendMouseHighResHScroll(scrollAmount));
         }
     }
 
     public int sendTouchEvent(byte eventType, int pointerId, float x, float y, float pressureOrDistance,
                               float contactAreaMajor, float contactAreaMinor, short rotation) {
         if (!isMonkey) {
-            return MoonBridge.sendTouchEvent(eventType, pointerId, x, y, pressureOrDistance,
-                    contactAreaMajor, contactAreaMinor, rotation);
+            return inputGate.contact("touch:" + pointerId,
+                    eventType == MoonBridge.LI_TOUCH_EVENT_UP || eventType == MoonBridge.LI_TOUCH_EVENT_CANCEL || eventType == MoonBridge.LI_TOUCH_EVENT_CANCEL_ALL,
+                    () -> MoonBridge.sendTouchEvent(eventType, pointerId, x, y, pressureOrDistance, contactAreaMajor, contactAreaMinor, rotation),
+                    () -> MoonBridge.sendTouchEvent(MoonBridge.LI_TOUCH_EVENT_CANCEL, pointerId, x, y, 0, 0, 0, rotation));
         }
         else {
             return MoonBridge.LI_ERR_UNSUPPORTED;
@@ -618,8 +633,9 @@ public class NvConnection {
                             float pressureOrDistance, float contactAreaMajor, float contactAreaMinor,
                             short rotation, byte tilt) {
         if (!isMonkey) {
-            return MoonBridge.sendPenEvent(eventType, toolType, penButtons, x, y, pressureOrDistance,
-                    contactAreaMajor, contactAreaMinor, rotation, tilt);
+            return inputGate.contact("pen", eventType == MoonBridge.LI_TOUCH_EVENT_UP || eventType == MoonBridge.LI_TOUCH_EVENT_CANCEL,
+                    () -> MoonBridge.sendPenEvent(eventType, toolType, penButtons, x, y, pressureOrDistance, contactAreaMajor, contactAreaMinor, rotation, tilt),
+                    () -> MoonBridge.sendPenEvent(MoonBridge.LI_TOUCH_EVENT_CANCEL, toolType, (byte) 0, x, y, 0, 0, 0, rotation, tilt));
         }
         else {
             return MoonBridge.LI_ERR_UNSUPPORTED;
@@ -628,13 +644,16 @@ public class NvConnection {
 
     public int sendControllerArrivalEvent(byte controllerNumber, short activeGamepadMask, byte type,
                                           int supportedButtonFlags, short capabilities) {
-        return MoonBridge.sendControllerArrivalEvent(controllerNumber, activeGamepadMask, type, supportedButtonFlags, capabilities);
+        return inputGate.call(() -> MoonBridge.sendControllerArrivalEvent(controllerNumber, activeGamepadMask, type, supportedButtonFlags, capabilities));
     }
 
     public int sendControllerTouchEvent(byte controllerNumber, byte eventType, int pointerId,
                                         float x, float y, float pressure) {
         if (!isMonkey) {
-            return MoonBridge.sendControllerTouchEvent(controllerNumber, eventType, pointerId, x, y, pressure);
+            return inputGate.contact("pad:" + controllerNumber + ":" + pointerId,
+                    eventType == MoonBridge.LI_TOUCH_EVENT_UP || eventType == MoonBridge.LI_TOUCH_EVENT_CANCEL,
+                    () -> MoonBridge.sendControllerTouchEvent(controllerNumber, eventType, pointerId, x, y, pressure),
+                    () -> MoonBridge.sendControllerTouchEvent(controllerNumber, MoonBridge.LI_TOUCH_EVENT_CANCEL, pointerId, x, y, 0));
         }
         else {
             return MoonBridge.LI_ERR_UNSUPPORTED;
@@ -644,7 +663,7 @@ public class NvConnection {
     public int sendControllerMotionEvent(byte controllerNumber, byte motionType,
                                          float x, float y, float z) {
         if (!isMonkey) {
-            return MoonBridge.sendControllerMotionEvent(controllerNumber, motionType, x, y, z);
+            return inputGate.call(() -> MoonBridge.sendControllerMotionEvent(controllerNumber, motionType, x, y, z));
         }
         else {
             return MoonBridge.LI_ERR_UNSUPPORTED;
@@ -652,12 +671,12 @@ public class NvConnection {
     }
 
     public void sendControllerBatteryEvent(byte controllerNumber, byte batteryState, byte batteryPercentage) {
-        MoonBridge.sendControllerBatteryEvent(controllerNumber, batteryState, batteryPercentage);
+        inputGate.run(() -> MoonBridge.sendControllerBatteryEvent(controllerNumber, batteryState, batteryPercentage));
     }
 
     public void sendUtf8Text(final String text) {
         if (!isMonkey) {
-            MoonBridge.sendUtf8Text(text);
+            inputGate.run(() -> MoonBridge.sendUtf8Text(text));
         }
     }
 

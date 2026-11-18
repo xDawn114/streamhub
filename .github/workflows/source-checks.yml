@@ -46,6 +46,11 @@ jobs:
         run: |
           dotnet run --project tests/device-grants/DeviceGrantChecks.csproj -c Release -- (Join-Path $env:RUNNER_TEMP 'icontrol-device-grants')
           if ($LASTEXITCODE -ne 0) { throw 'Device grant checks failed' }
+      - name: Check encoder cache migration and bounded install prewarm
+        shell: pwsh
+        run: |
+          dotnet run --project tests/encoder-prewarm/EncoderPrewarmChecks.csproj -c Release -- (Join-Path $env:GITHUB_WORKSPACE '.tmp/encoder-prewarm-fixtures')
+          if ($LASTEXITCODE -ne 0) { throw 'Encoder cache and prewarm checks failed' }
       - name: Check release catalogs and update delivery with isolated fixtures
         shell: pwsh
         run: |

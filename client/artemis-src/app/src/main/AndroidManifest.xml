@@ -109,6 +109,8 @@
                 <category android:name="tv.ouya.intent.category.APP" />
             </intent-filter>
         </activity>
+        <activity android:name=".streamhub.HubCompatibleActivity" android:exported="false" android:resizeableActivity="true" />
+        <activity android:name=".streamhub.HubKeyboardLayoutsActivity" android:exported="false" android:resizeableActivity="true" />
         <activity android:name=".PcView" android:exported="false" android:resizeableActivity="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection" />
         <activity android:name=".streamhub.HubFilesActivity" android:exported="false" android:resizeableActivity="true" />

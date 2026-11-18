@@ -16,6 +16,8 @@ public final class HubDesktopInput implements AutoCloseable {
     private final String host,lease,deviceId;
     private final AtomicBoolean fillQueued=new AtomicBoolean();
     private volatile boolean closed,connected,filled,unsupported,hostManagedPolicy;
+    private volatile boolean inputEnabled=true;
+    public void setInputEnabled(boolean value){inputEnabled=value;}
     private volatile HubControlClient client;
     private volatile Snapshot snapshot=Snapshot.UNKNOWN;
     private String lastObservation="";
@@ -72,7 +74,7 @@ public final class HubDesktopInput implements AutoCloseable {
         catch(java.util.concurrent.RejectedExecutionException ignored){fillQueued.set(false);}
     }
     private void fillPassword() {
-        if(hostManagedPolicy)return;
+        if(hostManagedPolicy||!inputEnabled)return;
         HubLoginSecrets secrets=new HubLoginSecrets(activity);
         if(!current() || filled || !locked() || !secrets.enabled())return;
         try {
@@ -81,7 +83,7 @@ public final class HubDesktopInput implements AutoCloseable {
             filled=true;
             JSONObject request=body("login-fill").put("password",secrets.password()).put("submit",secrets.submit());
             JSONObject result;
-            try {result=client().request("session/desktop",request);}finally{request.remove("password");}
+            try {if(!inputEnabled)return;result=client().request("session/desktop",request);}finally{request.remove("password");}
             JSONObject state=result.optJSONObject("state"),login=state==null?null:state.optJSONObject("login");
             if(login!=null && "not-ready".equals(login.optString("state"))){filled=false;return;}
             boolean success=login!=null && login.optBoolean("filled");

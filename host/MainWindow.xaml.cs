@@ -99,10 +99,9 @@ public partial class MainWindow : Window
             {
                 PrivacyModeCheck.IsChecked = _status?.PrivacyScreenEnabled == true;
                 PrivacyModeCheck.IsEnabled = _status is not null && !_busy;
-                PrivacyRecoverButton.IsEnabled = _status is not null && !_busy;
-                PrivacyModeStateText.Text = _status?.PrivacyScreenMessage ?? "等待后台服务";
-                PrivacyModeStateText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, 
-                    _status?.PrivacyScreenActive == true ? "SuccessText" : "Muted");
+                PrivacyRecoverButton.IsEnabled = _status?.PrivacyScreenActive == true && !_busy;
+                PrivacyRecoverButton.ToolTip = _status is null ? "等待后台服务连接。" : _busy ? "当前操作完成后可恢复屏幕。" :
+                    _status.PrivacyScreenActive ? null : "本机屏幕未被隐私保护遮挡，无需恢复。";
             }
             finally { _renderingPrivacy = false; }
             if (_status is null)
@@ -140,7 +139,7 @@ public partial class MainWindow : Window
                 var configResult = await _runtime.SendAsync(new("network-config"), _closing.Token);
                 if (configResult.Success && configResult.PayloadJson is not null)
                     RenderTransport(JsonSerializer.Deserialize<TransportSettings>(configResult.PayloadJson, RuntimeProtocol.JsonOptions));
-                else { _transportConfig = null; ClearLoginUrl(); RemoteNetworkActions.IsEnabled = false; ProviderSavedText.Text = configResult.Message; }
+                else { _transportConfig = null; ClearLoginUrl(); RemoteNetworkActions.IsEnabled = false; ProviderSavedText.Text = configResult.Message; ProviderSavedText.Visibility = Visibility.Visible; }
                 var networkResult = await _runtime.SendAsync(new("network-status"), _closing.Token);
                 _network = !string.IsNullOrEmpty(networkResult.PayloadJson)
                     ? JsonSerializer.Deserialize<NetworkStatus>(networkResult.PayloadJson, RuntimeProtocol.JsonOptions) : null;
@@ -202,7 +201,7 @@ public partial class MainWindow : Window
     private async void StartEngine_Click(object sender, RoutedEventArgs e)
     {
         var profile = (string)((Button)sender).Tag;
-        if (profile == "tablet") { OpenTabletPopover_Click(sender, e); await RefreshStatusAsync(); return; }
+        if (profile == "tablet") { OpenDeviceCards_Click(sender, e); await RefreshStatusAsync(); return; }
         await RunAction(async () =>
         {
             await CommandAsync(new("start", profile));
@@ -291,7 +290,7 @@ public partial class MainWindow : Window
         var safe = HubTransports.AuthorizationUrl(_transportConfig, url);
         if (safe.Length == 0) return false;
         LoginUrlBox.Text = safe;
-        LoginUrlBox.Visibility = CopyLoginButton.Visibility = Visibility.Visible;
+        LoginUrlBox.Visibility = CopyLoginButton.Visibility = LoginBrowserHint.Visibility = Visibility.Visible;
         return true;
     }
     private void CopyLogin_Click(object sender, RoutedEventArgs e) => CopyText(LoginUrlBox.Text, "授权地址已复制，可在浏览器完成授权。");
@@ -309,9 +308,7 @@ public partial class MainWindow : Window
         if (!response.Success || response.PayloadJson is null)
         {
             _receiverSnapshot = null;
-            RenderReceiverChoices();
             RenderUnifiedDevices();
-            ReceiverEmptyText.Text = response.Message;
             return;
         }
         RenderReceivers(JsonSerializer.Deserialize<ReceiverSnapshot>(response.PayloadJson, RuntimeProtocol.JsonOptions));
@@ -321,43 +318,10 @@ public partial class MainWindow : Window
     {
         if (snapshot is null) return;
         _receiverSnapshot = snapshot;
-        var selected = ReceiverBox.SelectedValue as string;
-        ReceiverBox.ItemsSource = snapshot.Receivers;
-        ReceiverBox.SelectedValue = snapshot.Receivers.Any(receiver => receiver.ClientId == selected) ? selected : null;
-        if (ReceiverBox.SelectedIndex < 0 && snapshot.Receivers.Length > 0) ReceiverBox.SelectedIndex = 0;
-        ReceiverEmptyText.Text = snapshot.Receivers.Length == 0 ? "请在平板开启“接收电脑副屏请求”" : "分辨率和刷新率将按接收设备自动匹配";
         _tabletRequest = snapshot.Request;
-        var active = _tabletRequest is not null && TabletRequestRegistry.Active(_tabletRequest.State);
-        SendTabletRequestButton.IsEnabled = snapshot.Receivers.Length > 0 && !active;
-        CancelTabletRequestButton.IsEnabled = active;
-        CancelTabletRequestButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        CancelTabletRequestButton.Content = _tabletRequest?.State == "connected" ? "断开连接" : "取消请求";
-        TabletRequestStateText.Text = _tabletRequest?.Message ?? "";
-        TabletRequestStateText.Visibility = string.IsNullOrWhiteSpace(TabletRequestStateText.Text) ? Visibility.Collapsed : Visibility.Visible;
         RefreshServiceControls();
-        TabletRequestStateText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, _tabletRequest?.State is "failed" or "rejected" or "expired" ? "DangerText" : "Muted");
     }
 
-    private async void SendTabletRequest_Click(object sender, RoutedEventArgs e) => await SendTabletRequestAsync();
-    private async Task SendTabletRequestAsync()
-    {
-        if (ReceiverBox.SelectedItem is not TabletReceiver receiver) return;
-        var clientId = receiver.ClientId;
-        var rotation = int.Parse((string)((ComboBoxItem)OrientationBox.SelectedItem).Tag);
-        var link = (string)((ComboBoxItem)RequestLinkBox.SelectedItem).Tag;
-        await RunAction(async () => {
-            var response = await _runtime.SendAsync(new("tablet-request", Profile: link, Orientation: rotation, ClientId: clientId), _closing.Token);
-            ShowFeedback(response.Message, error: !response.Success);
-            if (response.Success && response.PayloadJson is not null)
-                RenderReceivers(JsonSerializer.Deserialize<ReceiverSnapshot>(response.PayloadJson, RuntimeProtocol.JsonOptions));
-        });
-    }
-
-    private async void CancelTabletRequest_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tabletRequest is null) return;
-        await RunAction(() => CommandAsync(new("tablet-request-cancel", RequestId: _tabletRequest.Id)));
-    }
     private void OpenDisplaySettings_Click(object sender, RoutedEventArgs e) => OpenTarget("ms-settings:display");
 
     private static bool GetAutoStart()

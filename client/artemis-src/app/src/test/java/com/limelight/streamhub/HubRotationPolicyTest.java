@@ -27,10 +27,12 @@ import static org.robolectric.Shadows.shadowOf;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=28, manifest=Config.NONE, application=android.app.Application.class)
 public class HubRotationPolicyTest {
-    @Test public void normalTabletExitQuitsCaptureWhileRotationAndRemoteKeepTheirExistingPolicy() {
+    @Test public void mediaQuitRemainsTabletOnlyForManagedSessionsAndHonorsLegacyPreference() {
         assertTrue(HubSessionLease.shouldQuitBackend(true, "tablet", true, false));
         assertFalse(HubSessionLease.shouldQuitBackend(true, "tablet", true, true));
         assertFalse(HubSessionLease.shouldQuitBackend(true, "remote", true, false));
+        assertFalse(HubSessionLease.shouldQuitBackend(true, "remote", false, false));
+        assertFalse(HubSessionLease.shouldQuitBackend(true, "remote", true, true));
         assertTrue(HubSessionLease.shouldQuitBackend(false, "remote", true, false));
         assertFalse(HubSessionLease.shouldQuitBackend(false, "remote", false, false));
     }

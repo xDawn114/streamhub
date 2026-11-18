@@ -20,7 +20,7 @@ public partial class MainWindow
     private readonly ConnectionReadiness _readiness = new();
 
     private static string DeviceDisplayName(ControlDeviceSummary d) => string.IsNullOrWhiteSpace(d.Alias) ? d.Name : d.Alias;
-    private static string DeviceTypeText(ControlDeviceSummary d) => d.DeviceType switch { "phone" => "手机", "tablet" => "平板", _ => "安卓设备" };
+    private static string DeviceTypeText(ControlDeviceSummary d) => d.DeviceType switch { "phone" => "手机", "tablet" => "平板", _ => "设备" };
     private static string LastContact(ControlDeviceSummary d) => d.LastSeen is { } seen
         ? "最后联系 " + seen.ToLocalTime().ToString("MM-dd HH:mm") : "尚无联系记录";
     private static string ScopeText(ControlDeviceSummary d) => string.Join("、", new[] {
@@ -47,11 +47,12 @@ public partial class MainWindow
     {
         if (AcceptanceButton is null) return;
         bool live = _status?.Remote.Streaming == true || _status?.Tablet.Streaming == true;
+        bool ending = _status?.Remote.BackendReleasePending == true;
         string state = _readiness.Observe(_status);
         ReadinessReasonButton.Visibility = _readiness.TimedOut ? Visibility.Visible : Visibility.Collapsed;
         AcceptanceLabel.Text = _readiness.TimedOut ? "远控未就绪" : state;
         AcceptanceDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty,
-            live ? "WarningText" : _status?.Remote.Healthy == true && !_status.ConnectionsPaused ? "SuccessText" : "Muted");
+            live || ending ? "WarningText" : _status?.Remote.Healthy == true && !_status.ConnectionsPaused ? "SuccessText" : "Muted");
         HomeSummaryText.Text = (_status?.DeviceName ?? Environment.MachineName) + " · " + state + " · " +
             (live ? (_status!.Controller?.Name ?? "已连接设备") + " 正在连接" : "当前无设备连接");
         if (_status is null) HomeSummaryText.Text = "后台服务未连接，暂时无法确认被控状态";
@@ -59,9 +60,9 @@ public partial class MainWindow
         HomePrivacyText.Text = "隐私屏正在生效 · Ctrl+Alt+F12 可恢复本机画面";
         DeviceStateLabel.Text = _status is null ? "状态未知" : state;
         PauseConnectionsButton.Content = _status?.ConnectionsPaused == true ? "恢复接受连接"
-            : live ? "断开并暂停连接" : "暂停接受连接";
+            : live || ending ? "断开并暂停连接" : "暂停接受连接";
         PauseConnectionsButton.IsEnabled = _status is not null && !_busy;
-        DisconnectActiveButton.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
+        DisconnectActiveButton.Visibility = live || ending ? Visibility.Visible : Visibility.Collapsed;
         bool networkReady = _status?.Network.Running == true && _network?.LoggedIn == true && _network.State == "Running";
         bool networkFailed = _status?.Network.Desired == true && !_status.Network.Running;
         string networkState = _status is null ? "状态未知" : networkFailed ? "异常" : networkReady ? "已连接"
@@ -101,52 +102,46 @@ public partial class MainWindow
     {
         if (BoundDevicesList is null) return;
         var devices = _controlDeviceList?.Devices ?? [];
-        var rows = devices.OrderBy(d => d.Revoked).ThenByDescending(d => d.LastSeen ?? d.CreatedAt).Select(d => {
-            bool online = DeviceIsOnline(d);
-            var receiver = GetReceiverAction(d.ClientId, !d.Revoked && (d.Scope & ControlScope.Tablet) != 0);
-            return new {
-                d.Id, d.ClientId, Name = DeviceDisplayName(d), TypeText = DeviceTypeText(d), d.Revoked,
-                LastContact = LastContact(d), ShortId = d.Id.Length > 6 ? d.Id[^6..] : d.Id,
-                Online = online, OnlineText = d.Revoked ? "已撤销" : online ? "在线" : "未确认在线",
-                ActionVisibility = d.Revoked ? Visibility.Collapsed : Visibility.Visible,
-                HistoryActionVisibility = d.Revoked ? Visibility.Visible : Visibility.Collapsed,
-                CanConnect = receiver.CanConnect, ConnectReason = receiver.Reason,
-                CanOpenFiles = !d.Revoked && _status is not null && !_busy,
-                FileReason = "前往此设备的文件页",
-                Icon = d.DeviceType == "tablet" ? "\uE70A" : "\uE8EA"
-            };
-        }).ToArray();
+        var rows = devices.OrderBy(d => d.Revoked).ThenByDescending(d => d.LastSeen ?? d.CreatedAt)
+            .Select(d => MakeDeviceCard(d.Id, d.ClientId, DeviceDisplayName(d), DeviceTypeText(d),
+                d.DeviceType == "tablet" ? "\uE70A" : "\uE8EA", d, DeviceIsOnline(d), LastContact(d))).ToList();
+        // Compatible receivers used to live only in the title bar. Never reintroduce
+        // a revoked credential as a compatible device or list one receiver twice.
+        if (_controlDeviceList?.LegacyAllowed == true)
+            rows.AddRange((_receiverSnapshot?.Receivers ?? []).Where(ReceiverIsFresh)
+                .Where(r => !devices.Any(d => d.ClientId == r.ClientId))
+                .GroupBy(r => r.ClientId).Select(group => group.OrderByDescending(r => r.LastSeen).First())
+                .Select(r => MakeDeviceCard("", r.ClientId, r.Name, "兼容设备", "\uE772", null, true,
+                    "兼容连接 · 建议使用短码重新绑定")));
+        if (_tabletRequest is {} request && TabletRequestRegistry.Active(request.State) &&
+            !rows.Any(row => !row.Revoked && row.ClientId == request.ClientId))
+            rows.Add(MakeDeviceCard("", request.ClientId, "当前副屏设备", "设备", "\uE772", null, false, "接收状态待确认"));
         BoundDevicesList.ItemsSource = rows.Where(d => !d.Revoked).ToArray();
         HistoricalDevicesList.ItemsSource = rows.Where(d => d.Revoked).ToArray();
-        BoundDevicesEmptyText.Text = _controlDeviceList is null ? "设备列表暂不可用，请稍后刷新" : "还没有有效绑定，点右侧“+ 绑定设备”添加";
+        BoundDevicesEmptyText.Text = _controlDeviceList is null ? "设备列表暂不可用，请稍后刷新" : "还没有设备，点右侧“+ 绑定设备”添加";
         BoundDevicesEmptyText.Visibility = rows.Any(d => !d.Revoked) ? Visibility.Collapsed : Visibility.Visible;
         DeviceHistoryExpander.Header = $"历史设备（{rows.Count(d => d.Revoked)}）";
         DeviceHistoryExpander.Visibility = rows.Any(d => d.Revoked) ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void RenderReceiverChoices()
+    private DeviceCard MakeDeviceCard(string id, string clientId, string name, string type, string icon,
+        ControlDeviceSummary? device, bool online, string lastContact)
     {
-        if (TabletReceiverList is null) return;
-        var receivers = _receiverSnapshot?.Receivers.Where(ReceiverIsFresh).ToArray() ?? [];
-        var devices = _controlDeviceList?.Devices.Where(d => !d.Revoked).ToArray() ?? [];
-        bool active = _tabletRequest is { } request && TabletRequestRegistry.Active(request.State);
-        var rows = devices.Select(d => {
-            var action = GetReceiverAction(d.ClientId, (d.Scope & ControlScope.Tablet) != 0);
-            return new { d.ClientId, Name = DeviceDisplayName(d), CanConnect = action.CanConnect, Detail = action.Reason };
-        }).ToList();
-        if (_controlDeviceList?.LegacyAllowed == true)
-            rows.AddRange(receivers.Where(r => !devices.Any(d => d.ClientId == r.ClientId)).Select(r => {
-                var action = GetReceiverAction(r.ClientId, true);
-                return new { r.ClientId, r.Name, CanConnect = action.CanConnect, Detail = action.Reason };
-            }));
-        TabletReceiverList.ItemsSource = rows;
-        ReceiverEmptyText.Text = rows.Count > 0 ? "" : _receiverSnapshot is null ? "接收状态暂不可用，请刷新后重试。"
-            : "还没有可用设备";
-        ReceiverEmptyText.Visibility = string.IsNullOrWhiteSpace(ReceiverEmptyText.Text) ? Visibility.Collapsed : Visibility.Visible;
-        CancelTabletRequestButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        CancelTabletRequestButton.Content = _tabletRequest?.State == "connected" ? "断开副屏" : "取消邀请";
-        CancelTabletRequestButton.IsEnabled = active && !_busy;
-        RenderFilesInlineState();
+        bool revoked = device?.Revoked == true;
+        bool compatible = device is null && _controlDeviceList?.LegacyAllowed == true &&
+            !_controlDeviceList.Devices.Any(d => d.ClientId == clientId);
+        var request = !revoked && _tabletRequest?.ClientId == clientId ? _tabletRequest : null;
+        bool active = request is not null && TabletRequestRegistry.Active(request.State);
+        var action = GetReceiverAction(clientId, !revoked && (device is not null
+            ? (device.Scope & ControlScope.Tablet) != 0 : compatible));
+        bool files = !revoked && _status is not null && !_busy && (device is not null ||
+            compatible && _fileSnapshot?.Devices.Any(d => d.ClientId == clientId) == true);
+        return new(id, clientId, name, type, icon, device is not null, revoked, online,
+            revoked ? "已撤销" : active ? request!.State == "connected" ? "副屏已连接" : "等待设备确认" : online ? "在线" : "未确认在线",
+            lastContact, active ? !_busy && _status is not null : action.CanConnect,
+            active ? request!.State == "connected" ? "结束此设备的副屏连接" : "取消此设备的副屏邀请" : action.Reason,
+            files, device is not null ? "前往此设备的文件页" : "需要此兼容设备先连接文件服务，或使用短码重新绑定",
+            active ? request!.Id : null, request?.State ?? "", request?.Message ?? "");
     }
 
     private void OpenAcceptance_Click(object sender, RoutedEventArgs e)
@@ -167,7 +162,7 @@ public partial class MainWindow
                 return;
             }
             bool paused = current.Status.ConnectionsPaused;
-            bool live = current.Status.Remote.Streaming || current.Status.Tablet.Streaming;
+            bool live = current.Status.Remote.Streaming || current.Status.Tablet.Streaming || current.Status.Remote.BackendReleasePending;
             if (!paused && live && System.Windows.MessageBox.Show(this,
                 "将断开当前主屏和副屏连接，并暂停接受连接。\n重启后仍保持暂停，需在电脑顶栏手动恢复。是否继续？",
                 "断开并暂停连接", MessageBoxButton.YesNo, MessageBoxImage.Warning,
@@ -186,17 +181,33 @@ public partial class MainWindow
     }
     private void OpenTabletSettings_Click(object sender, RoutedEventArgs e)
     { CloseTransientPopovers(); Pages.SelectedItem = SettingsPage; SettingsCategories.SelectedItem = TabletSettingsCategory; }
-    private async void RefreshReceiverList_Click(object sender, RoutedEventArgs e)
-    { await ReadControlDevicesAsync(); await RefreshReceiversAsync(); }
-    private async void ConnectReceiver_Click(object sender, RoutedEventArgs e)
+    private bool _refreshingDeviceCards;
+    private async void RefreshDeviceCards_Click(object sender, RoutedEventArgs e) => await RefreshDeviceCardsAsync();
+    private async Task RefreshDeviceCardsAsync()
     {
-        if (sender is Button { Tag: string clientId }) await InviteReceiverAsync(clientId, null);
+        if (_refreshingDeviceCards) return;
+        _refreshingDeviceCards = true; RefreshDeviceCardsButton.IsEnabled = false;
+        try { await ReadControlDevicesAsync(); await RefreshReceiversAsync(); }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { ShowFeedback("设备刷新失败：" + error.Message, error: true); }
+        finally { _refreshingDeviceCards = false; RefreshDeviceCardsButton.IsEnabled = true; }
     }
     private async void ConnectListedReceiver_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string id }) return;
-        var device = _controlDeviceList?.Devices.FirstOrDefault(d => d.Id == id && !d.Revoked);
-        if (device is not null) await InviteReceiverAsync(device.ClientId, id);
+        if (sender is not Button { Tag: DeviceCard card }) return;
+        if (card.RequestId is {} requestId)
+        {
+            await RunAction(async () =>
+            {
+                await RefreshReceiversAsync();
+                if (_receiverSnapshot is null || _tabletRequest is not {} current || current.Id != requestId ||
+                    current.ClientId != card.ClientId || !TabletRequestRegistry.Active(current.State))
+                { ShowFeedback("这次副屏连接已变化，请查看更新后的设备卡片。", error: true); return; }
+                await CommandAsync(new("tablet-request-cancel", RequestId: requestId));
+                await RefreshReceiversAsync();
+            });
+        }
+        else await InviteReceiverAsync(card.ClientId, card.CredentialId);
     }
     private Task InviteReceiverAsync(string clientId, string? credentialId) => RunAction(async () =>
     {
@@ -208,7 +219,8 @@ public partial class MainWindow
         var device = _controlDeviceList?.Devices.FirstOrDefault(d =>
             d.ClientId == clientId && !d.Revoked && (credentialId is null || d.Id == credentialId));
         bool allowed = device is not null ? (device.Scope & ControlScope.Tablet) != 0
-            : credentialId is null && _controlDeviceList?.LegacyAllowed == true;
+            : credentialId is null && _controlDeviceList?.LegacyAllowed == true &&
+                !_controlDeviceList.Devices.Any(d => d.ClientId == clientId);
         var action = GetReceiverAction(clientId, allowed, duringAction: true);
         if (!action.CanConnect) { ShowFeedback(action.Reason, error: true); return; }
         var rotation = int.Parse((string)((ComboBoxItem)OrientationBox.SelectedItem).Tag);
@@ -220,17 +232,20 @@ public partial class MainWindow
     });
     private async void OpenListedFiles_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string id }) return;
+        if (sender is not Button { Tag: DeviceCard card }) return;
         await RunAction(async () =>
         {
             await ReadControlDevicesAsync();
-            var device = _controlDeviceList?.Devices.FirstOrDefault(d => d.Id == id && !d.Revoked);
-            if (device is null) { ShowFeedback("设备绑定已失效，请刷新列表。", error: true); return; }
-            _fileTargetClientId = device.ClientId;
+            var device = _controlDeviceList?.Devices.FirstOrDefault(d => d.Id == card.CredentialId &&
+                d.ClientId == card.ClientId && !d.Revoked);
+            bool compatible = card.CredentialId is null && _controlDeviceList?.LegacyAllowed == true &&
+                !_controlDeviceList.Devices.Any(d => d.ClientId == card.ClientId);
+            if (device is null && !compatible) { ShowFeedback("设备绑定已失效，请刷新列表。", error: true); return; }
+            _fileTargetClientId = card.ClientId;
             await RefreshFilesAsync();
-            FileDeviceBox.SelectedValue = device.ClientId;
+            FileDeviceBox.SelectedValue = card.ClientId;
             CloseTransientPopovers(); Pages.SelectedItem = FilesPage;
-            if (FileDeviceBox.SelectedValue as string != device.ClientId)
+            if (FileDeviceBox.SelectedValue as string != card.ClientId)
                 ShowFeedback("此设备的文件状态暂不可用，请稍后刷新。", error: true);
         });
     }

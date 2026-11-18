@@ -12,6 +12,8 @@
     <EmbeddedResource Include="../host/Assets/我控制.ico" LogicalName="StreamHub.BrandIcon.ico" />
     <InternalsVisibleTo Include="HostPolicyChecks" />
     <InternalsVisibleTo Include="DeviceGrantChecks" />
+    <InternalsVisibleTo Include="SessionCleanupChecks" />
+    <InternalsVisibleTo Include="EncoderPrewarmChecks" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
     <PackageReference Include="System.IO.Pipes.AccessControl" Version="5.0.0" />

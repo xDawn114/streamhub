@@ -22,7 +22,7 @@ public final class HubClipboardPreview {
         if(activity.isFinishing() || activity.isDestroyed())return;
         HubStreamUi.dialog(activity).setTitle("未能读取电脑剪贴板")
                 .setMessage(message+"\n\n原平板剪贴板已保留。确认电脑已登录并解锁后，可以重试。")
-                .setPositiveButton("重试",(d,w)->retry.run()).setNegativeButton("关闭",null).show();
+                .setPositiveButton("重试",(d,w)->retry.run()).setNegativeButton("取消",null).show();
     }
     public static void show(Activity activity,ClipData clip,boolean sensitive) {
         if(activity.isFinishing() || activity.isDestroyed())return;
@@ -47,7 +47,7 @@ public final class HubClipboardPreview {
         }
         ScrollView scroll=new ScrollView(activity);scroll.addView(body);
         AlertDialog dialog=HubStreamUi.dialog(activity).setTitle("电脑剪贴板").setView(scroll)
-                .setPositiveButton("再次复制",null).setNegativeButton("关闭",null).create();
+                .setPositiveButton("再次复制",null).setNegativeButton("取消",null).create();
         Runnable copy=()->{
             try {
                 if(Build.VERSION.SDK_INT>=24){PersistableBundle extras=new PersistableBundle();

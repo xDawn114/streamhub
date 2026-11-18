@@ -21,6 +21,9 @@ public final class HubFileClient {
     private final String revision, transportRevision;
     public HubFileClient(Context context) { store = new HubStore(context); revision = store.get("bindingRevision", ""); transportRevision = store.get("transportRevision", ""); }
     public void cancel() { cancelled = true; HubControlClient active = control; if (active != null) active.cancel(); }
+    boolean isCurrent() {
+        return !cancelled && revision.equals(store.get("bindingRevision", "")) && transportRevision.equals(store.get("transportRevision", ""));
+    }
     public void check() {
         if (!transportRevision.equals(store.get("transportRevision", ""))) throw new CancellationException("连接通道已改变，请重新打开文件页面。");
         if (cancelled || Thread.currentThread().isInterrupted()) throw new CancellationException("传输已暂停，可继续。");
@@ -29,7 +32,7 @@ public final class HubFileClient {
     public void connect() throws Exception {
         check();
         final String trust = store.invitation(), expected = store.get("deviceId", "");
-        HubProbeRace.Match<String> match;
+        HubProbeRace.Match<JSONObject> match;
         try { match = HubTransportProbe.first(store.candidates("auto"), host -> {
             HubControlClient probe = new HubControlClient(host, trust);
             try {
@@ -37,14 +40,13 @@ public final class HubFileClient {
                 if (!expected.equals(info.optString("deviceId"))) throw new IOException("这不是已绑定电脑。");
                 JSONObject caps = info.optJSONObject("capabilities");
                 if (caps == null || !caps.optBoolean("fileTransfer")) throw new IOException("电脑端尚未支持文件传输，请更新后重试。");
-                return host;
+                return caps;
             } finally { probe.cancel(); }
         }, () -> cancelled, 6000); }
         catch (IOException error) { throw new HubFileRetryPolicy.DiscoveryFailure(error); }
         check(); control = new HubControlClient(match.host, trust);
-        JSONObject capabilities = control.probeInfo().optJSONObject("capabilities");
-        browseSupported = capabilities != null && capabilities.optBoolean("fileBrowse");
-        rootsSupported=capabilities!=null && capabilities.optBoolean("fileRoots");
+        browseSupported = match.value.optBoolean("fileBrowse");
+        rootsSupported = match.value.optBoolean("fileRoots");
     }
     public JSONObject register() throws Exception {
         check(); return control.fileJson("files/register", new JSONObject().put("clientId", store.clientId()).put("name", Build.MODEL).put("key", store.fileKey()), store.clientId(), store.fileKey());

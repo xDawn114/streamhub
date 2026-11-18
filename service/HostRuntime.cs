@@ -100,11 +100,12 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     private bool _displayCleanupDone;
     private DateTimeOffset _displayCleanupRetryAt;
     private string ControlIdentityDirectory => Path.Combine(_data, "control-api");
-    private readonly HttpClient _probe = new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromMilliseconds(900) };
+    private readonly HttpClient _probe = new(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMilliseconds(900) };
 
     public HostRuntime(string root, string data, bool interactive)
     {
         (_root, _data, _interactive) = (Path.GetFullPath(root), Path.GetFullPath(data), interactive);
+        _remoteBackendRelease = new(Path.Combine(_data, "session-release-receipts.json"));
         _profiles = new(_root, _data);
         _configureTabletMode = (request, token) => DisplayModeProbe.ConfigureTabletAsync(_root, _interactive, request, token);
         _backend = new(_profiles);
@@ -194,6 +195,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
                 { Log("服务退出时停用副屏提示：" + ex.Message); }
                 await StopPrivacyScreenAsync(CancellationToken.None);
+                ResetRemoteSession();
                 await StopEngineAsync(_remote, CancellationToken.None);
             }
             finally { _gate.Release(); }
@@ -222,6 +224,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 foreach (var engine in new[] { _remote, _tablet })
                 {
                     ObserveExitedEngine(engine);
+                    if (engine == _remote) _remoteBackendRelease.ObserveEngineExit();
                     if (!engine.Desired && engine.Process?.Running == true &&
                         (engine != _tablet || !TabletWarmActive(now)))
                         await StopEngineAsync(engine, cancellationToken);
@@ -245,7 +248,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                     var healthy = running && (await GetEngineStatusAsync(_remote, cancellationToken)).Healthy;
                     if (healthy) _remoteWarmupFailures = 0;
                     if (_remoteWarmup.ShouldRestart(now, _remote.ProcessStartedAt, _remote.Desired, running,
-                        healthy, _remoteSession.HasLease(now)))
+                        healthy, _remoteSession.HasLease(now) || _remoteBackendRelease.Pending))
                     {
                         Log("主屏引擎持续不健康且没有活动会话，正在恢复。");
                         await StopEngineAsync(_remote, cancellationToken);
@@ -415,6 +418,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     private async Task<RuntimeResponse> HandleAsync(RuntimeRequest request, CancellationToken cancellationToken)
     {
         var networkCommand = request.Command?.ToLowerInvariant();
+        if (request.EndBackend is not null && (networkCommand != "remote-release" || request.Profile != "remote"))
+            return new(false, "endBackend 仅适用于远控会话结束请求。", ErrorStatus: 400);
         if (networkCommand == "network-access-status")
         {
             var access = ReadNetworkAccessState();
@@ -484,7 +489,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 if (pause)
                 {
                     _remote.Desired = false;
-                    _remoteSession.Reset();
+                    ResetRemoteSession();
                     if (_controlApi is not null)
                     {
                         var snapshot = JsonSerializer.Deserialize<ReceiverSnapshot>(_controlApi.ReceiverCommand("receiver-list", new("receiver-list")), RuntimeProtocol.JsonOptions);
@@ -572,6 +577,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                     throw new InvalidOperationException("会话或接收设备标识缺失。");
                 if (command == "remote-prepare")
                 {
+                    _remoteBackendRelease.EnsureCanPrepare(request.LeaseId, request.ClientId);
                     if (!await StopExpiredPrivacyStreamAsync(cancellationToken))
                         throw new InvalidOperationException("正在安全结束上一条隐私保护连接，请稍后重试。");
                     _remoteSession.Prepare(request.LeaseId, request.ClientId, DateTimeOffset.UtcNow);
@@ -583,7 +589,25 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 else {
                     bool matching=_remoteSession.IsStreaming(request.LeaseId,request.ClientId,DateTimeOffset.UtcNow);
                     bool shouldLock=SessionExitPolicy.ShouldLock(matching,request.ExitReason,_lockOnExitEnabled);
-                    _remoteSession.End(request.LeaseId,request.ClientId);
+                    if (request.EndBackend == true)
+                    {
+                        var released = await ReleaseRemoteBackendAsync(request, shouldLock, cancellationToken);
+                        shouldLock = released.ShouldLock;
+                        payload = JsonSerializer.Serialize(new { leaseId = request.LeaseId, clientId = request.ClientId,
+                            completed = !released.Obsolete, obsolete = released.Obsolete,
+                            alreadyCompleted = released.AlreadyCompleted }, RuntimeProtocol.JsonOptions);
+                        if (released.Obsolete)
+                            return new(true, "此旧会话请求已失效，未更改当前串流状态。", PayloadJson: payload);
+                        if (released.AlreadyCompleted)
+                            return new(true, "此会话的结束已确认。", PayloadJson: payload);
+                    }
+                    else
+                    {
+                        // Legacy release and preparation cancellation cannot
+                        // erase an ambiguous backend mutation's engine fence.
+                        _remoteBackendRelease.EnsureCanPrepareOrRelease();
+                        _remoteSession.End(request.LeaseId,request.ClientId);
+                    }
                     await ReconcilePrivacyScreenAsync(cancellationToken);
                     if(shouldLock)await LockDesktopAsync(cancellationToken);
                 }
@@ -689,7 +713,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                             await SnapshotAsync(cancellationToken));
                     }
                     engine.Desired = command != "stop";
-                    if (engine == _remote && command is "stop" or "restart") _remoteSession.Reset();
+                    if (engine == _remote && command is "stop" or "restart") ResetRemoteSession();
                     if (engine == _remote && command is "stop" or "restart") await ReconcilePrivacyScreenAsync(cancellationToken);
                     if (engine == _tablet && engine.Desired)
                     {
@@ -797,7 +821,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             else if (command == "stop-all")
             {
                 _remote.Desired = false;
-                _remoteSession.Reset();
+                ResetRemoteSession();
                 await ReconcilePrivacyScreenAsync(cancellationToken);
                 await EndTabletSessionAsync("远程服务已停止。", cancellationToken);
                 await SaveDesiredAsync(cancellationToken);
@@ -859,6 +883,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (ex is BackendReleaseException releaseError)
+                return new(false, releaseError.Message, ErrorStatus: releaseError.Status);
             if (string.Equals(request.Command, "media-identity", StringComparison.OrdinalIgnoreCase))
                 // Do not log certificate material, upstream bodies, credentials or filesystem paths.
                 return new(false, ex is MediaIdentityException identityError ? identityError.Message : "媒体身份预检未完成，请检查所选模式和公开证书后重试。",
@@ -1227,7 +1253,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         if (!await StopExpiredPrivacyStreamAsync(cancellationToken)) return;
         var now = DateTimeOffset.UtcNow;
         var remoteRunning = _remote.Process?.Running == true;
-        var authenticatedStream = _remoteSession.IsStreaming(now);
+        var authenticatedStream = _remoteSession.IsStreaming(now) ||
+            _remoteBackendRelease.Pending && _privacyScreen?.Running == true;
         var shouldShow = PrivacyScreenPolicy.ShouldShow(_privacyScreenEnabled && _privacySuppressedLease is null, authenticatedStream, remoteRunning);
 
         if (_privacyScreen is { } exited && !exited.Running)
@@ -1333,6 +1360,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     {
         if (_privacyScreen?.Running != true || !_remoteSession.PrivacyHeartbeatExpired(DateTimeOffset.UtcNow)) return true;
         var engine = _remote.Process;
+        if (engine is not null && _remoteBackendRelease is { } release)
+            release.TrackEngineExit(_remoteSession, () => engine.Running);
         if (engine?.Running == true)
         {
             try
@@ -1353,12 +1382,13 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         }
         if (engine is not null)
         {
+            _remoteBackendRelease?.ObserveEngineExit();
             _remote.Process = null;
             _remote.ReadinessWatch = null;
             engine.Dispose();
             _remote.Message = "隐私会话已结束，正在恢复待机";
         }
-        _remoteSession.Reset();
+        ResetRemoteSession();
         Log("隐私会话心跳超时，主屏引擎已停止，准备恢复本机屏幕。");
         return true;
     }
@@ -1378,7 +1408,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             : exitCode == PrivacyScreenWindow.EmergencyRecovery
             ? "已通过 Ctrl+Alt+F12 恢复本机屏幕，远控隐私保护已关闭"
             : "无法注册恢复热键 Ctrl+Alt+F12（可能已被占用），未开启隐私黑屏";
-        if (exitCode == PrivacyScreenGuard.Recovered) _remoteSession.Reset();
+        if (exitCode == PrivacyScreenGuard.Recovered) ResetRemoteSession();
         try { await SaveDesiredAsync(CancellationToken.None); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1526,9 +1556,12 @@ internal sealed partial class HostRuntime : IAsyncDisposable
 
     private async Task PrepareEncoderProbeAsync(Engine engine, string? hint, CancellationToken token)
     {
+        if (engine == _remote) _remoteBackendRelease.EnsureCanPrepareOrRelease();
         string requested = EncoderProbePlan.Validate(hint);
         string current = await _profiles.ReadEncoderProbeAsync(engine.Profile, token);
-        if (engine.Process?.Running == true && EncoderProbePlan.Covers(current, requested)) return;
+        // Preserve a compatible on-disk plan even after an engine restart. A
+        // narrower receiver hint must not rewrite the cache identity needlessly.
+        if (EncoderProbePlan.Covers(current, requested)) return;
         if (engine.Process?.Running == true)
         {
             var state = await GetEngineStatusAsync(engine, token);
@@ -1563,6 +1596,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 await _profiles.ConfigureTabletAsync(null, null, output, cancellationToken);
             }
             var executable = _profiles.ExecutableFor(engine.Profile);
+            await _profiles.PrepareEncoderCacheAsync(engine.Profile, cancellationToken);
             var processWatch = Stopwatch.StartNew();
             engine.Process = SessionLauncher.Start(executable, new[] { _profiles.ConfigFor(engine.Profile) },
                 Path.GetDirectoryName(executable)!, _interactive);
@@ -1655,7 +1689,11 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 engine.ReadinessWatch = readinessWatch;
                 engine.Message = "正在停止串流引擎";
             }
-            else { owned.Dispose(); engine.Message = "已停止"; }
+            else
+            {
+                if (engine == _remote) _remoteBackendRelease?.ObserveEngineExit();
+                owned.Dispose(); engine.Message = "已停止";
+            }
         }
     }
 
@@ -1703,6 +1741,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         var healthy = false;
         var streaming = false;
         var busy = false;
+        var encoderCacheState = "unknown";
         if (running)
         {
             try
@@ -1710,6 +1749,9 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 var xml = await _probe.GetStringAsync($"http://127.0.0.1:{ProfileStore.Port(engine.Profile)}/serverinfo", cancellationToken);
                 var document = XDocument.Parse(xml);
                 healthy = document.Root?.Attribute("status_code")?.Value == "200";
+                var cacheState = document.Root?.Element("streamhub_probe_cache")?.Value;
+                if (cacheState is "ready" or "disabled" or "not-applicable" or "unavailable")
+                    encoderCacheState = cacheState;
                 var readinessWatch = engine.ReadinessWatch;
                 if (healthy && readinessWatch is not null && ReferenceEquals(owned, engine.Process) &&
                     ReferenceEquals(Interlocked.CompareExchange(ref engine.ReadinessWatch, null, readinessWatch), readinessWatch))
@@ -1722,10 +1764,12 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Xml.XmlException) { }
         }
         var cleanupPending = engine == _tablet && !engine.Desired && !_displayCleanupDone;
+        var releasePending = engine == _remote && _remoteBackendRelease.Pending;
         return new(engine.Profile, running, engine.Desired, running ? engine.Process!.Process.Id : null, ProfileStore.Port(engine.Profile),
-            healthy, cleanupPending ? "副屏桌面尚未回收，正在重试" : TabletWarmActive(DateTimeOffset.UtcNow) && engine == _tablet
+            healthy, releasePending ? "正在确认远控已结束，暂不接受新连接" : cleanupPending ? "副屏桌面尚未回收，正在重试" : TabletWarmActive(DateTimeOffset.UtcNow) && engine == _tablet
                 ? "已停止，可快速重连" : healthy ? streaming ? "正在串流" : "已就绪，等待设备连接" : engine.Message, streaming,
-            SessionVerified: true, BackendBusy: busy, DesktopCleanupPending: cleanupPending);
+            SessionVerified: true, BackendBusy: busy, DesktopCleanupPending: cleanupPending, BackendReleasePending: releasePending,
+            EncoderCacheState: encoderCacheState);
     }
 
     private async Task SaveDesiredAsync(CancellationToken cancellationToken)

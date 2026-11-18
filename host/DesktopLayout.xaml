@@ -116,7 +116,7 @@
        <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Accent}" />
       </MultiTrigger>
       <Trigger Property="IsEnabled" Value="False">
-       <Setter TargetName="Frame" Property="Opacity" Value="0.45" />
+       <Setter Property="Foreground" Value="{DynamicResource Muted}" />
       </Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate>
@@ -150,12 +150,16 @@
        <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Accent}" />
       </MultiTrigger>
       <Trigger Property="IsEnabled" Value="False">
-       <Setter TargetName="Frame" Property="Opacity" Value="0.45" />
+       <Setter Property="Foreground" Value="{DynamicResource Muted}" />
       </Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate>
    </Setter.Value>
   </Setter>
+ </Style>
+ <Style x:Key="DeviceQuickAction" TargetType="Button" BasedOn="{StaticResource HeaderAction}">
+  <Setter Property="Foreground" Value="{DynamicResource AccentText}"/>
+  <Setter Property="Background" Value="{DynamicResource InsetSurface}"/>
  </Style>
  <Style x:Key="HeaderIconAction" TargetType="Button" BasedOn="{StaticResource HeaderAction}">
   <Setter Property="Width" Value="40" />
@@ -203,7 +207,7 @@
        <Setter TargetName="Frame" Property="Background" Value="{DynamicResource NavigationHover}" />
       </Trigger>
       <Trigger Property="IsEnabled" Value="False">
-       <Setter TargetName="Frame" Property="Opacity" Value="0.45" />
+       <Setter Property="Foreground" Value="{DynamicResource Muted}" />
       </Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate>
@@ -222,7 +226,7 @@
   <Setter Property="Template">
    <Setter.Value>
     <ControlTemplate TargetType="ContextMenu">
-     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
       <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
      </Border>
     </ControlTemplate>

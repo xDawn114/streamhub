@@ -1,11 +1,11 @@
 {
   "upstreamCommit": "63d35f702ee9e362e43263742981836ec0710384",
-  "version": "2026.914.233613+streamhub.4.trace1",
-  "binarySha256": "5BE561362ACDD8A8D3B2483E37B134F85C70520EF178FFB2982FEB7A30BBB66F",
+  "version": "2026.914.233613+streamhub.4.trace1.persist2",
+  "binarySha256": "1565EC8412C51E54E9171D07BF8CAD2FAF296F83737F5D037BADD2C4B1DCF51D",
   "sourceArchive": "Sunshine-streamhub-source.tar.gz",
-  "sourceArchiveSha256": "255AD3AE64EF40B711008BD0442E734CBCE41298F2E0719D17544A3928E04D13",
-  "sourceFileCount": 1501,
-  "patchSha256": "242EFA602A948650748E6988F7F885C6A646000B310F86F870250314D630F89D",
+  "sourceArchiveSha256": "1CF5CF3FE6E6161B23F84D757E1F70FFBA832E6926B9C83B54FA4399FA8A808D",
+  "sourceFileCount": 1503,
+  "patchSha256": "6C7AC7C02993D96B52D48176B410521C60762F12B91050B40002079E7079B2B2",
   "compiler": "GCC 16.2.0 UCRT64",
   "cmake": "4.5.0",
   "configuration": "Release; assets relative; no native tray; no CUDA; static libraries",
@@ -16,11 +16,11 @@
     },
     {
       "path": "src/config.cpp",
-      "sha256": "F53866B8FFB29A791E04989315F52F7BFB94385E3572902DC4B9BAF8592F0FF2"
+      "sha256": "DAFB6C6604FD4D01510F436E5265F6D1608A1510150AA7312176B3D3BCDC4436"
     },
     {
       "path": "src/config.h",
-      "sha256": "EC3E5D957D95777ECA844EE501FC55001134D6425AFA7B785190136037E1F3DA"
+      "sha256": "98B88C7DFEC62A9F43D666F84F8948A33DFC0888A2476346474DC803D1C78A6D"
     },
     {
       "path": "src/main.cpp",
@@ -28,7 +28,7 @@
     },
     {
       "path": "src/nvhttp.cpp",
-      "sha256": "FBA0AD5C79062F1B0202BB0FECA67D6DCE350A6CB6F3C4F13ABEAD3FAD803982"
+      "sha256": "852D0AE9A087DAD2822A9AE8A836020B5844DAEC3A2F240955FE5B353816E2BD"
     },
     {
       "path": "src/platform/common.h",
@@ -55,6 +55,10 @@
       "sha256": "3DDADE342CF8E706DC8C5BA08C80B1072C08C29DB9D3E3A971AFF0F2835BA976"
     },
     {
+      "path": "src/streamhub_persisted_probe.h",
+      "sha256": "793A9AEBA64722E3C0FDA9C06F50826CE742E89C113C5850FD02B671F3E9ED03"
+    },
+    {
       "path": "src/streamhub_probe_cache.h",
       "sha256": "76A81150FF013454978B59A581DD9C3E08B99F4675566F114F82F58181DCB929"
     },
@@ -68,7 +72,15 @@
     },
     {
       "path": "src/video.cpp",
-      "sha256": "AEA252FE2C534F2986B95AF62BD19B7F5568E7540362B7D892664434F52F6EEE"
+      "sha256": "DC06074E559EF69FDAD19444D27646F813F815C928BEF5A1DDC6DBE9403F6714"
+    },
+    {
+      "path": "src/video.h",
+      "sha256": "BBFC49BD1611653F53662D50A558B93F6054B417A91AE2A86AA0C2C13BE672E2"
+    },
+    {
+      "path": "src/video_persisted_probe.inc",
+      "sha256": "B8955CA45277AA18523EDA13185C915492DD794857EB271E677DA85591241265"
     },
     {
       "path": "third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp",
@@ -189,5 +201,35 @@
     "supplementalPatchSha256": "12E57C5449D592B24D5615157645CE51B09367FAA6E0EC2E39B59679210B28B8",
     "maximumStagesPerSession": 16,
     "performanceBehaviorChanged": false
+  },
+  "controlledBuild": {
+    "toolchain": "toolchains/ucrt64-trace1-20261117.json",
+    "toolchainLockSha256": "D73742984A3CA1485B39FA95A4DE103CAF43E8D1F5DF4C02FCE603E5101C769E",
+    "previousBinarySha256": "B666589AED2210C3BEC67DCDC7920288EAF0253C0CE974CB80486ED2284C8484",
+    "sourceUnchangedFrom": null,
+    "performanceBehaviorChanged": true,
+    "performanceGatePassed": false,
+    "byteReproductionClaim": false
+  },
+  "persistedProbe": {
+    "profileOptInRequired": true,
+    "productDefaultEnabled": true,
+    "sdrOnly": true,
+    "schema": "SHPC1",
+    "maximumAgeSeconds": 604800,
+    "maximumBytes": 4096,
+    "realH264IdrValidation": true,
+    "identityIncludes": [
+      "image",
+      "configuration",
+      "command",
+      "GPU",
+      "driver",
+      "output",
+      "probePlan"
+    ],
+    "failedValidationFallback": "full-probe",
+    "activeStreamReconfiguration": false,
+    "supplementalPatchSha256": "6C5F35E2650BDCB8254F4B38B394C028365B70D9BC906889337FA316BEEF3CB5"
   }
 }

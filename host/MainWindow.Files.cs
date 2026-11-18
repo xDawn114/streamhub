@@ -105,7 +105,7 @@ public partial class MainWindow
     { await CommandAsync(new("files-configure", TransferEnabled: false)); await RefreshFilesAsync(); });
     private void GrantFiles_Click(object sender, RoutedEventArgs e) => _ = RunAction(async () =>
     {
-        if (FileDeviceBox.SelectedValue is not string clientId) { ShowFeedback("请先从安卓“文件”页连接电脑。", error: true); return; }
+        if (FileDeviceBox.SelectedValue is not string clientId) { ShowFeedback("请先从平板“文件”页连接电脑。", error: true); return; }
         if (_fileSnapshot?.Devices.FirstOrDefault(x => x.ClientId == clientId)?.UsesDevicePermissions == true)
         {
             await ReadControlDevicesAsync();

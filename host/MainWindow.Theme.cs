@@ -10,7 +10,7 @@ namespace StreamHub.Host;
 
 public partial class MainWindow
 {
-    private sealed record UiPreferences(string Theme = "system", bool ReduceMotion = false);
+    private sealed record UiPreferences(string Theme = "system", bool ReduceMotion = false, int TabletOrientation = 0, int TabletLink = 0);
     private UiPreferences _uiPreferences = new();
     private bool _themeEventsAttached, _loadingAppearance = true;
     private readonly string _uiPreferencesPath;
@@ -28,6 +28,8 @@ public partial class MainWindow
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { }
         ThemeChoice.SelectedIndex = _uiPreferences.Theme switch { "light" => 1, "dark" => 2, _ => 0 };
         ReduceMotionCheck.IsChecked = _uiPreferences.ReduceMotion;
+        OrientationBox.SelectedIndex = Math.Clamp(_uiPreferences.TabletOrientation,0,3);
+        RequestLinkBox.SelectedIndex = Math.Clamp(_uiPreferences.TabletLink,0,2);
         _loadingAppearance = false;
         ApplyDesktopTheme();
         if (!_themeEventsAttached)
@@ -56,20 +58,34 @@ public partial class MainWindow
 
     private void Appearance_Changed(object sender, RoutedEventArgs e)
     {
-        if (_loadingAppearance || ThemeChoice is null || ReduceMotionCheck is null) return;
-        _uiPreferences = new(ThemeChoice.SelectedIndex switch { 1 => "light", 2 => "dark", _ => "system" },
-            ReduceMotionCheck.IsChecked == true);
+        if (_loadingAppearance || ThemeChoice is null || ReduceMotionCheck is null || OrientationBox is null || RequestLinkBox is null) return;
+        var next = new UiPreferences(ThemeChoice.SelectedIndex switch { 1 => "light", 2 => "dark", _ => "system" },
+            ReduceMotionCheck.IsChecked == true, OrientationBox.SelectedIndex, RequestLinkBox.SelectedIndex);
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(UiPreferencesPath)!);
             var temporary = UiPreferencesPath + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(_uiPreferences));
+            File.WriteAllText(temporary, JsonSerializer.Serialize(next));
             File.Move(temporary, UiPreferencesPath, true);
+            _uiPreferences = next;
             ApplyDesktopTheme();
             if (_uiPreferences.ReduceMotion) ResetPageTransition();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        { ShowFeedback("外观设置未能保存：" + error.Message, error: true); }
+        {
+            _loadingAppearance = true;
+            ThemeChoice.SelectedIndex = _uiPreferences.Theme switch { "light" => 1, "dark" => 2, _ => 0 };
+            ReduceMotionCheck.IsChecked = _uiPreferences.ReduceMotion;
+            OrientationBox.SelectedIndex = _uiPreferences.TabletOrientation;
+            RequestLinkBox.SelectedIndex = _uiPreferences.TabletLink;
+            _loadingAppearance = false;
+            ShowFeedback("设置未能保存：" + error.Message, error: true);
+        }
+    }
+
+    private void TabletPreference_Changed(object sender, RoutedEventArgs e)
+    {
+        Appearance_Changed(sender,e);
     }
 
     private void OpenSettings_Click(object sender, RoutedEventArgs e) => Pages.SelectedItem = SettingsPage;

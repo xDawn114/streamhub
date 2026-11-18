@@ -17,34 +17,37 @@ index 4e3d52b..004e290 100644
  # packaging
  include(${CMAKE_MODULE_PATH}/packaging/common.cmake)
 diff --git a/src/config.cpp b/src/config.cpp
-index e0e8647..1350b07 100644
+index e0e8647..e2c1f6a 100644
 --- a/src/config.cpp
 +++ b/src/config.cpp
-@@ -719,6 +719,7 @@ namespace config {
+@@ -719,6 +719,8 @@ namespace config {
  
      0,  // hevc_mode
      0,  // av1_mode
 +    "full"s,  // streamhub_probe_plan
++    false,  // streamhub_persist_probe
  
      2,  // min_threads
      {
-@@ -1607,6 +1608,7 @@ namespace config {
+@@ -1607,6 +1609,8 @@ namespace config {
      int_f(vars, "qp", video.qp);
      int_between_f(vars, "hevc_mode", video.hevc_mode, {0, 3});
      int_between_f(vars, "av1_mode", video.av1_mode, {0, 3});
 +    string_f(vars, "streamhub_probe_plan", video.streamhub_probe_plan);
++    bool_f(vars, "streamhub_persist_probe", video.streamhub_persist_probe);
      int_f(vars, "min_threads", video.min_threads);
      string_f(vars, "sw_preset", video.sw.sw_preset);
      if (!video.sw.sw_preset.empty()) {
 diff --git a/src/config.h b/src/config.h
-index 7861538..7d2204f 100644
+index 7861538..d757df2 100644
 --- a/src/config.h
 +++ b/src/config.h
-@@ -68,6 +68,7 @@ namespace config {
+@@ -68,6 +68,8 @@ namespace config {
  
      int hevc_mode;  ///< HEVC support mode advertised to clients.
      int av1_mode;  ///< AV1 support mode advertised to clients.
 +    std::string streamhub_probe_plan;  ///< Bounded receiver codec/chroma probe plan.
++    bool streamhub_persist_probe;  ///< Profile-scoped disk metadata; the owning product opts in.
  
      int min_threads;  ///< Minimum number of threads or slices for CPU encoding.
  
@@ -132,7 +135,7 @@ index f349a23..7868650 100644
  
  #ifdef _WIN32
 diff --git a/src/nvhttp.cpp b/src/nvhttp.cpp
-index 8e33cad..1ee7f4a 100644
+index 8e33cad..da1e344 100644
 --- a/src/nvhttp.cpp
 +++ b/src/nvhttp.cpp
 @@ -1,3 +1,4 @@
@@ -140,7 +143,15 @@ index 8e33cad..1ee7f4a 100644
  /**
   * @file src/nvhttp.cpp
   * @brief Definitions for the nvhttp (GameStream) server.
-@@ -1390,7 +1391,7 @@ namespace nvhttp {
+@@ -1225,6 +1226,7 @@ namespace nvhttp {
+     tree.put("root.hostname", config::nvhttp.sunshine_name);
+ 
+     tree.put("root.appversion", VERSION);
++    tree.put("root.streamhub_probe_cache", video::persisted_probe_state());
+     tree.put("root.GfeVersion", GFE_VERSION);
+     tree.put("root.uniqueid", http::unique_id);
+     tree.put("root.HttpsPort", net::map_port(PORT_HTTPS));
+@@ -1390,7 +1392,7 @@ namespace nvhttp {
        // encoder matches the active GPU (which could have changed
        // due to hotplugging, driver crash, primary monitor change,
        // or any number of other factors).
@@ -149,7 +160,7 @@ index 8e33cad..1ee7f4a 100644
          tree.put("root.<xmlattr>.status_code", 503);
          tree.put("root.<xmlattr>.status_message", "Failed to initialize video capture/encoding. Is a display connected and turned on?");
          tree.put("root.gamesession", 0);
-@@ -1502,7 +1503,7 @@ namespace nvhttp {
+@@ -1502,7 +1504,7 @@ namespace nvhttp {
        // encoder matches the active GPU (which could have changed
        // due to hotplugging, driver crash, primary monitor change,
        // or any number of other factors).
@@ -462,6 +473,73 @@ index 0000000..d9453e2
 +  // real stream sessions. The implementation lives beside stream::session_t.
 +  void first_frame_mark(void *channel_data, streamhub::first_frame_phase phase, int64_t frame_index = 0);
 +}
+diff --git a/src/streamhub_persisted_probe.h b/src/streamhub_persisted_probe.h
+new file mode 100644
+index 0000000..e020410
+--- /dev/null
++++ b/src/streamhub_persisted_probe.h
+@@ -0,0 +1,61 @@
++#pragma once
++
++#include <array>
++#include <chrono>
++#include <cstdint>
++#include <optional>
++#include <sstream>
++#include <string>
++#include <string_view>
++
++namespace streamhub {
++  // Capability metadata only. Never contains objects, certificates,
++  // credentials or configuration text. A disk hit still requires real encoding.
++  struct persisted_probe {
++    std::int64_t created = 0;
++    std::string fingerprint;
++    std::string encoder;
++    std::array<std::uint64_t, 3> capabilities {};
++    int hevc_mode = 1;
++    int av1_mode = 1;
++  };
++
++  inline constexpr std::int64_t persisted_probe_max_age = 7 * 24 * 60 * 60;
++
++  inline bool valid_probe_fingerprint(std::string_view text) {
++    if (text.size() != 64) return false;
++    for (char c : text) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
++    return true;
++  }
++
++  inline std::optional<persisted_probe> decode_persisted_probe(
++      std::string_view bytes, std::string_view fingerprint, std::int64_t now, std::uint64_t flag_mask) {
++    if (bytes.empty() || bytes.size() > 4096 || !valid_probe_fingerprint(fingerprint)) return {};
++    std::istringstream input {std::string(bytes)};
++    persisted_probe result;
++    std::string magic;
++    if (!(input >> magic >> result.created >> result.fingerprint >> result.encoder
++          >> result.capabilities[0] >> result.capabilities[1] >> result.capabilities[2]
++          >> result.hevc_mode >> result.av1_mode)) return {};
++    input >> std::ws;
++    if (!input.eof() || magic != "SHPC1" || result.fingerprint != fingerprint ||
++        result.created < 0 || now < result.created || now - result.created >= persisted_probe_max_age ||
++        result.encoder.empty() || result.encoder.size() > 64 ||
++        result.hevc_mode < 1 || result.hevc_mode > 5 || result.av1_mode < 1 || result.av1_mode > 5) return {};
++    for (char c : result.encoder) if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) return {};
++    for (auto bits : result.capabilities) if (bits & ~flag_mask) return {};
++    // PASSED is bit zero in the pinned encoder ABI. Unknown bits are rejected.
++    if (!(result.capabilities[0] & 1) ||
++        (result.hevc_mode > 1 && !(result.capabilities[1] & 1)) ||
++        (result.av1_mode > 1 && !(result.capabilities[2] & 1))) return {};
++    return result;
++  }
++
++  inline std::string encode_persisted_probe(const persisted_probe &value) {
++    std::ostringstream output;
++    output << "SHPC1\n" << value.created << '\n' << value.fingerprint << '\n' << value.encoder << '\n'
++           << value.capabilities[0] << ' ' << value.capabilities[1] << ' ' << value.capabilities[2] << '\n'
++           << value.hevc_mode << ' ' << value.av1_mode << '\n';
++    return output.str();
++  }
++}
 diff --git a/src/streamhub_probe_cache.h b/src/streamhub_probe_cache.h
 new file mode 100644
 index 0000000..fe45555
@@ -576,18 +654,22 @@ index 0000000..4940b2b
 +  }
 +}
 diff --git a/src/video.cpp b/src/video.cpp
-index 843a19a..b8f22b5 100644
+index 843a19a..644dcad 100644
 --- a/src/video.cpp
 +++ b/src/video.cpp
-@@ -1,3 +1,7 @@
+@@ -1,3 +1,11 @@
 +#include "src/streamhub_timing.h"
 +#include "src/streamhub_first_frame.h"
 +#include "src/streamhub_probe_cache.h"
 +#include "src/streamhub_probe_plan.h"
++#include "src/streamhub_persisted_probe.h"
++#include <filesystem>
++#include <fstream>
++#include "src/crypto.h"
  /**
   * @file src/video.cpp
   * @brief Definitions for video.
-@@ -31,6 +35,7 @@ extern "C" {
+@@ -31,6 +39,7 @@ extern "C" {
  #include "globals.h"
  #include "input.h"
  #include "logging.h"
@@ -595,7 +677,7 @@ index 843a19a..b8f22b5 100644
  #include "nvenc/nvenc_encoder.h"
  #include "platform/common.h"
  #include "sync.h"
-@@ -1470,6 +1475,8 @@ namespace video {
+@@ -1470,6 +1479,8 @@ namespace video {
    static encoder_t *chosen_encoder;
    int active_hevc_mode;  ///< HEVC mode selected by the most recent encoder probe.
    int active_av1_mode;  ///< AV1 mode selected by the most recent encoder probe.
@@ -604,7 +686,7 @@ index 843a19a..b8f22b5 100644
    bool last_encoder_probe_supported_ref_frames_invalidation = false;  ///< Whether the last probe found reference-frame invalidation support.
    std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec = {};  ///< YUV444 support discovered for each probed codec.
  
-@@ -1891,6 +1898,7 @@ namespace video {
+@@ -1891,6 +1902,7 @@ namespace video {
  
        packet->replacements = &session.replacements;
        packet->channel_data = channel_data;
@@ -612,7 +694,7 @@ index 843a19a..b8f22b5 100644
        packets->raise(std::move(packet));
      }
  
-@@ -1922,6 +1930,7 @@ namespace video {
+@@ -1922,6 +1934,7 @@ namespace video {
      packet->channel_data = channel_data;
      packet->after_ref_frame_invalidation = encoded_frame.after_ref_frame_invalidation;
      packet->frame_timestamp = frame_timestamp;
@@ -620,7 +702,7 @@ index 843a19a..b8f22b5 100644
      packets->raise(std::move(packet));
  
      return 0;
-@@ -2408,11 +2417,15 @@ namespace video {
+@@ -2408,11 +2421,15 @@ namespace video {
      const encoder_t &encoder,
      void *channel_data
    ) {
@@ -636,7 +718,7 @@ index 843a19a..b8f22b5 100644
      // As a workaround for NVENC hangs and to generally speed up encoder reinit,
      // we will complete the encoder teardown in a separate thread if supported.
      // This will move expensive processing off the encoder thread to allow us
-@@ -2466,6 +2479,7 @@ namespace video {
+@@ -2466,6 +2483,7 @@ namespace video {
        }
  
        if (requested_idr_frame) {
@@ -644,7 +726,7 @@ index 843a19a..b8f22b5 100644
          session->request_idr_frame();
        }
  
-@@ -2475,6 +2489,7 @@ namespace video {
+@@ -2475,6 +2493,7 @@ namespace video {
        if (!requested_idr_frame || images->peek()) {
          if (auto img = images->pop(max_frametime)) {
            frame_timestamp = img->frame_timestamp;
@@ -652,7 +734,7 @@ index 843a19a..b8f22b5 100644
            if (session->convert(*img)) {
              BOOST_LOG(error) << "Could not convert image"sv;
              return;
-@@ -2498,6 +2513,7 @@ namespace video {
+@@ -2498,6 +2517,7 @@ namespace video {
          break;
        }
  
@@ -660,7 +742,7 @@ index 843a19a..b8f22b5 100644
        if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp)) {
          BOOST_LOG(error) << "Could not encode video packet"sv;
          return;
-@@ -2638,11 +2654,15 @@ namespace video {
+@@ -2638,11 +2658,15 @@ namespace video {
  
      encode_session.ctx = &ctx;
  
@@ -676,7 +758,7 @@ index 843a19a..b8f22b5 100644
      // absolute mouse coordinates require that the dimensions of the screen are known
      ctx.touch_port_events->raise(make_port(disp, ctx.config));
  
-@@ -2657,11 +2677,15 @@ namespace video {
+@@ -2657,11 +2681,15 @@ namespace video {
      }
      ctx.hdr_events->raise(std::move(hdr_info));
  
@@ -692,7 +774,7 @@ index 843a19a..b8f22b5 100644
      // Load the initial image to prepare for encoding
      if (session->convert(img)) {
        BOOST_LOG(error) << "Could not convert initial image"sv;
-@@ -2777,10 +2801,12 @@ namespace video {
+@@ -2777,10 +2805,12 @@ namespace video {
            }
  
            if (ctx->idr_events->peek()) {
@@ -705,7 +787,7 @@ index 843a19a..b8f22b5 100644
            if (frame_captured && pos->session->convert(*img)) {
              BOOST_LOG(error) << "Could not convert image"sv;
              ctx->shutdown_event->raise(true);
-@@ -2793,6 +2819,7 @@ namespace video {
+@@ -2793,6 +2823,7 @@ namespace video {
              frame_timestamp = img->frame_timestamp;
            }
  
@@ -713,7 +795,7 @@ index 843a19a..b8f22b5 100644
            if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp)) {
              BOOST_LOG(error) << "Could not encode video packet"sv;
              ctx->shutdown_event->raise(true);
-@@ -2923,11 +2950,15 @@ namespace video {
+@@ -2923,11 +2954,15 @@ namespace video {
  
        auto &encoder = *chosen_encoder;
  
@@ -729,7 +811,7 @@ index 843a19a..b8f22b5 100644
        // absolute mouse coordinates require that the dimensions of the screen are known
        touch_port_event->raise(make_port(display.get(), config));
  
-@@ -2968,10 +2999,12 @@ namespace video {
+@@ -2968,10 +3003,12 @@ namespace video {
      config_t config,
      void *channel_data
    ) {
@@ -742,7 +824,7 @@ index 843a19a..b8f22b5 100644
      idr_events->raise(true);
      if (chosen_encoder->flags & PARALLEL_ENCODING) {
        capture_async(std::move(mail), config, channel_data);
-@@ -3068,14 +3101,26 @@ namespace video {
+@@ -3068,14 +3105,26 @@ namespace video {
    bool validate_encoder(encoder_t &encoder, bool expect_failure) {
      const auto output_name {display_device::map_output_name(config::video.output_name)};
      std::shared_ptr<platf::display_t> disp;
@@ -771,7 +853,7 @@ index 843a19a..b8f22b5 100644
  
      encoder.h264.capabilities.set();
      encoder.hevc.capabilities.set();
-@@ -3086,7 +3131,7 @@ namespace video {
+@@ -3086,7 +3135,7 @@ namespace video {
      config_t config_autoselect {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
  
      // If the encoder isn't supported at all (not even H.264), bail early
@@ -780,7 +862,7 @@ index 843a19a..b8f22b5 100644
      if (!disp) {
        return false;
      }
-@@ -3174,12 +3219,21 @@ namespace video {
+@@ -3174,12 +3223,21 @@ namespace video {
        encoder.av1.capabilities.reset();
      }
  
@@ -806,7 +888,7 @@ index 843a19a..b8f22b5 100644
          if (!disp) {
            return;
          }
-@@ -3198,8 +3252,8 @@ namespace video {
+@@ -3198,8 +3256,8 @@ namespace video {
  
        auto test_yuv420_hdr = [&](auto &flag_map, auto video_format) {
          const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 0, 0};
@@ -817,7 +899,7 @@ index 843a19a..b8f22b5 100644
          if (!disp) {
            return;
          }
-@@ -3218,8 +3272,11 @@ namespace video {
+@@ -3218,8 +3276,11 @@ namespace video {
  
        auto test_yuv444_hdr = [&](auto &flag_map, auto video_format) {
          const config_t config = {1920, 1080, 60, 6000, 1000, 1, 0, 3, video_format, 1, 1, 0};
@@ -831,7 +913,7 @@ index 843a19a..b8f22b5 100644
          if (!disp) {
            return;
          }
-@@ -3242,9 +3299,9 @@ namespace video {
+@@ -3242,9 +3303,9 @@ namespace video {
        encoder.h264[encoder_t::DYNAMIC_RANGE_YUV444] = false;
  
        test_yuv444(encoder.hevc, 1);
@@ -842,9 +924,12 @@ index 843a19a..b8f22b5 100644
        test_yuv420_hdr(encoder.av1, 2);
        test_yuv444_hdr(encoder.av1, 2);
      }
-@@ -3264,6 +3321,11 @@ namespace video {
+@@ -3263,7 +3324,14 @@ namespace video {
+     return true;
    }
  
++#include "src/video_persisted_probe.inc"
++
    int probe_encoders() {
 +    streamhub::timer duration("probe-encoders");
 +    if (rtsp_stream::session_count() != 0) {
@@ -854,7 +939,7 @@ index 843a19a..b8f22b5 100644
      if (!allow_encoder_probing()) {
        // Error already logged
        return -1;
-@@ -3271,16 +3333,62 @@ namespace video {
+@@ -3271,16 +3339,75 @@ namespace video {
  
      auto encoder_list = encoders;
  
@@ -877,7 +962,17 @@ index 843a19a..b8f22b5 100644
 +    const bool environment_unchanged = true;
 +#endif
 +    const bool encode_failed = streamhub_encode_failed.exchange(false);
-+    if (encode_failed) streamhub_probe_cache.invalidate();
++    if (encode_failed) {
++      streamhub_probe_cache.invalidate();
++#ifdef _WIN32
++      if (config::video.streamhub_persist_probe) streamhub_discard_persisted_probe();
++#endif
++    }
++#ifdef _WIN32
++    if (!chosen_encoder && !encode_failed && config::video.streamhub_persist_probe &&
++        streamhub::probe_plan{config::video.streamhub_probe_plan}.basic_only() &&
++        streamhub_restore_persisted_probe(environment, output_name)) return 0;
++#endif
 +    if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platform_changed && !encode_failed &&
 +        environment_unchanged) {
 +      BOOST_LOG(info) << "[StreamHub] encoder-probe=reused encoder=" << chosen_encoder->name;
@@ -905,6 +1000,9 @@ index 843a19a..b8f22b5 100644
 +       (chosen_encoder->flags & ALWAYS_REPROBE) ? "fallback-encoder" :
 +       platform_changed ? "display-or-driver-changed" : "target-unknown-changed-or-revalidation-failed");
  
++#ifdef _WIN32
++    streamhub_persisted_ready = false;
++#endif
      // Restart encoder selection
      auto previous_encoder = chosen_encoder;
      chosen_encoder = nullptr;
@@ -919,14 +1017,211 @@ index 843a19a..b8f22b5 100644
      last_encoder_probe_supported_ref_frames_invalidation = false;
  
      auto adjust_encoder_constraints_hevc = [&](encoder_t *encoder) {
-@@ -3502,6 +3610,7 @@ namespace video {
+@@ -3502,6 +3629,11 @@ namespace video {
        BOOST_LOG(debug) << "ENCODER STATUS ACTIVE_AV1_MODE: "sv << active_av1_mode;
      }
  
 +    streamhub_probe_cache.remember(environment);
++#ifdef _WIN32
++    if (config::video.streamhub_persist_probe && streamhub::probe_plan{config::video.streamhub_probe_plan}.basic_only())
++      streamhub_save_persisted_probe(environment);
++#endif
      return 0;
    }
  
+diff --git a/src/video.h b/src/video.h
+index 63f3cf5..cd74ce7 100644
+--- a/src/video.h
++++ b/src/video.h
+@@ -725,6 +725,9 @@ namespace video {
+    */
+   int probe_encoders();
+ 
++  // Read-only startup evidence; no probe or stream reconfiguration.
++  const char *persisted_probe_state();
++
+   // Several NTSC standard refresh rates are hardcoded here, because their
+   // true rate requires a denominator of 1001. ffmpeg's av_d2q() would assume it could
+   // reduce 29.97 to 2997/100 but this would be slightly wrong. We also include
+diff --git a/src/video_persisted_probe.inc b/src/video_persisted_probe.inc
+new file mode 100644
+index 0000000..638f6cc
+--- /dev/null
++++ b/src/video_persisted_probe.inc
+@@ -0,0 +1,173 @@
++// Included inside namespace video, after validate_encoder(). Windows metadata cache.
++#ifdef _WIN32
++  static std::atomic_bool streamhub_persisted_ready {false};
++  static std::string streamhub_sha_text(std::string_view bytes) {
++    const auto hash = crypto::hash(bytes);
++    constexpr char hex[] = "0123456789abcdef";
++    std::string result;
++    for (auto byte : hash) { result += hex[byte >> 4]; result += hex[byte & 15]; }
++    return result;
++  }
++
++  static std::string streamhub_hash_file(const std::filesystem::path &path, std::uintmax_t maximum) {
++    std::error_code error;
++    const auto size = std::filesystem::file_size(path, error);
++    if (error || size == 0 || size > maximum) return {};
++    std::ifstream file(path, std::ios::binary);
++    if (!file) return {};
++    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
++    if (!context || EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) != 1) return {};
++    std::array<char, 65536> buffer;
++    while (file) {
++      file.read(buffer.data(), buffer.size());
++      if (file.gcount() && EVP_DigestUpdate(context.get(), buffer.data(), file.gcount()) != 1) return {};
++    }
++    if (!file.eof()) return {};
++    std::array<unsigned char, 32> digest;
++    unsigned int length = 0;
++    if (EVP_DigestFinal_ex(context.get(), digest.data(), &length) != 1 || length != digest.size()) return {};
++    constexpr char hex[] = "0123456789abcdef";
++    std::string result;
++    for (auto byte : digest) { result += hex[byte >> 4]; result += hex[byte & 15]; }
++    return result;
++  }
++
++  static std::filesystem::path streamhub_persisted_path() {
++    // A new sidecar in the selected product profile. Never edits the state file.
++    return std::filesystem::path(config::nvhttp.file_state).concat(".probe-cache-v1");
++  }
++
++  static bool streamhub_cache_path_allowed(const std::filesystem::path &path) {
++    if (path.empty() || !path.is_absolute()) return false;
++    auto current = path;
++    bool leaf = true;
++    while (!current.empty()) {
++      const auto attributes = GetFileAttributesW(current.c_str());
++      if (attributes == INVALID_FILE_ATTRIBUTES) {
++        if (!leaf || (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND)) return false;
++      } else if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) || (leaf && (attributes & FILE_ATTRIBUTE_DIRECTORY))) {
++        return false;
++      }
++      const auto parent = current.parent_path();
++      if (parent == current) break;
++      current = parent; leaf = false;
++    }
++    return true;
++  }
++
++  static std::string streamhub_persisted_fingerprint(const std::string &environment) {
++    if (environment.empty()) return {};
++    static const std::string image_hash = [] {
++      std::array<wchar_t, 32768> name {};
++      const auto length = GetModuleFileNameW(nullptr, name.data(), name.size());
++      return length && length < name.size() ? streamhub_hash_file(std::filesystem::path(name.data()), 256 * 1024 * 1024) : std::string {};
++    }();
++    const auto configuration_hash = streamhub_hash_file(config::sunshine.config_file, 1024 * 1024);
++    // A file changed under an already-running process is not its parsed config.
++    static const auto startup_configuration_hash = configuration_hash;
++    if (image_hash.empty() || configuration_hash.empty() || configuration_hash != startup_configuration_hash) return {};
++    const std::wstring command = GetCommandLineW();
++    const auto command_hash = streamhub_sha_text(std::string_view(reinterpret_cast<const char *>(command.data()), command.size() * sizeof(wchar_t)));
++    return streamhub_sha_text("SHPC1:" + image_hash + ':' + configuration_hash + ':' + command_hash + ':' + environment);
++  }
++
++  static std::int64_t streamhub_wall_seconds() {
++    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
++  }
++
++  static void streamhub_discard_persisted_probe() {
++    streamhub_persisted_ready = false;
++    const auto path = streamhub_persisted_path();
++    if (streamhub_cache_path_allowed(path)) DeleteFileW(path.c_str());
++  }
++
++  static bool streamhub_restore_persisted_probe(const std::string &environment, const std::string &output_name) {
++    streamhub::timer duration("persistent-probe-read-and-verify");
++    const auto path = streamhub_persisted_path();
++    const auto fingerprint = streamhub_persisted_fingerprint(environment);
++    if (fingerprint.empty() || !streamhub_cache_path_allowed(path)) return false;
++    std::error_code error;
++    const auto size = std::filesystem::file_size(path, error);
++    if (error || size == 0 || size > 4096) return false;
++    std::ifstream input(path, std::ios::binary);
++    std::string bytes(static_cast<std::size_t>(size), '\0');
++    if (!input.read(bytes.data(), bytes.size()) || input.peek() != std::char_traits<char>::eof()) return false;
++    // Windows ifstream does not share delete access. Release the read handle
++    // before the failure guard invalidates a record after real sample failure.
++    input.close();
++    const auto saved = streamhub::decode_persisted_probe(bytes, fingerprint, streamhub_wall_seconds(), (1ULL << encoder_t::MAX_FLAGS) - 1);
++    if (!saved) { BOOST_LOG(info) << "[StreamHub] persistent-probe=miss reason=record-or-environment"; return false; }
++    encoder_t *candidate = nullptr;
++    for (auto encoder : encoders) if (encoder->name == saved->encoder && !(encoder->flags & ALWAYS_REPROBE)) candidate = encoder;
++    if (!candidate) return false;
++    const auto original_h264 = candidate->h264.capabilities;
++    const auto original_hevc = candidate->hevc.capabilities;
++    const auto original_av1 = candidate->av1.capabilities;
++    candidate->h264.capabilities = std::bitset<encoder_t::MAX_FLAGS>(saved->capabilities[0]);
++    candidate->hevc.capabilities = std::bitset<encoder_t::MAX_FLAGS>(saved->capabilities[1]);
++    candidate->av1.capabilities = std::bitset<encoder_t::MAX_FLAGS>(saved->capabilities[2]);
++    auto restore = util::fail_guard([&] {
++      candidate->h264.capabilities = original_h264;
++      candidate->hevc.capabilities = original_hevc;
++      candidate->av1.capabilities = original_av1;
++      streamhub_discard_persisted_probe();
++    });
++    // Matches existing same-target revalidation: a real fresh capture/encode
++    // object, conversion and verified first IDR. No deserialized native objects.
++    const config_t check {1920, 1080, 60, 6000, 1000, 1, 0, 1, 0, 0, 0, 0};
++    std::shared_ptr<platf::display_t> display;
++    reset_display(display, candidate->platform_formats->dev_type, output_name, check);
++    if (!display || !display->is_codec_supported(candidate->h264.name, check) || validate_config(display, *candidate, check) < 0) {
++      BOOST_LOG(info) << "[StreamHub] persistent-probe=failed-real-sample fallback=full";
++      return false;
++    }
++    chosen_encoder = candidate;
++    active_hevc_mode = saved->hevc_mode;
++    active_av1_mode = saved->av1_mode;
++    last_encoder_probe_supported_ref_frames_invalidation = (candidate->flags & REF_FRAMES_INVALIDATION);
++    last_encoder_probe_supported_yuv444_for_codec = {
++      candidate->h264[encoder_t::PASSED] && candidate->h264[encoder_t::YUV444],
++      candidate->hevc[encoder_t::PASSED] && candidate->hevc[encoder_t::YUV444],
++      candidate->av1[encoder_t::PASSED] && candidate->av1[encoder_t::YUV444]};
++    streamhub_probe_cache.remember(environment);
++    streamhub_persisted_ready = true;
++    restore.disable();
++    BOOST_LOG(info) << "[StreamHub] encoder-probe=persistent-revalidated encoder=" << candidate->name;
++    return true;
++  }
++
++  static void streamhub_save_persisted_probe(const std::string &environment) {
++    if (!chosen_encoder || (chosen_encoder->flags & ALWAYS_REPROBE)) return;
++    const auto path = streamhub_persisted_path();
++    const auto fingerprint = streamhub_persisted_fingerprint(environment);
++    if (fingerprint.empty() || !streamhub_cache_path_allowed(path)) return;
++    const streamhub::persisted_probe value {streamhub_wall_seconds(), fingerprint, std::string(chosen_encoder->name),
++      {chosen_encoder->h264.capabilities.to_ullong(), chosen_encoder->hevc.capabilities.to_ullong(), chosen_encoder->av1.capabilities.to_ullong()},
++      active_hevc_mode, active_av1_mode};
++    const auto bytes = streamhub::encode_persisted_probe(value);
++    const auto temporary = std::filesystem::path(path).concat(".new." + std::to_string(GetCurrentProcessId()));
++    if (!streamhub_cache_path_allowed(temporary)) return;
++    const auto file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
++    if (file == INVALID_HANDLE_VALUE) return;
++    DWORD written = 0;
++    const bool complete = WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) && written == bytes.size() && FlushFileBuffers(file);
++    CloseHandle(file);
++    if (complete && MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
++      streamhub_persisted_ready = true;
++      BOOST_LOG(info) << "[StreamHub] persistent-probe=saved";
++    } else {
++      DeleteFileW(temporary.c_str());
++      BOOST_LOG(info) << "[StreamHub] persistent-probe=save-unavailable";
++    }
++  }
++#endif
++
++  const char *persisted_probe_state() {
++#ifdef _WIN32
++    if (!config::video.streamhub_persist_probe) return "disabled";
++    if (!streamhub::probe_plan{config::video.streamhub_probe_plan}.basic_only()) return "not-applicable";
++    return streamhub_persisted_ready && !streamhub_encode_failed ? "ready" : "unavailable";
++#else
++    return "not-applicable";
++#endif
++  }
 diff --git a/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp b/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp
 index d05eb11..cdc3607 100644
 --- a/third-party/libvirtualhid/src/platform/windows/windows_broker_client.cpp

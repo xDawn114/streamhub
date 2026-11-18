@@ -26,7 +26,7 @@ public sealed record RuntimeRequest(string Command, string? Profile = null, stri
     bool? AutomaticLoginEnabled = null, long? PolicyRevision = null, bool? AllowPublicLan = null,
     int? DeviceScope = null, bool? LegacyBindingAllowed = null,
     string? ControllerName = null, string? ControllerCredentialId = null, string? ControllerChannel = null,
-    string? EncoderProbe = null);
+    string? EncoderProbe = null, bool? EndBackend = null);
 
 public sealed record MediaIdentityRequest(string Mode, string ClientCertificate);
 public sealed record MediaIdentityResult([property: JsonRequired] bool Paired, [property: JsonRequired] string? ServerCertificate);
@@ -76,7 +76,8 @@ public sealed record RuntimeResponse(bool Success, string Message, RuntimeStatus
 public sealed record ControlApiStatus(bool Running, bool IdentityPresent, string? Invitation, string? LastError);
 
 public sealed record EngineStatus(string Profile, bool Running, bool Desired, int? ProcessId, int Port, bool Healthy, string Message,
-    bool Streaming = false, bool SessionVerified = false, bool BackendBusy = false, bool DesktopCleanupPending = false);
+    bool Streaming = false, bool SessionVerified = false, bool BackendBusy = false, bool DesktopCleanupPending = false,
+    bool BackendReleasePending = false, string EncoderCacheState = "unknown");
 
 public sealed record NetworkEngineStatus(bool Running, bool Desired, int? ProcessId, string Message);
 

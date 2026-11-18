@@ -15,11 +15,12 @@ internal static class Program
  [STAThread] static void Main(string[] args)
  {
   string root=Path.GetFullPath(args.Single());Directory.CreateDirectory(root);
-  var app=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};var checks=new List<string>();var calls=new List<RuntimeRequest>();var typography=new List<object>();
-  bool paused=false,available=true,responding=false,receiverAvailable=true,streaming=false;var now=DateTimeOffset.UtcNow;
+  var app=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};var checks=new List<string>();var calls=new List<RuntimeRequest>();var typography=new List<object>();var scrollClearance=new List<object>();
+  bool paused=false,available=true,responding=false,receiverAvailable=true,streaming=false,ending=false;var now=DateTimeOffset.UtcNow;
   var network=new NetworkEngineStatus(false,false,null,"未启用");
   var networkDetails=new NetworkStatus{Error="内置异地连接尚未启动，或后台服务暂时不可用。"};
   var binding=new LocalBindingSnapshot(null,null,null);
+  TabletReceiver[] extraReceivers=[]; TabletConnectionRequest? tabletRequest=null;
   var bound=new ControlDeviceList(false,[new("active-device-123456","fixture-client","PA2573",ControlScope.Remote|ControlScope.Tablet,false,now,"宿舍平板","tablet",now),new("revoked-device-654321","fixture-old-client","PA2573",ControlScope.All,true,now.AddDays(-1)),new("phone-device-112233","fixture-phone","PA2573",ControlScope.Remote,false,now,null,"phone")]);
   var files=new TransferSnapshot(new(),[new("fixture-client","PA2573",new string('A',64))],[]);
   var engine=new EngineStatus("remote",true,true,null,48989,true,"等待设备连接");
@@ -31,6 +32,8 @@ internal static class Program
    if(r.Command=="binding-cancel")binding=new(null,null,null);
    if(r.Command=="connections-pause")paused=true;if(r.Command=="connections-resume")paused=false;
    if(r.Command=="control-device-rename")bound=bound with{Devices=bound.Devices.Select(d=>d.Id==r.RequestId?d with{Alias=r.Name}:d).ToArray()};
+   if(r.Command=="tablet-request")tabletRequest=new("fixture-request",r.ClientId!,"waiting",0,"lan",now.AddMinutes(1),"请在设备上确认副屏邀请");
+   if(r.Command=="tablet-request-cancel"&&tabletRequest is {} cancelling&&cancelling.Id==r.RequestId)tabletRequest=cancelling with{State="cancelled",Message="邀请已取消"};
    string? payload=r.Command switch{
     "network-config"=>"{\"provider\":\"lan\",\"serverUrl\":\"\",\"manualAddresses\":\"\"}",
     "network-status"=>JsonSerializer.Serialize(networkDetails,RuntimeProtocol.JsonOptions),
@@ -38,8 +41,8 @@ internal static class Program
     "control-device-list" or "control-device-rename"=>JsonSerializer.Serialize(bound,RuntimeProtocol.JsonOptions),
     "binding-start" or "binding-cancel" or "binding-status"=>JsonSerializer.Serialize(binding,RuntimeProtocol.JsonOptions),
     "host-policy-status"=>JsonSerializer.Serialize(new HostPolicySnapshot(),RuntimeProtocol.JsonOptions),
-    "receiver-list"=>JsonSerializer.Serialize(new ReceiverSnapshot(responding?[new("fixture-client","PA2573",2560,1600,60,[0,90],now)]:[],null),RuntimeProtocol.JsonOptions),_=>null};
-   return Task.FromResult(new RuntimeResponse(true,"隔离状态已更新",new RuntimeStatus("fixture-id","我的电脑",engine with{Running=!paused,Healthy=!paused,Desired=!paused,Streaming=streaming},engine with{Profile="tablet",Running=false,Desired=false,Healthy=false},network,"fixture",root,now,ConnectionsPaused:paused),payload));
+    "receiver-list" or "tablet-request"=>JsonSerializer.Serialize(new ReceiverSnapshot((responding?new TabletReceiver[]{new("fixture-client","PA2573",2560,1600,60,[0,90],now)}:[]).Concat(extraReceivers).ToArray(),tabletRequest),RuntimeProtocol.JsonOptions),_=>null};
+   return Task.FromResult(new RuntimeResponse(true,"隔离状态已更新",new RuntimeStatus("fixture-id","我的电脑",engine with{Running=!paused,Healthy=!paused,Desired=!paused,Streaming=streaming,BackendReleasePending=ending},engine with{Profile="tablet",Running=false,Desired=false,Healthy=false},network,"fixture",root,now,ConnectionsPaused:paused),payload));
   });
   var w=new MainWindow(runtime,preferences){Left=-20000,Top=-20000,ShowActivated=false,ShowInTaskbar=false,Width=940,Height=660};
   T N<T>(string n)where T:class=>(T)w.FindName(n);
@@ -47,6 +50,22 @@ internal static class Program
   void Async(string m){typeof(MainWindow).GetMethod(m,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(w,null);Pump();}
   void Refresh(){Invoke("RefreshButton_Click");Pump();}
   void Check(bool b,string label){if(!b)throw new Exception(label);checks.Add(label);}
+  void AuditScrollClearance(ScrollViewer viewer,string label){
+   viewer.UpdateLayout();
+   var bar=(ScrollBar)viewer.Template.FindName("PART_VerticalScrollBar",viewer);
+   if(viewer.ComputedVerticalScrollBarVisibility!=Visibility.Visible)return;
+   var viewport=(ScrollContentPresenter)viewer.Template.FindName("PART_ScrollContentPresenter",viewer);
+   viewer.SetValue(ScrollActivity.PointerNearProperty,true);Pump();
+   double barLeft=bar.TranslatePoint(new Point(),viewer).X;
+   double contentRight=viewport.TranslatePoint(new Point(viewport.ActualWidth,0),viewer).X;
+   var visibleControls=Descendants(viewport).OfType<FrameworkElement>().Where(e=>e.IsVisible&&e is ButtonBase or ComboBox or TextBox)
+    .Where(e=>{var p=e.TranslatePoint(new Point(),viewer);return p.Y+e.ActualHeight>0&&p.Y<viewer.ActualHeight;}).ToArray();
+   scrollClearance.Add(new{label,viewerWidth=viewer.ActualWidth,contentRight,barLeft,barWidth=bar.ActualWidth,bar.Opacity,visibleControls=visibleControls.Length});
+   Check(bar.Opacity==1&&bar.ActualWidth>=16,$"{label}: expanded scrollbar retains its pointer target");
+   Check(contentRight<=barLeft+0.1,$"{label}: content viewport leaves a separate scrollbar gutter (content={contentRight}, bar={barLeft}, width={viewer.ActualWidth}, presenter={viewport.ActualWidth}, column={Grid.GetColumn(viewport)}, span={Grid.GetColumnSpan(viewport)})");
+   Check(visibleControls.All(e=>e.TranslatePoint(new Point(e.ActualWidth,0),viewer).X<=barLeft+0.1),$"{label}: visible controls stay clear of the scrollbar");
+   viewer.SetValue(ScrollActivity.PointerNearProperty,false);
+  }
   void AuditTypography(DependencyObject container,string label){
    var expected=((FontFamily)w.FindResource("DesktopFont")).Source;
    string Color(Brush brush)=>((SolidColorBrush)brush).Color.ToString();
@@ -69,6 +88,8 @@ internal static class Program
     tick=TimeSpan.FromSeconds(45);Check(readiness.Observe(waiting).Contains("引擎未启动")&&readiness.TimedOut,"startup exits preparation at 45 seconds");
     Check(readiness.Observe(waiting with{Remote=waiting.Remote with{ProcessId=999}}).Contains("引擎未启动"),"process retry does not restart timeout");
     Check(readiness.Observe(waiting with{Remote=engine})=="接受连接"&&!readiness.TimedOut,"healthy engine clears timeout");
+    Check(readiness.Observe(waiting with{Remote=engine with{BackendReleasePending=true}})=="正在结束连接"&&!readiness.TimedOut,"unconfirmed cleanup never claims readiness or startup timeout");
+    Check(readiness.Observe(waiting with{Remote=engine with{BackendReleasePending=true},Tablet=engine with{Streaming=true}})=="正在被控","ending remote cleanup does not hide an active secondary stream");
     readiness.Observe(waiting);tick+=TimeSpan.FromSeconds(45);readiness.Observe(waiting);
     Check(readiness.Observe(waiting with{ConnectionsPaused=true})=="已暂停被控"&&!readiness.TimedOut,"pause clears startup wait");
     Check(readiness.Observe(waiting)=="准备中","resume starts a fresh wait");
@@ -78,7 +99,8 @@ internal static class Program
     Pump();var pages=N<TabControl>("Pages");
     Check(pages.SelectedItem==N<TabItem>("HomePage")&&N<TextBlock>("HomeSummaryText").IsVisible,"startup selects and displays the unified homepage");
     Check(N<Border>("HomeLocalBadge").IsVisible,"local status is explicitly labeled as this computer");
-    Check(System.Windows.Automation.AutomationProperties.GetName(N<Button>("TabletPopoverButton"))=="连接副屏"&&N<Button>("TabletPopoverButton").ActualWidth<=44&&System.Windows.Automation.AutomationProperties.GetName(N<Button>("AccountButton"))=="网络连接","compact icon controls have display and network names");
+    Check(w.FindName("TabletPopoverButton")==null&&w.FindName("TabletPopover")==null,"title bar has no duplicate secondary-display entry or hidden popup");
+    Check(System.Windows.Automation.AutomationProperties.GetName(N<Button>("AccountButton"))=="网络连接","network entry keeps its accessible name");
     Invoke("OpenAcceptance_Click");Pump();var acceptance=N<Popup>("AcceptancePopover");
     Check(N<Button>("PauseConnectionsButton").Content.ToString()=="暂停接受连接"&&N<Button>("DisconnectActiveButton").Visibility==Visibility.Collapsed,"idle menu does not claim to disconnect an existing session");
     Check(((FrameworkElement)acceptance.Child).ActualHeight<=48&&N<Button>("PauseConnectionsButton").HorizontalContentAlignment==HorizontalAlignment.Left,"idle pause is a compact left-aligned menu row");
@@ -86,12 +108,15 @@ internal static class Program
     streaming=true;Refresh();Invoke("OpenAcceptance_Click");Pump();
     Check(N<Button>("PauseConnectionsButton").Content.ToString()=="断开并暂停连接"&&N<Button>("DisconnectActiveButton").IsVisible,"active menu distinguishes disconnect once from persistent pause");
     Save((FrameworkElement)acceptance.Child,Path.Combine(root,"acceptance-active.png"));acceptance.IsOpen=false;streaming=false;Refresh();
+    ending=true;Refresh();Invoke("OpenAcceptance_Click");Pump();
+    Check(N<TextBlock>("AcceptanceLabel").Text=="正在结束连接"&&N<Button>("DisconnectActiveButton").IsVisible&&N<Button>("PauseConnectionsButton").Content.ToString()=="断开并暂停连接","unconfirmed cleanup retains explicit local recovery actions");
+    acceptance.IsOpen=false;ending=false;Refresh();
     Check(w.FindName("DevicesNavigation")==null,"local and devices navigation merged");
     Check(N<ItemsControl>("BoundDevicesList").Items.Count==2&&N<ItemsControl>("HistoricalDevicesList").Items.Count==1&&!N<Expander>("DeviceHistoryExpander").IsExpanded,"revoked duplicate stays in collapsed history");
     Check(!Descendants(N<ItemsControl>("BoundDevicesList")).OfType<TextBlock>().Any(t=>t.Text is "主屏" or "副屏" or "剪贴板" or "文件"),"device cards do not mix permission chips with connection status");
-    foreach(string name in new[]{"TabletPopoverButton","AccountButton","HeaderMenuButton"}){
+    foreach(string name in new[]{"AccountButton","HeaderMenuButton"}){
      var iconButton=N<Button>(name);var iconPath=Descendants(iconButton).OfType<System.Windows.Shapes.Path>().Single();
-     var viewport=(Grid)iconButton.Content;var iconOrigin=viewport.TranslatePoint(new Point(),iconButton);
+     var viewport=Descendants(iconButton).OfType<Grid>().First(g=>g.Width==20&&g.Height==20);var iconOrigin=viewport.TranslatePoint(new Point(),iconButton);
      Check(iconOrigin.Y>=1&&iconOrigin.Y+viewport.ActualHeight<=iconButton.ActualHeight-1&&viewport.ActualHeight==20&&iconPath.StrokeThickness==1.5,$"{name}: full icon viewport fits and stroke is shared");
     }
     var deviceMore=Descendants(N<ItemsControl>("BoundDevicesList")).OfType<Button>().First(b=>b.ContextMenu is not null);
@@ -116,49 +141,85 @@ internal static class Program
     Check(N<Button>("FileInlineAllowButton").Visibility==Visibility.Collapsed,"file page keeps permissions in device dialog");
     Invoke("OpenFileAccessSettings_Click");Pump();
     Check(N<Grid>("DevicePermissionsDialog").IsVisible&&N<Expander>("FileAccessDetails").IsExpanded,"file permissions link opens device dialog");
+    var permissionScroller=Descendants(N<Grid>("DevicePermissionsDialog")).OfType<ScrollViewer>().First();
+    foreach(int theme in new[]{1,2}){
+     N<ComboBox>("ThemeChoice").SelectedIndex=theme;
+     foreach(var size in new[]{(940,660),(1080,760),(1380,900)}){
+      w.Width=size.Item1;w.Height=size.Item2;
+      foreach(bool expanded in new[]{false,true,false}){
+       N<Expander>("FileAccessDetails").IsExpanded=expanded;Pump();double? initialX=null;
+       foreach(double fraction in new[]{0d,.5,1d}){
+        permissionScroller.ScrollToVerticalOffset(permissionScroller.ScrollableHeight*fraction);Pump();
+        AuditScrollClearance(permissionScroller,$"permissions/{theme}/{size}/{expanded}/{fraction}");
+        double x=N<CheckBox>("ControlRemoteCheck").TranslatePoint(new Point(),permissionScroller).X;
+        initialX??=x;Check(Math.Abs(initialX.Value-x)<.5,"permission switches do not move horizontally while scrolling");
+       }
+       if(size==(940,660))Save((FrameworkElement)w.Content,Path.Combine(root,$"permissions-{theme}-{expanded}.png"));
+      }
+     }
+    }
+    w.Width=940;w.Height=660;N<ComboBox>("ThemeChoice").SelectedIndex=1;
     Invoke("CloseDevicePermissions_Click");Pump();
     Check(N<Expander>("DeviceHistoryExpander").Header.ToString()=="历史设备（1）"&&(string)P(row,"ShortId")=="123456","history count and short id are labeled");
     files=files with{Settings=new(true)};Async("RefreshFilesAsync");
     var fileChoice=N<ComboBox>("FileDeviceBox").Items.Cast<object>().Single();
     Check((string)P(fileChoice,"Label")=="PA2573","legacy file selector shows a name without permission or pending suffixes");
     Check(N<TextBlock>("FileTasksEmptyText").Text.Contains("暂无传输任务")&&!N<Button>("SendFileButton").IsEnabled,"enabling transfer does not grant device access");
-    Invoke("OpenTabletPopover_Click");Pump();var popup=N<Popup>("TabletPopover");
-    row=N<ItemsControl>("TabletReceiverList").Items[0];
-    Check(!(bool)P(row,"CanConnect")&&((string)P(row,"Detail")).Contains("网络"),"missing response does not assert offline or toggle disabled");
+    object Device(string id)=>N<ItemsControl>("BoundDevicesList").Items.Cast<object>().Single(r=>(string)P(r,"Id")==id);
+    row=Device("active-device-123456");
+    Check(!(bool)P(row,"CanConnect")&&((string)P(row,"ConnectReason")).Contains("网络"),"missing response keeps a distinct reason on the device card");
     responding=true;Async("RefreshReceiversAsync");
-    row=N<ItemsControl>("TabletReceiverList").Items.Cast<object>().Single(r=>(string)P(r,"ClientId")=="fixture-client");
-    Check((bool)P(row,"CanConnect"),"authorized responding receiver enabled");
-    var receiverRow=Descendants(popup.Child).OfType<Button>().Single(b=>b.Tag as string=="fixture-client");
-    Check(receiverRow.ActualHeight<=56&&Descendants(receiverRow).OfType<TextBlock>().Any(t=>t.Text=="连接"&&t.IsVisible),"ready receiver is a single compact row with an explicit connect action");
-    Check(!Descendants(receiverRow).OfType<TextBlock>().Any(t=>t.IsVisible&&t.Text.Contains("发送副屏邀请"))&&N<TextBlock>("TabletRequestStateText").Visibility==Visibility.Collapsed,"ready row and idle popover omit repeated invitation explanations");
-    var phone=N<ItemsControl>("TabletReceiverList").Items.Cast<object>().Single(r=>(string)P(r,"ClientId")=="fixture-phone");
-    Check(!(bool)P(phone,"CanConnect")&&((string)P(phone,"Detail")).Contains("未授权"),"missing scope has distinct disabled reason");
-    Save((FrameworkElement)popup.Child,Path.Combine(root,"tablet-popover.png"));
-    var deviceRow=N<ItemsControl>("BoundDevicesList").Items.Cast<object>().Single(r=>(string)P(r,"Id")=="active-device-123456");
-    Check((bool)P(deviceRow,"CanConnect")&&(string)P(deviceRow,"OnlineText")=="在线","device shortcut and dot use fresh receiver evidence");
+    row=Device("active-device-123456");
+    Check((bool)P(row,"CanConnect")&&(string)P(row,"OnlineText")=="在线","authorized responding tablet connects from its card");
+    var phone=Device("phone-device-112233");
+    Check((string)P(phone,"TypeText")=="手机"&&!(bool)P(phone,"CanConnect")&&((string)P(phone,"ConnectReason")).Contains("未授权"),"phone shares the card template and respects its own permissions");
     int requestsBefore=calls.Count(c=>c.Command=="tablet-request");
-    receiverAvailable=false;Invoke("ConnectListedReceiver_Click",new Button{Tag="active-device-123456"});Pump();
+    receiverAvailable=false;Invoke("ConnectListedReceiver_Click",new Button{Tag=row});Pump();
     Check(calls.Count(c=>c.Command=="tablet-request")==requestsBefore,"failed receiver refresh cannot invite from a stale device row");
     receiverAvailable=true;responding=true;Async("RefreshReceiversAsync");
-    Invoke("ConnectListedReceiver_Click",new Button{Tag="phone-device-112233"});Pump();
+    Invoke("ConnectListedReceiver_Click",new Button{Tag=phone});Pump();
     Check(calls.Count(c=>c.Command=="tablet-request")==requestsBefore,"device without secondary scope never sends an invitation");
-    Invoke("ConnectListedReceiver_Click",new Button{Tag="active-device-123456"});Pump();
+    Invoke("ConnectListedReceiver_Click",new Button{Tag=Device("active-device-123456")});Pump();
     Check(calls.Last(c=>c.Command=="tablet-request").ClientId=="fixture-client","device shortcut routes to its exact receiver");
+    row=Device("active-device-123456");
+    Check((string)P(row,"ConnectLabel")=="取消邀请"&&(string)P(row,"RequestId")=="fixture-request","pending invitation can be cancelled on the same device card");
+    Invoke("ConnectListedReceiver_Click",new Button{Tag=row});Pump();
+    Check(calls.Last(c=>c.Command=="tablet-request-cancel").RequestId=="fixture-request","card cancellation uses the exact request id");
+    tabletRequest=new("connected-request","fixture-client","connected",0,"lan",now.AddMinutes(1),"副屏已连接");Async("RefreshReceiversAsync");
+    row=Device("active-device-123456");
+    Check((string)P(row,"ConnectLabel")=="断开副屏","connected device retains its disconnect action without a popup");
+    tabletRequest=new("new-request","fixture-client","waiting",0,"lan",now.AddMinutes(1),"等待确认");
+    int cancelsBefore=calls.Count(c=>c.Command=="tablet-request-cancel");
+    Invoke("ConnectListedReceiver_Click",new Button{Tag=row});Pump();
+    Check(calls.Count(c=>c.Command=="tablet-request-cancel")==cancelsBefore,"stale disconnect never cancels a newer request");
+    tabletRequest=null;Async("RefreshReceiversAsync");
+    extraReceivers=[new("legacy-phone","兼容手机",1080,2400,60,[0,90],now),new("fixture-old-client","撤销设备",1080,2400,60,[0],now),new("fixture-client","同一平板",2560,1600,60,[0],now)];
+    Async("RefreshReceiversAsync");Check(N<ItemsControl>("BoundDevicesList").Items.Count==2,"receiver discovery does not grant legacy access");
+    bound=bound with{LegacyAllowed=true};Async("ReadControlDevicesAsync");
+    var cards=N<ItemsControl>("BoundDevicesList").Items.Cast<object>().ToArray();
+    Check(cards.Length==3&&cards.Count(r=>(string)P(r,"ClientId")=="fixture-client")==1,"bound and receiver data merge into one card per device");
+    var legacy=cards.Single(r=>(string)P(r,"ClientId")=="legacy-phone");
+    Check((bool)P(legacy,"CanConnect")&&!(bool)P(legacy,"IndividuallyBound")&&(string)P(legacy,"TypeText")=="兼容设备","legacy phone moves to the homepage with a truthful binding label");
+    Check(!cards.Any(r=>(string)P(r,"ClientId")=="fixture-old-client"),"revoked device is never resurrected through legacy discovery");
+    bound=bound with{LegacyAllowed=false};Async("ReadControlDevicesAsync");
+    requestsBefore=calls.Count(c=>c.Command=="tablet-request");Invoke("ConnectListedReceiver_Click",new Button{Tag=legacy});Pump();
+    Check(calls.Count(c=>c.Command=="tablet-request")==requestsBefore,"stale legacy card rechecks permission before inviting");
+    extraReceivers=[];Async("RefreshReceiversAsync");
     var detailMenu=new ContextMenu();var menuAnchor=new Button{Tag="active-device-123456"};
     var detailItem=new MenuItem{Tag="active-device-123456"};detailMenu.Items.Add(detailItem);detailMenu.PlacementTarget=menuAnchor;
     Invoke("OpenBoundDeviceDetails_Click",detailItem);Pump();
     Check(N<Popup>("BoundDeviceDetailsPopover").PlacementTarget==menuAnchor&&N<TextBlock>("BoundDeviceNameText").Text=="宿舍平板","menu details retain the clicked device and popup anchor");
     N<Popup>("BoundDeviceDetailsPopover").IsOpen=false;
     files=files with{Devices=[files.Devices[0],new("fixture-phone","手机",new string('B',64),true)]};
-    Invoke("OpenListedFiles_Click",new Button{Tag="phone-device-112233"});Pump();
+    Invoke("OpenListedFiles_Click",new Button{Tag=Device("phone-device-112233")});Pump();
     Check(pages.SelectedItem==N<TabItem>("FilesPage")&&N<ComboBox>("FileDeviceBox").SelectedValue as string=="fixture-phone","file shortcut selects its clicked device");
     files=files with{Devices=[files.Devices[0]]};Async("RefreshFilesAsync");
     Check(N<ComboBox>("FileDeviceBox").SelectedIndex<0&&!N<Button>("SendFileButton").IsEnabled,"missing target cannot silently fall back to another device");
-    Invoke("OpenListedFiles_Click",new Button{Tag="active-device-123456"});Pump();
+    Invoke("OpenListedFiles_Click",new Button{Tag=Device("active-device-123456")});Pump();
     Check(N<ComboBox>("FileDeviceBox").SelectedValue as string=="fixture-client","another device shortcut explicitly replaces the target");
     pages.SelectedItem=N<TabItem>("HomePage");
-    responding=false;int before=calls.Count(c=>c.Command=="tablet-request");Invoke("ConnectReceiver_Click",new Button{Tag="fixture-client"});Pump();
-    Check(calls.Count(c=>c.Command=="tablet-request")==before,"stale receiver is refreshed before inviting");popup.IsOpen=false;
+    responding=false;int before=calls.Count(c=>c.Command=="tablet-request");Invoke("ConnectListedReceiver_Click",new Button{Tag=Device("active-device-123456")});Pump();
+    Check(calls.Count(c=>c.Command=="tablet-request")==before,"stale receiver is refreshed before inviting");
     Invoke("PauseConnections_Click");Pump();
     Check(paused&&N<TextBlock>("AcceptanceLabel").Text.Contains("暂停")&&N<Button>("PauseConnectionsButton").Content.ToString()!.Contains("恢复"),"topbar pause uses confirmed backend state");
     Invoke("PauseConnections_Click");Pump();Check(!paused,"same topbar entry resumes acceptance");
@@ -192,6 +253,8 @@ internal static class Program
      foreach(TabItem category in N<TabControl>("SettingsCategories").Items){
       N<TabControl>("SettingsCategories").SelectedItem=category;Pump();w.UpdateLayout();
       AuditTypography((FrameworkElement)w.Content,$"{theme}/settings/{category.Header}");
+      var settingsScroller=(ScrollViewer)category.Content;settingsScroller.ScrollToBottom();Pump();
+      AuditScrollClearance(settingsScroller,$"settings/{theme}/{category.Header}");settingsScroller.ScrollToTop();Pump();
       Check(category.Foreground is SolidColorBrush body&&body.Color==((SolidColorBrush)w.FindResource("TextPrimary")).Color,$"{theme}/{category.Header}: selected category does not tint its content");
      }
      N<TabControl>("SettingsCategories").SelectedItem=N<TabItem>("TabletSettingsCategory");Pump();
@@ -199,6 +262,12 @@ internal static class Program
      Save((FrameworkElement)w.Content,Path.Combine(root,$"tablet-settings-{theme}.png"));
      foreach(string page in new[]{"AccountPage","DiagnosticsPage"}){
       pages.SelectedItem=N<TabItem>(page);Pump();w.UpdateLayout();AuditTypography((FrameworkElement)w.Content,$"{theme}/{page}");
+      if(page=="AccountPage") {
+       var content=(FrameworkElement)N<TabItem>(page).Content;
+       Check(new[]{"连接方式","连接状态","账号内设备"}.All(title=>Descendants(content).OfType<TextBlock>().Count(t=>t.Text==title&&t.IsVisible)==1),$"{theme}/account: section titles are unique and distinct");
+       Check(N<TextBlock>("NetworkStateText").FontSize<N<TextBlock>("ConnectionStatusHeading").FontSize&&N<TextBlock>("ProviderSavedText").Visibility==Visibility.Collapsed,$"{theme}/account: state and saved selection do not become duplicate headings");
+       Save((FrameworkElement)w.Content,Path.Combine(root,$"account-page-{theme}.png"));
+      }
      }
      Invoke("OpenHelp_Click");Pump();AuditTypography(N<Grid>("HelpDialog"),$"{theme}/help");
      var help=N<ScrollViewer>("HelpScroller");var helpFrame=N<Border>("HelpFrame");
@@ -213,9 +282,9 @@ internal static class Program
      Invoke("CloseHelp_Click");
      pages.SelectedItem=N<TabItem>("HomePage");Pump();
      Invoke("OpenAcceptance_Click");Pump();AuditTypography(N<Popup>("AcceptancePopover").Child,$"{theme}/acceptance");Save((FrameworkElement)N<Popup>("AcceptancePopover").Child,Path.Combine(root,$"acceptance-{theme}.png"));N<Popup>("AcceptancePopover").IsOpen=false;
-     foreach(string opener in new[]{"OpenAccountPopover_Click","OpenTabletPopover_Click","OpenDeviceDetails_Click"}){
+     foreach(string opener in new[]{"OpenAccountPopover_Click","OpenDeviceDetails_Click"}){
       Invoke(opener);Pump();
-      string popupName=opener=="OpenAccountPopover_Click"?"AccountPopover":opener=="OpenTabletPopover_Click"?"TabletPopover":"DeviceDetailsPopover";
+      string popupName=opener=="OpenAccountPopover_Click"?"AccountPopover":"DeviceDetailsPopover";
       var themedPopup=N<Popup>(popupName);AuditTypography(themedPopup.Child,$"{theme}/{popupName}");themedPopup.IsOpen=false;
      }
      var themedMenu=new ContextMenu{Style=(Style)w.FindResource("DesktopMenu"),PlacementTarget=N<Button>("HeaderMenuButton")};
@@ -231,6 +300,7 @@ internal static class Program
     available=false;Refresh();Check(!N<Button>("PauseConnectionsButton").IsEnabled&&N<TextBlock>("AcceptanceLabel").Text.Contains("未连接"),"backend failure disables readiness actions");
     Check(!calls.Any(c=>c.Command is "control-device-scope" or "control-device-revoke" or "files-allow" or "host-policy-save" or "network-provider"),"presentation never silently mutates permissions or transport");
     File.WriteAllText(Path.Combine(root,"typography.json"),JsonSerializer.Serialize(typography,new JsonSerializerOptions{WriteIndented=true}));
+    File.WriteAllText(Path.Combine(root,"scroll-clearance.json"),JsonSerializer.Serialize(scrollClearance,new JsonSerializerOptions{WriteIndented=true}));
     File.WriteAllText(Path.Combine(root,"result.json"),JsonSerializer.Serialize(new{passed=true,count=checks.Count,checks,installedServiceCalls=0,operatingSystemInputSent=false},new JsonSerializerOptions{WriteIndented=true}));Console.WriteLine($"PASS {checks.Count} focused desktop checks.");
    }catch(Exception ex){File.WriteAllText(Path.Combine(root,"result.json"),JsonSerializer.Serialize(new{passed=false,error=ex.ToString()}));Console.Error.WriteLine(ex);Environment.ExitCode=1;}
    finally{w.DisposeWindow();w.Close();app.Shutdown();}

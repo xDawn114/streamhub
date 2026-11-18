@@ -181,6 +181,8 @@ internal sealed class ProfileStore(string root, string data)
                 ["install_steam_audio_drivers"] = "disabled",
                 ["dd_configuration_option"] = "disabled"
             };
+            settings["streamhub_probe_plan"] = "sdr-auto";
+            settings["streamhub_persist_probe"] = "enabled";
             if (profile == "tablet")
             {
                 // The receiver advertises its physical mode during prepare.
@@ -301,11 +303,11 @@ internal sealed class ProfileStore(string root, string data)
     internal async Task<string> ReadEncoderProbeAsync(string profile, CancellationToken token)
     {
         var path = ConfigFor(profile);
-        if (!File.Exists(path)) return "full";
+        if (!File.Exists(path)) return "sdr-auto";
         var entries = (await File.ReadAllLinesAsync(path, token))
             .Where(line => Regex.IsMatch(line, @"^\s*streamhub_probe_plan\s*=", RegexOptions.IgnoreCase)).ToArray();
         if (entries.Length > 1) throw new InvalidOperationException("编码探测配置重复，未更改配置。");
-        return StreamHub.Host.Runtime.EncoderProbePlan.Validate(entries.Length == 0 ? null : entries[0].Split('=', 2)[1].Trim());
+        return StreamHub.Host.Runtime.EncoderProbePlan.Validate(entries.Length == 0 ? "sdr-auto" : entries[0].Split('=', 2)[1].Trim());
     }
 
     // Caller owns the runtime gate and has verified the selected engine is stopped.
@@ -317,6 +319,30 @@ internal sealed class ProfileStore(string root, string data)
         var lines = (await File.ReadAllLinesAsync(path, token)).ToList();
         lines.RemoveAll(line => Regex.IsMatch(line, @"^\s*streamhub_probe_plan\s*=", RegexOptions.IgnoreCase));
         lines.Add("streamhub_probe_plan = " + plan);
+        var temporary = path + ".new";
+        await File.WriteAllLinesAsync(temporary, lines, new UTF8Encoding(false), token);
+        File.Move(temporary, path, true);
+    }
+
+    // Only called under the runtime gate, immediately before starting a stopped
+    // owned engine. EnsureAsync is also called by live requests: do not put this
+    // migration there or change a running process's configuration fingerprint.
+    internal async Task PrepareEncoderCacheAsync(string profile, CancellationToken token)
+    {
+        var path = ConfigFor(profile);
+        var lines = (await File.ReadAllLinesAsync(path, token)).ToList();
+        bool Missing(string key)
+        {
+            var count = lines.Count(line => Regex.IsMatch(line, @"^\s*" + key + @"\s*=", RegexOptions.IgnoreCase));
+            if (count > 1) throw new InvalidOperationException("编码探测配置重复，未更改配置。");
+            return count == 0;
+        }
+        // Check both before writing; retain explicit full/HDR and opt-out values.
+        var planMissing = Missing("streamhub_probe_plan");
+        var cacheMissing = Missing("streamhub_persist_probe");
+        if (!planMissing && !cacheMissing) return;
+        if (planMissing) lines.Add("streamhub_probe_plan = sdr-auto");
+        if (cacheMissing) lines.Add("streamhub_persist_probe = enabled");
         var temporary = path + ".new";
         await File.WriteAllLinesAsync(temporary, lines, new UTF8Encoding(false), token);
         File.Move(temporary, path, true);

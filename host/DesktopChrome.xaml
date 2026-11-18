@@ -38,6 +38,7 @@
  </Style>
  <Style TargetType="ScrollBar">
   <Setter Property="Opacity" Value="0"/>
+  <Setter Property="MinWidth" Value="0"/><Setter Property="MinHeight" Value="0"/>
   <Setter Property="Background" Value="Transparent"/><Setter Property="Width" Value="16"/><Setter Property="Focusable" Value="False"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
    <Grid Background="Transparent">
@@ -62,10 +63,19 @@
   <Setter Property="local:ScrollActivity.Enabled" Value="True"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
    <Grid Background="{TemplateBinding Background}" ClipToBounds="True">
+    <!-- Reserve the hit area even when an Auto scrollbar fades out. -->
+    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition x:Name="VerticalGutter" Width="24"/></Grid.ColumnDefinitions>
+    <Grid.RowDefinitions><RowDefinition/><RowDefinition x:Name="HorizontalGutter" Height="24"/></Grid.RowDefinitions>
     <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}" CanContentScroll="{TemplateBinding CanContentScroll}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"/>
-    <ScrollBar x:Name="PART_VerticalScrollBar" Orientation="Vertical" HorizontalAlignment="Right" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
-    <ScrollBar x:Name="PART_HorizontalScrollBar" Orientation="Horizontal" VerticalAlignment="Bottom" Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}" Value="{Binding HorizontalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"/>
+    <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Orientation="Vertical" HorizontalAlignment="Right" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+    <ScrollBar x:Name="PART_HorizontalScrollBar" Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Bottom" Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}" Value="{Binding HorizontalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"/>
    </Grid>
+   <ControlTemplate.Triggers>
+    <Trigger Property="VerticalScrollBarVisibility" Value="Disabled"><Setter TargetName="VerticalGutter" Property="Width" Value="0"/></Trigger>
+    <Trigger Property="VerticalScrollBarVisibility" Value="Hidden"><Setter TargetName="VerticalGutter" Property="Width" Value="0"/></Trigger>
+    <Trigger Property="HorizontalScrollBarVisibility" Value="Disabled"><Setter TargetName="HorizontalGutter" Property="Height" Value="0"/></Trigger>
+    <Trigger Property="HorizontalScrollBarVisibility" Value="Hidden"><Setter TargetName="HorizontalGutter" Property="Height" Value="0"/></Trigger>
+   </ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style TargetType="ScrollViewer" BasedOn="{StaticResource OverlayScrollViewer}"/>

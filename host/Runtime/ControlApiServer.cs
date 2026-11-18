@@ -75,7 +75,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
     private sealed record ReceiverPoll(string ClientId, string Name, int Width, int Height, int RefreshRate, int[]? Orientations = null, string? DeviceType = null);
     private sealed record RequestAnswer(string ClientId, string Action, string? Message = null);
     private sealed record SessionRequest(string LeaseId, string Mode = "tablet", string? ClientId = null, string? RequestId = null,
-        bool StreamReady = false, bool FastPrivacyHeartbeat = false, bool BoundedPrivacyHeartbeat = false, bool LockOnExit = false, string? ExitReason = null);
+        bool StreamReady = false, bool FastPrivacyHeartbeat = false, bool BoundedPrivacyHeartbeat = false, bool LockOnExit = false, string? ExitReason = null,
+        bool? EndBackend = null);
     private sealed record DesktopRequest(string LeaseId,string ClientId,string Action,bool? Enabled=null,
         string? Password=null,bool Submit=false);
     private sealed record PrivacyRequest(string LeaseId, string ClientId, string Mode = "remote", bool? Enabled = null);
@@ -341,13 +342,14 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                     ports = new { remote = 48989, tablet = 49089, control = Port },
                     capabilities = new { remote = true, tablet = true, pair = true, orientations = new[] { 0, 90, 180, 270 }, automaticOrientationDuringStream = true, integratedVpn = true,
                         prepareJobs = true, receiverRequests = true, dynamicDisplay = true, sessionLease = true, liveSessionState = true, fastPrivacyHeartbeat = true, boundedPrivacyHeartbeat = true, selectiveEncoderProbe = true,
+                        remoteBackendRelease = true,
                         fileTransfer = _fileApi is not null, fileBrowse = _fileApi is not null, fileRoots = _fileApi is not null, fileRecycle = _fileApi is not null, remoteDesktopLock = true,
                         remotePrivacy = true, streamResolution = true, desktopInputState = true, loginPasswordFill = true,
                         hostManagedPolicy = true, hostAutomaticLogin = status.HostPolicy?.AutomaticLoginAvailable == true,
                         individualDeviceCredentials = true, deviceMetadata = true },
                     connectionsPaused = status.ConnectionsPaused,
                     policy = status.HostPolicy,
-                    remote = new { status.Remote.Running, status.Remote.Healthy, status.Remote.Streaming, status.Remote.BackendBusy },
+                    remote = new { status.Remote.Running, status.Remote.Healthy, status.Remote.Streaming, status.Remote.BackendBusy, status.Remote.BackendReleasePending },
                     tablet = new { status.Tablet.Running, status.Tablet.Healthy, status.Tablet.Streaming, status.Tablet.BackendBusy,
                         status.Tablet.DesktopCleanupPending }
                 }, lifetime.Token).ConfigureAwait(false);
@@ -483,7 +485,10 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             {
                 var session = await ReadJsonAsync<SessionRequest>(context, lifetime.Token).ConfigureAwait(false);
                 ValidateMode(session.Mode); ValidateId(session.LeaseId, "会话");
+                if (session.EndBackend is not null && (session.Mode != "remote" || path != "/v1/session/end"))
+                    throw new ApiError(400, "endBackend 仅适用于远控会话结束请求。");
                 _devices.EnsureCurrent(principal!, session.ClientId, ScopeFor(session.Mode));
+                JsonElement? backendRelease = null;
                 if (session.Mode == "tablet")
                 {
                     ValidateId(session.ClientId, "接收设备");
@@ -502,12 +507,19 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                         ? "remote-release" : "remote-heartbeat", "remote", LeaseId: session.LeaseId,
                         ClientId: session.ClientId, StreamReady: session.StreamReady,
                         FastPrivacyHeartbeat: session.FastPrivacyHeartbeat,
-                        BoundedPrivacyHeartbeat: session.BoundedPrivacyHeartbeat,ExitReason:session.ExitReason,
+                        BoundedPrivacyHeartbeat: session.BoundedPrivacyHeartbeat,ExitReason:session.ExitReason, EndBackend: session.EndBackend,
                         ControllerName: principal!.Name, ControllerCredentialId: principal.Id,
                         ControllerChannel: Channel(context)), lifetime.Token).ConfigureAwait(false);
-                    if (!response.Success) throw new ApiError(409, response.Message);
+                    if (!response.Success) throw new ApiError(response.ErrorStatus ?? 409, response.Message);
+                    if (session.EndBackend == true)
+                    {
+                        using var receipt = JsonDocument.Parse(response.PayloadJson ?? throw new ApiError(503, "电脑未返回会话结束确认。"));
+                        backendRelease = receipt.RootElement.Clone();
+                    }
                 }
-                await WriteAsync(context, 200, new { success = true }, lifetime.Token).ConfigureAwait(false);
+                if (backendRelease is not null)
+                    await WriteAsync(context, 200, new { success = true, backendRelease }, lifetime.Token).ConfigureAwait(false);
+                else await WriteAsync(context, 200, new { success = true }, lifetime.Token).ConfigureAwait(false);
                 return;
             }
             if (context.Request.Path == "/v1/prepare")
@@ -569,7 +581,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                     _devices.EnsureCurrent(principal!, principal!.ClientId, ScopeFor(request.Mode));
                     await CommandAsync(new("pair", request.Mode, request.Pin, principal.Name,
                         ClientId:principal.ClientId, ControllerCredentialId:principal.Id), lifetime.Token).ConfigureAwait(false);
-                    await WriteAsync(context, 200, new { success = true, mode = request.Mode, message = "已确认配对，请等待安卓端完成连接。" }, lifetime.Token).ConfigureAwait(false);
+                    await WriteAsync(context, 200, new { success = true, mode = request.Mode, message = "已确认配对，请等待平板完成连接。" }, lifetime.Token).ConfigureAwait(false);
                 }
                 finally { _operationGate.Release(); }
                 return;
@@ -864,7 +876,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         if (address?.IsIPv4MappedToIPv6 == true) address = address.MapToIPv4();
         var bytes = address?.GetAddressBytes();
         return bytes is { Length: 4 } && bytes[0] == 100 && bytes[1] is >= 64 and <= 127
-            ? "异地安全隧道" : "局域网 / USB";
+            ? "异地地址" : "局域网/USB";
     }
 
     private static bool IsFileDataRequest(HttpRequest request)

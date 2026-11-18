@@ -563,7 +563,7 @@ public static class DisplayController
         requested.Bits = 32; requested.Frequency = before.Frequency;
         requested.Fields = ModeFields;
         var planned = ToSnapshot(target.Tablet.Device.Name, requested);
-        if (others.Values.Any(mode => Overlaps(planned, mode))) throw new InvalidOperationException("这个方向会与其他显示器重叠，请先调整扩展屏布局。");
+        if (others.Values.Any(mode => Overlaps(planned, mode))) throw new InvalidOperationException("这个方向会与其他显示器重叠，请先调整副屏布局。");
         TestMode(target.Tablet.Device.Name, ref requested, "这个副屏方向");
         var checkedTarget = VerifyUnchanged(target, others, true);
         if (Read(checkedTarget.Tablet.Device.Name) != before) throw new InvalidOperationException("副屏模式在检查期间发生变化，请刷新后重试。");

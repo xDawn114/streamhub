@@ -14,16 +14,15 @@ public partial class MainWindow
 {
     private void CloseTransientPopovers()
     {
-        if (TabletPopover is null) return;
-        TabletPopover.IsOpen = DeviceDetailsPopover.IsOpen = FeedbackHistoryPopover.IsOpen = false;
+        if (DeviceDetailsPopover is null) return;
+        DeviceDetailsPopover.IsOpen = FeedbackHistoryPopover.IsOpen = false;
         if (AccountPopover is not null) AccountPopover.IsOpen = AcceptancePopover.IsOpen = false;
         if (BoundDeviceDetailsPopover is not null) BoundDeviceDetailsPopover.IsOpen = false;
     }
-    private void OpenTabletPopover_Click(object sender, RoutedEventArgs args)
+    private async void OpenDeviceCards_Click(object sender, RoutedEventArgs args)
     {
-        bool open = !TabletPopover.IsOpen;
-        if (open) _ = RefreshReceiversAsync();
-        CloseTransientPopovers(); TabletPopover.IsOpen = open;
+        CloseTransientPopovers(); Pages.SelectedItem = HomePage;
+        await RefreshDeviceCardsAsync();
     }
     private void OpenDeviceDetails_Click(object sender, RoutedEventArgs args)
     {
@@ -35,7 +34,7 @@ public partial class MainWindow
     private void OpenDiagnostics_Click(object sender, RoutedEventArgs args) { CloseTransientPopovers(); Pages.SelectedItem = DiagnosticsPage; }
     private void OpenUpdates_Click(object sender, RoutedEventArgs args)
     {
-        CloseTransientPopovers(); Pages.SelectedItem = SettingsPage; SettingsCategories.SelectedIndex = 4;
+        CloseTransientPopovers(); Pages.SelectedItem = SettingsPage; SettingsCategories.SelectedItem = MaintenanceSettingsCategory;
         CheckUpdate_Click(sender, args);
     }
     private void OpenHeaderMenu_Click(object sender, RoutedEventArgs args) => OpenMenu((Button)sender);
@@ -91,7 +90,7 @@ public partial class MainWindow
         if (HomeSummaryText is null) return;
         RefreshUnifiedStatus();
         RenderUnifiedDevices();
-        RenderReceiverChoices();
+        RenderFilesInlineState();
     }
     private async void BoundDevicesPage_Loaded(object sender, RoutedEventArgs args) => await ReadControlDevicesAsync();
     private void RenderBoundDevicesSummary() => RenderUnifiedDevices();

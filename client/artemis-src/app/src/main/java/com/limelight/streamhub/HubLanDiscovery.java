@@ -23,7 +23,10 @@ public final class HubLanDiscovery {
             this.service=service; this.id=id; this.name=name; this.address=address; this.pin=pin;
         }
     }
-    public interface Listener { void update(List<Device> devices, String message); }
+    public interface Listener {
+        void update(List<Device> devices, String message);
+        default void finished() { }
+    }
     private static final class SearchStats {
         volatile int interfaces;
         volatile String state="尚未查找", lastError="无";
@@ -38,6 +41,12 @@ public final class HubLanDiscovery {
     private volatile SearchStats stats=new SearchStats();
     private String requestedAddress="";
     public String diagnostics(){return stats.describe();}
+    public String summary() {
+        if ("尚未查找".equals(stats.state)) return "尚未查找附近电脑。请先让电脑打开“绑定设备”。";
+        if (!devices.isEmpty()) return "已发现 " + devices.size() + " 台电脑。选择电脑后，输入电脑显示的六位短码。";
+        return stats.interfaces == 0 ? "当前没有可用于查找的局域网。请连接同一网络，或使用电脑地址与短码。"
+                : "尚未发现可绑定的电脑。请确认两端处于同一网络，电脑已打开“绑定设备”。也可以直接填写电脑地址与短码。";
+    }
     private final NsdManager manager;
     private final android.net.ConnectivityManager connectivity;
     private android.net.ConnectivityManager.NetworkCallback networkCallback;
@@ -193,9 +202,13 @@ public final class HubLanDiscovery {
             } catch(Exception error) { if(raw==usbGeneration && run==generation){counters.error("直接查找",error);counters.state="直接查找未完成";} }
             finally {
                 if(socket!=null)socket.close();synchronized(this){if(usbSocket==socket)usbSocket=null;}
-                main.post(()->{if(run==generation && raw==usbGeneration && devices.isEmpty())listener.update(new ArrayList<>(),
-                    counters.sent.get()>0?"本次未收到有效电脑回复。可重试、查看查找详情，或使用电脑地址与短码。":
-                    "暂时无法发送查找请求，请检查本地网络或使用已有绑定连接。");});
+                main.post(()->{
+                    if(run!=generation || raw!=usbGeneration)return;
+                    if(devices.isEmpty())listener.update(new ArrayList<>(), counters.sent.get()>0?
+                        "本次未收到有效电脑回复。可重试、查看查找详情，或使用电脑地址与短码。":
+                        "暂时无法发送查找请求，请检查本地网络或使用已有绑定连接。");
+                    listener.finished();
+                });
             }
         },"StreamHub local interface discovery");
         worker.setDaemon(true);worker.start();

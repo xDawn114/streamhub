@@ -16,9 +16,6 @@ public partial class MainWindow
             PreventSleepChoice.SelectedIndex = _status?.PreventSleepMode switch
             { PowerAwakePolicy.System => 0, PowerAwakePolicy.PluggedIn => 2, _ => 1 };
             PreventSleepChoice.IsEnabled = _status is not null && !_busy;
-            PowerStateText.Text = _status?.SleepPreventionMessage is { Length: > 0 } message ? message : "等待后台服务读取防休眠状态。";
-            PowerStateText.SetResourceReference(TextBlock.ForegroundProperty,
-                _status?.SleepPreventionActive == true ? "SuccessText" : "Muted");
         }
         finally { _renderingPower = false; }
     }

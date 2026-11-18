@@ -9,6 +9,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $record = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Sunshine.build.json') -Raw | ConvertFrom-Json
+& (Join-Path $PSScriptRoot 'Assert-NativeToolchain.ps1') -MsysRoot $MsysRoot
 $source = [IO.Path]::GetFullPath($SourceRoot)
 $deps = [IO.Path]::GetFullPath($DependenciesRoot).Replace('\','/')
 $build = [IO.Path]::GetFullPath($BuildRoot)

@@ -42,7 +42,7 @@ public final class HubLiveControls implements AutoCloseable {
                         android.app.AlertDialog.Builder dialog=HubStreamUi.dialog(activity).setTitle("本机隐私屏 · " + (current ? "已开启" : "已关闭"))
                             .setMessage(managed ? "隐私屏策略由电脑设置统一管理。本次可临时恢复本机屏幕，下次连接仍遵循电脑策略。\n\n紧急恢复：电脑物理键盘 Ctrl+Alt+F12。" :
                                 "开启后电脑本机显示黑屏，平板继续显示并接受远控输入。\n\n紧急恢复：在电脑物理键盘按 Ctrl+Alt+F12。断开连接后自动恢复。")
-                            .setNegativeButton("关闭", null);
+                            .setNegativeButton("取消", null);
                         if(!managed || current)dialog.setPositiveButton(managed?"本次恢复屏幕":current?"关闭隐私屏":"开启隐私屏",(d,w)->privacy(managed?false:!current));
                         dialog.show();
                     }

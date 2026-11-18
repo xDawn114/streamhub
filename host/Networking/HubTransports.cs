@@ -31,8 +31,8 @@ public static class HubTransports
             ? ManualAddresses(settings.ManualAddresses) : UsableIpv4.Filter(local.Where(address => Id != "lan" || !address.StartsWith("100.", StringComparison.Ordinal)));
     }
     public static readonly HubTransport[] All =
-    [new Provider("tailscale", "Tailscale 官方", true), new Provider("self-hosted", "自建服务区", true),
-     new Provider("lan", "局域网 / USB", false), new Provider("manual", "手动地址", false)];
+    [new Provider("tailscale", "Tailscale", true), new Provider("self-hosted", "自建服务区", true),
+     new Provider("lan", "局域网/USB", false), new Provider("manual", "手动地址", false)];
     public static HubTransport Get(string? id) => All.FirstOrDefault(p => p.Id == id) ??
         throw new ArgumentException("连接通道配置无效，请重新选择并保存。");
 

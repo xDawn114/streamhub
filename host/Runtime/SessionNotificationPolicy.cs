@@ -17,9 +17,10 @@ public static class SessionNotificationPolicy
     public static SessionNotification? Transition(string previous, string current)
     {
         if (previous == current || previous == "initial" || current == "unavailable") return null;
-        if (current == "both-streaming") return new("我控制 · 串流已连接", "主屏和副屏都正在使用。");
-        if (current is "remote-streaming" or "remote-verifying") return new("我控制 · 远程主屏已连接", "电脑正在向远程控制端提供画面。");
-        if (current is "tablet-streaming" or "tablet-verifying") return new("我控制 · 平板副屏已连接", "电脑正在使用平板作为扩展屏。");
+        // Informational toasts are captured with the main desktop. The host's
+        // live status/tray remains visible; permission and security alerts use other paths.
+        if (current is "both-streaming" or "remote-streaming" or "remote-verifying") return null;
+        if (current is "tablet-streaming" or "tablet-verifying") return new("我控制 · 平板副屏已连接", "电脑正在使用平板作为副屏。");
         if (previous is "remote-streaming" or "remote-verifying" or "tablet-streaming" or "tablet-verifying" or "both-streaming")
             return new("我控制 · 串流已结束", "当前远程画面已断开，电脑显示状态正在收尾。");
         return null;

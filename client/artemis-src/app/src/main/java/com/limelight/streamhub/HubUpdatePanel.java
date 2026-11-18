@@ -16,7 +16,7 @@ public final class HubUpdatePanel extends LinearLayout {
     private final Activity activity;
     private final HubUpdates updates;
     private final BooleanSupplier idle;
-    private final TextView version, state, notes, lastChecked;
+    private final TextView version, state, notes;
     private final ProgressBar progress;
     private final Button check, download, install, cancel;
     private final Runnable listener = this::render;
@@ -25,8 +25,7 @@ public final class HubUpdatePanel extends LinearLayout {
         super(activity); this.activity = activity; this.updates = updates; this.idle = idle;
         setOrientation(VERTICAL); setClipToPadding(false);
         version = text(16, HubTheme.text(activity)); version.setTypeface(null, Typeface.BOLD);
-        state = text(14, HubTheme.muted(activity)); state.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        lastChecked = text(12, HubTheme.muted(activity)); notes = text(14, HubTheme.text(activity));
+        notes = text(14, HubTheme.text(activity));
         toggle("自动检查更新", updates.autoCheck(), true);
         toggle("空闲时自动下载", updates.autoDownload(), false);
         progress = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
@@ -40,6 +39,9 @@ public final class HubUpdatePanel extends LinearLayout {
                 .setMessage("安装将保留电脑绑定和设置。请先结束串流与文件操作，并完成系统安装确认。")
                 .setNegativeButton("稍后", null).setPositiveButton("继续", (dialog, which) -> updates.install(activity, idle)).show());
         cancel = button("取消", false, v -> updates.cancel());
+        state = text(14, HubTheme.muted(activity));
+        state.setPadding(0, dp(8), 0, 0);
+        state.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         check.setTooltipText("每12小时检查一次；强制停止应用后暂停，重新打开后恢复。更新保留绑定和设置，安装仍需系统确认。");
         render();
     }
@@ -48,7 +50,8 @@ public final class HubUpdatePanel extends LinearLayout {
     private void render() {
         HubUpdatePolicy.Manifest available = updates.available();
         version.setText(updates.currentVersion() + (available == null ? "" : "\n最新 " + available.version + " / " + available.code));
-        state.setText(updates.message()); lastChecked.setText(updates.lastChecked()); lastChecked.setVisibility(lastChecked.length() == 0 ? GONE : VISIBLE);
+        state.setText(updates.message());
+        state.setVisibility(state.length() == 0 ? GONE : VISIBLE);
         notes.setText(available == null ? "" : available.notes); notes.setVisibility(notes.length() == 0 ? GONE : VISIBLE);
         boolean busy = updates.busy();
         progress.setVisibility(busy ? VISIBLE : GONE); progress.setIndeterminate(updates.progress() < 0); progress.setProgress(Math.max(0, updates.progress()));
@@ -57,11 +60,9 @@ public final class HubUpdatePanel extends LinearLayout {
         install.setVisibility(updates.ready() ? VISIBLE : GONE); install.setEnabled(!busy); cancel.setVisibility(busy ? VISIBLE : GONE);
     }
     private void toggle(String label, boolean checked, boolean autoCheck) {
-        Switch control = new Switch(activity); control.setText(label); control.setTextSize(14); control.setTextColor(HubTheme.text(activity));
+        Switch control = new HubSwitch(activity); control.setText(label); control.setTextSize(14); control.setTextColor(HubTheme.text(activity));
         control.setTooltipText(autoCheck ? "每12小时检查一次" : "仅非计费网络；不会自动安装");
         control.setChecked(checked); control.setMinimumHeight(dp(56)); control.setPadding(0, dp(8), 0, dp(8));
-        control.setThumbTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{HubTheme.accent(activity), HubTheme.muted(activity)}));
-        control.setTrackTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{HubTheme.primary(activity), HubTheme.border(activity)}));
         addView(control, new LayoutParams(-1, -2));
         control.setOnCheckedChangeListener((view, value) -> updates.configure(autoCheck ? value : updates.autoCheck(), autoCheck ? updates.autoDownload() : value));
     }

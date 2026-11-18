@@ -80,5 +80,5 @@ public final class HubRoutes {
         }
         return hosts;
     }
-    public static String label(String host) { String type = type(host); return "usb".equals(type) ? "USB 有线" : "remote".equals(type) ? "异地网络" : "局域网 / Wi-Fi"; }
+    public static String label(String host) { String type = type(host); return "usb".equals(type) ? "局域网/USB" : "remote".equals(type) ? "异地网络" : "局域网/USB"; }
 }

@@ -13,12 +13,13 @@ public sealed class ConnectionReadiness(Func<TimeSpan>? clock = null)
     public bool TimedOut { get; private set; }
     public string Observe(RuntimeStatus? status)
     {
-        if (status is null || status.ConnectionsPaused || status.Remote.Healthy || !status.Remote.Desired ||
+        if (status is null || status.ConnectionsPaused || status.Remote.BackendReleasePending || status.Remote.Healthy || !status.Remote.Desired ||
             status.Remote.Streaming || status.Tablet.Streaming)
         {
             _waitingSince = null; TimedOut = false; _serviceStartedAt = status?.StartedAt;
             return status is null ? "后台未连接" : status.ConnectionsPaused ? "已暂停被控"
                 : status.Remote.Streaming || status.Tablet.Streaming ? "正在被控"
+                : status.Remote.BackendReleasePending ? "正在结束连接"
                 : status.Remote.Healthy ? "接受连接" : "远控未就绪";
         }
         if (_serviceStartedAt != status.StartedAt) { _waitingSince = null; _serviceStartedAt = status.StartedAt; }

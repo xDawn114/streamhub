@@ -122,6 +122,16 @@ public final class HubSessionCoordinator {
         }
     }
     public JSONObject check() throws Exception { findControl("auto", false); return selectedInfo; }
+    public String checkStatus() throws Exception {
+        JSONObject info = check();
+        if (info.optBoolean("connectionsPaused")) return "电脑在线，已暂停接受连接。";
+        JSONObject remote = info.optJSONObject("remote");
+        if (remote != null && remote.optBoolean("backendReleasePending")) return "电脑在线，正在结束上次连接。";
+        if (remote != null && remote.optBoolean("backendBusy", remote.optBoolean("streaming")))
+            return "电脑在线，仍有未结束的串流。";
+        if (remote != null && !remote.optBoolean("healthy")) return "电脑在线，远控尚未就绪。";
+        return "电脑在线，可以连接。";
+    }
     /** Validation uses proposed trust in memory; failed attempts never replace saved trust. */
     public void bind(String addresses, String proposedInvitation) throws Exception {
         String trust = proposedInvitation.isEmpty() ? store.invitation() : proposedInvitation;
@@ -170,22 +180,17 @@ public final class HubSessionCoordinator {
         logPhase(started, "address-probe-complete");
         HubSessionDiagnostics.route(activity, HubRoutes.type(selectedHost));
         progress.update("已选择 " + HubRoutes.label(selectedHost) + " · " + selectedHost);
-        // Sunshine may keep the launched desktop busy after Android has stopped
-        // its video connection. End only the previous mode recorded by this APK,
-        // using its own paired identity, before preparing a fresh connection.
-        String previousMode = store.get("lastMode", "");
         boolean reusingLease = requestedLeaseId != null && !requestedLeaseId.isEmpty();
-        if (!reusingLease && ("remote".equals(previousMode) || "tablet".equals(previousMode)) && certificate(previousMode) != null) {
-            JSONObject previous = selectedInfo.optJSONObject(previousMode);
+        if (!reusingLease && HubSessionLease.retryPending(activity, control, selectedInfo, this::checkCancelled))
+            selectedInfo = control.request("info", null);
+        // BUSY is not proof that this APK owns the backend. Never use the
+        // unscoped media cancel endpoint to recover an aggregate busy flag.
+        if (!reusingLease) {
+            JSONObject previous = selectedInfo.optJSONObject(mode);
+            if (previous != null && previous.optBoolean("backendReleasePending"))
+                throw new IOException("上次远控尚未结束，请在电脑端断开后重试。");
             if (previous != null && previous.optBoolean("backendBusy", previous.optBoolean("streaming"))) {
-                progress.update("正在结束本设备上次的串流会话…");
-                finishPrevious();
-                HubSessionDrain.awaitIdle(() -> {
-                    checkCancelled();
-                    JSONObject current = control.request("info", null).optJSONObject(previousMode);
-                    if (current == null) throw new IOException("电脑未返回上次会话状态，请重试。");
-                    return !current.optBoolean("backendBusy", current.optBoolean("streaming"));
-                }, ms -> { checkCancelled(); Thread.sleep(ms); checkCancelled(); });
+                throw new IOException("电脑仍有未结束的串流，请在电脑端断开后重试。");
             }
         }
         progress.update(reusingLease ? "正在调整画面并恢复视频…" : "正在准备" + ("tablet".equals(mode) ? "副屏" : "远程桌面") + "，首次初始化可能需要约一分钟…");
@@ -249,7 +254,8 @@ public final class HubSessionCoordinator {
         if (ready == null) throw new IOException("准备连接超时，请检查电脑状态后重试。");
         logPhase(started, "host-ready");
         checkCancelled();
-        HubSessionLease.start(activity, selectedHost, leaseId, mode, requestId, started);
+        HubSessionLease preparedLease = HubSessionLease.start(activity, selectedHost, leaseId, mode, requestId, started);
+        if (preparedLease != null) preparedLease.rememberCapabilities(selectedInfo);
         int port = ready.optInt("httpPort", "tablet".equals(mode) ? 49089 : 48989);
         int httpsPort = ready.optInt("httpsPort", port - 5);
         String uniqueId = new IdentityManager(activity).getUniqueId();
@@ -354,21 +360,5 @@ public final class HubSessionCoordinator {
                 throw new CancellationException("电脑绑定已改变，请重新连接。");
             store.put(certKey(mode), Base64.encodeToString(certificate.getEncoded(), Base64.NO_WRAP));
         }
-    }
-    /** Cancel only the session authenticated by this APK's own paired certificate before rotation. */
-    public void finishPrevious() throws Exception {
-        String mode = store.get("lastMode", "tablet"), host = store.get("lastHost", "");
-        X509Certificate cert = certificate(mode);
-        if (host.isEmpty() || cert == null) return;
-        int port = "tablet".equals(mode) ? 49089 : 48989;
-        NvHTTP http = new NvHTTP(new ComputerDetails.AddressTuple(host, port), port - 5, new IdentityManager(activity).getUniqueId(), cert, PlatformBinding.getCryptoProvider(activity));
-        http.boundProductOperations();
-        activeHttp = http;
-        try {
-            checkCancelled();
-            // The ordinary authenticated cancel endpoint also restores the engine's captured display state.
-            if (!http.quitApp()) throw new IOException("电脑未确认结束上次会话，请重试。");
-            checkCancelled();
-        } finally { if (activeHttp == http) activeHttp = null; }
     }
 }

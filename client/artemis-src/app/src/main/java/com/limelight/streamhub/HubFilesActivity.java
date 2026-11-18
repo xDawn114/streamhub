@@ -24,8 +24,10 @@ public final class HubFilesActivity extends Activity {
         HubNavigation.holdSurface(source);
     }
     private static final int OPEN_FILE=861, OPEN_FOLDER=862, CHANGE_FOLDER=864;
+    private enum RemoteRead { REFRESH, DIRECTORY, TASKS }
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final HubFileBrowser browser = new HubFileBrowser(() -> new HubFileClient(this));
     private HubStore store; private HubFileTasks tasks;
     private Button pauseButton;
     private ImageButton destinationButton, sortButton, refreshButton, moreButton;
@@ -36,6 +38,7 @@ public final class HubFilesActivity extends Activity {
     private String browsePath = "", renderedBrowse = "", browseSort="name";
     private int browseOffset;
     private String browseRootId="", pendingRootId="", pendingComputer="", renderedRoots="";
+    private String browseScope="";
     private Button computerTab,tasksTab;
     private boolean showingTasks;
     private LinearLayout rootsList,computerPane,transferPane;
@@ -49,23 +52,29 @@ public final class HubFilesActivity extends Activity {
     private final java.util.LinkedHashMap<String,JSONObject> selectableFiles=new java.util.LinkedHashMap<>();
     private final java.util.List<CheckBox> fileChecks=new java.util.ArrayList<>();
     private JSONArray knownRoots=new JSONArray();
+    private boolean fileConnectionKnown;
     private boolean uploadAllowed=true,deleteAllowed;
     private final java.util.LinkedHashMap<String,JSONObject> selectedFiles=new java.util.LinkedHashMap<>();
     private JSONArray pendingBrowseDownloads=new JSONArray();
-    private volatile HubFileClient control;
     private JSONObject chosenDownload;
     private JSONArray remoteTasks = new JSONArray();
     private boolean foreground;
     private boolean fileTransferAllowed;
-    private volatile boolean checking;
+    private boolean checking, pollingTasks;
+    private int readGeneration;
     private long nextRemoteRefreshAt;
     private String renderedTasks = "";
     private int background, surface, field, border, textColor, muted, accent, primary, onAccent, ripple;
-    private final Runnable refresh = new Runnable() { @Override public void run() { if (foreground) { renderLocal(); if (!checking && SystemClock.elapsedRealtime() >= nextRemoteRefreshAt) loadRemote(); main.postDelayed(this, 1000); } } };
+    private final Runnable refresh = new Runnable() { @Override public void run() {
+        if (!foreground) return;
+        renderLocal();
+        if (showingTasks && SystemClock.elapsedRealtime() >= nextRemoteRefreshAt) loadRemote(RemoteRead.TASKS);
+        main.postDelayed(this, 1000);
+    } };
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved); HubNavigation.prepareWindow(this); store=new HubStore(this); tasks=new HubFileTasks(this);
         if(saved!=null)try{String value=saved.getString("download", "");if(!value.isEmpty())chosenDownload=new JSONObject(value);}catch(Exception ignored){}
-        if(saved!=null) { browsePath=saved.getString("browsePath", ""); browseOffset=saved.getInt("browseOffset", 0); browseRootId=saved.getString("browseRootId","");pendingRootId=saved.getString("pendingRootId","");pendingComputer=saved.getString("pendingComputer","");showingTasks=saved.getBoolean("showingTasks",false);
+        if(saved!=null) { browseScope=saved.getString("browseScope","");browsePath=saved.getString("browsePath", ""); browseOffset=saved.getInt("browseOffset", 0); browseRootId=saved.getString("browseRootId","");pendingRootId=saved.getString("pendingRootId","");pendingComputer=saved.getString("pendingComputer","");showingTasks=saved.getBoolean("showingTasks",false);
             browseSort=saved.getString("browseSort","name");
             try{JSONArray selected=new JSONArray(saved.getString("selectedFiles","[]"));for(int i=0;i<selected.length();i++){JSONObject entry=selected.getJSONObject(i);selectedFiles.put(entry.getString("path"),entry);}}catch(Exception ignored){}
             try{pendingBrowseDownloads=new JSONArray(saved.getString("pendingBrowseDownloads","[]"));}catch(Exception ignored){} }
@@ -74,8 +83,8 @@ public final class HubFilesActivity extends Activity {
         getWindow().getDecorView().setBackgroundColor(background);
         FrameLayout centered=new FrameLayout(this); centered.setBackgroundColor(background);
         HubWindowLayout layout=HubWindowLayout.of(this);
-        LinearLayout content=new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(layout.pageInsetDp()),dp(layout.compact()?12:20),dp(layout.pageInsetDp()),dp(12));
-        int fileWidth=Math.max(1,Math.min(1000,layout.widthDp-layout.railWidthDp()));
+        LinearLayout content=new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(layout.pageInsetDp()),dp(layout.compact()?16:24),dp(layout.pageInsetDp()),dp(12));
+        int fileWidth=Math.max(1,layout.contentWidthDp());
         centered.addView(content,new FrameLayout.LayoutParams(dp(fileWidth),-1,Gravity.TOP|Gravity.CENTER_HORIZONTAL));
         HubNavigation navigation=new HubNavigation(this,centered,3,index->{
             if(index==3)return;
@@ -83,8 +92,8 @@ public final class HubFilesActivity extends Activity {
             HubNavigation.holdSurface(this);
         }); setContentView(navigation.view);
         LinearLayout toolbar=new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title=text("文件",layout.compact()?20:24); title.setTypeface(null,Typeface.BOLD); title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams titleSize=new LinearLayout.LayoutParams(0,-2,1); titleSize.leftMargin=dp(4); toolbar.addView(title,titleSize);
+        TextView title=text("文件",24); title.setPadding(0,0,0,0); title.setTypeface(null,Typeface.BOLD); title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams titleSize=new LinearLayout.LayoutParams(0,-2,1); titleSize.leftMargin=0; toolbar.addView(title,titleSize);
         refreshButton=iconAction(toolbar,R.drawable.ic_hub_refresh,"刷新电脑文件",this::loadRemote);
         sortButton=iconAction(toolbar,R.drawable.ic_hub_sort,"排序："+sortLabel(),this::showSortChoices);
         destinationButton=iconAction(toolbar,R.drawable.ic_hub_folder,"保存位置",()->pickDestination(CHANGE_FOLDER)); updateDestinationLabel();
@@ -100,16 +109,12 @@ public final class HubFilesActivity extends Activity {
                         } else pickDestination(CHANGE_FOLDER);
                     }).show());
         }
-        {
-            FrameLayout sendHint=new HintFrame();toolbar.addView(sendHint,new LinearLayout.LayoutParams(-2,dp(48)));
-            LinearLayout sendSlot=new LinearLayout(this);sendHint.addView(sendSlot);
-            Button send=button(sendSlot,"发送文件",true,this::chooseUpload);
-            send.setTextSize(14);send.setSingleLine(true);send.setMinWidth(0);send.setMinHeight(dp(48));send.setPadding(dp(10),0,dp(10),0);
-            send.setLayoutParams(new LinearLayout.LayoutParams(-2,dp(48)));send.setTag(sendHint);sendButton=send;
-        }
+        sendButton=iconAction(toolbar,R.drawable.ic_hub_upload,"发送文件",this::chooseUpload);
         toolbar.setMinimumHeight(dp(56));content.addView(toolbar,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout statusBar=new LinearLayout(this);statusBar.setGravity(Gravity.CENTER_VERTICAL);
         state=text("正在连接电脑…",13); state.setTextColor(muted);state.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        state.setSingleLine(true); state.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        state.setMinHeight(dp(32)); state.setGravity(Gravity.CENTER_VERTICAL);
         statusBar.addView(state,new LinearLayout.LayoutParams(0,-2,1));
         content.addView(statusBar,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout tabs=new LinearLayout(this);
@@ -151,7 +156,6 @@ public final class HubFilesActivity extends Activity {
         clearButton=button(transferPane,"清理已完成/取消记录",()->{ tasks.clearFinished(); renderLocal(); });
 
         compactButton(pauseButton);compactButton(clearButton);showFilePane(showingTasks);renderControls();
-        loadRemote();
     }
     @Override public void finish() { super.finish(); HubNavigation.holdSurface(this); }
     private int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
@@ -182,7 +186,7 @@ public final class HubFilesActivity extends Activity {
     }
     private ImageButton iconAction(LinearLayout parent,int icon,String description,Runnable action) {
         HintFrame hint=new HintFrame();parent.addView(hint,new LinearLayout.LayoutParams(dp(48),dp(48)));
-        ImageButton button=new ImageButton(this);button.setImageResource(icon);button.setImageTintList(android.content.res.ColorStateList.valueOf(accent));
+        ImageButton button=new ImageButton(this);button.setImageResource(icon);button.setImageTintList(new android.content.res.ColorStateList(new int[][]{new int[]{-android.R.attr.state_enabled},new int[]{}},new int[]{muted,accent}));
         button.setPadding(dp(12),dp(12),dp(12),dp(12));button.setBackgroundColor(android.graphics.Color.TRANSPARENT);
         button.setContentDescription(description);button.setOnClickListener(v->action.run());button.setTag(hint);hint.addView(button,new FrameLayout.LayoutParams(-1,-1));
         if(Build.VERSION.SDK_INT>=26)button.setTooltipText(description);return button;
@@ -195,9 +199,13 @@ public final class HubFilesActivity extends Activity {
         private void showHint(){Toast.makeText(HubFilesActivity.this,getContentDescription(),Toast.LENGTH_SHORT).show();}
     }
     private void actionAvailability(View view,boolean enabled,String description) {
-        view.setEnabled(enabled);view.setAlpha(enabled?1f:0.45f);view.setContentDescription(description);
+        view.setEnabled(enabled);view.setAlpha(1f);view.setContentDescription(description);
         if(Build.VERSION.SDK_INT>=26)view.setTooltipText(description);
-        if(view.getTag() instanceof HintFrame)((HintFrame)view.getTag()).setContentDescription(description);
+        if(view.getTag() instanceof HintFrame){
+            HintFrame hint=(HintFrame)view.getTag();hint.setContentDescription(description);hint.setFocusable(!enabled);
+            hint.setImportantForAccessibility(enabled?View.IMPORTANT_FOR_ACCESSIBILITY_NO:View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+            view.setImportantForAccessibility(enabled?View.IMPORTANT_FOR_ACCESSIBILITY_AUTO:View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
     }
     private void chooseUpload() {
         if(!fileTransferAllowed||!uploadAllowed||checking)return;
@@ -208,42 +216,135 @@ public final class HubFilesActivity extends Activity {
         if(store.bound())loadRemote();
         else startActivity(new Intent(this,HubActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("HubPage",1),HubNavigation.transition(this));
     }
-    private void loadRemote() {
-        if(!store.bound()) { fileTransferAllowed=false;state.setText("先在“全部设备”添加电脑。");renderControls();return; }
-        if(checking) return; checking=true; state.setText("正在连接电脑…");
-        final String requestedPath=browsePath; final int requestedOffset=browseOffset; final String requestedRoot=browseRootId;
-        final String requestedSort=browseSort,requestedComputer=store.get("deviceId","");
-        renderControls();
-        nextRemoteRefreshAt=SystemClock.elapsedRealtime()+10000;
-        worker.execute(()->{
+    private void loadRemote() { loadRemote(RemoteRead.REFRESH); }
+    private String fileScope() {
+        return store.get("deviceId", "") + ":" + store.get("bindingRevision", "") + ":" + store.get("transportRevision", "");
+    }
+    private void loadRemote(RemoteRead read) {
+        final boolean tasksOnly = read == RemoteRead.TASKS;
+        if (checking || (tasksOnly && pollingTasks)) return;
+        final String requestedScope = fileScope();
+        if (!browseScope.isEmpty() && !browseScope.equals(requestedScope)) clearRemoteFiles();
+        nextRemoteRefreshAt = SystemClock.elapsedRealtime() + 10000;
+        if(!store.bound()) {
+            ++readGeneration; fileConnectionKnown=false; fileTransferAllowed=false; deleteAllowed=false;
+            state.setText("先在“全部设备”添加电脑。");renderControls();return;
+        }
+        browseScope = requestedScope;
+        if (tasksOnly) pollingTasks = true;
+        else {
+            checking = true;
+            state.setText(fileConnectionKnown ? "正在读取电脑文件…" : "正在连接电脑…");
+            renderControls();
+        }
+        final int generation = ++readGeneration;
+        final String requestedPath = browsePath, requestedRoot = browseRootId, requestedSort = browseSort;
+        final int requestedOffset = browseOffset;
+        worker.execute(() -> {
             try {
-                if(!requestedComputer.equals(store.get("deviceId","")))throw new java.io.IOException("电脑绑定已改变，请刷新。");
-                HubFileClient client=new HubFileClient(this); control=client; client.connect(); JSONObject registration=client.register();
-                boolean allowed=registration.optBoolean("allowed"), enabled=registration.optBoolean("enabled");
-                JSONArray available=allowed && enabled ? client.json("tasks",null).optJSONArray("tasks") : new JSONArray();
-                JSONObject listing=null; JSONArray roots=new JSONArray();
-                if(allowed && enabled && client.supportsRoots())roots=client.json("roots",null).optJSONArray("roots");
-                String resolvedRoot=requestedRoot;
-                if(resolvedRoot.isEmpty() && roots!=null && roots.length()>0)resolvedRoot=roots.optJSONObject(0).optString("id");
-                final String currentRoot=resolvedRoot;
-                String browseError="电脑尚未添加可浏览目录。";
-                if(allowed && enabled) {
-                    if(client.supportsRoots()&&(roots==null||roots.length()==0))browseError="请在电脑的设备权限中添加可浏览目录。";
-                    else if(client.supportsBrowse()) try { listing=client.json("browse",new JSONObject().put("path",requestedPath).put("offset",requestedOffset).put("rootId",currentRoot).put("sort",requestedSort)).optJSONObject("listing"); }
-                    catch(Exception error) { browseError=error.getMessage(); }
-                    else browseError="电脑端尚未支持共享目录浏览，请更新电脑端。";
-                }
-                final JSONArray resolvedRoots=roots;
-                final JSONObject shared=listing; final String sharedMessage=browseError;
-                String message=allowed?(enabled?"已连接":"电脑尚未开启文件访问"):registration.optBoolean("usesDevicePermissions")?"请在电脑的设备权限中开启“文件”。":"旧版电脑需要核对文件权限，建议更新电脑端。";
-                main.post(()->{ if(isDestroyed()||!requestedComputer.equals(store.get("deviceId",""))) return; browseRootId=currentRoot;fileTransferAllowed=allowed && enabled; uploadAllowed=registration.optBoolean("uploadAllowed",true);deleteAllowed=registration.optBoolean("deleteAllowed",false);renderRoots(resolvedRoots); state.setText(message); remoteTasks=available; renderRemote(remoteTasks); renderBrowse(shared,sharedMessage); renderControls(); });
-            }catch(Exception error) { main.post(()->{ if(!isDestroyed()) { fileTransferAllowed=false;deleteAllowed=false;renderRoots(new JSONArray());state.setText("未连接："+error.getMessage()); renderRemote(new JSONArray()); renderBrowse(null,"连接电脑后可浏览共享文件夹。"); renderControls(); } }); }
-            finally { if(control!=null)control.cancel(); control=null; main.post(()->{checking=false;nextRemoteRefreshAt=SystemClock.elapsedRealtime()+10000;if(!isDestroyed())renderControls();}); }
+                if (!requestedScope.equals(fileScope())) throw new CancellationException("连接设置已改变，请刷新。");
+                RemoteFiles result = browser.read(read == RemoteRead.REFRESH, (client, registration) -> {
+                    if (!requestedScope.equals(fileScope())) throw new CancellationException("连接设置已改变，请刷新。");
+                    RemoteFiles files = new RemoteFiles(registration, requestedRoot, requestedPath, requestedOffset);
+                    if (!files.allowed) return files;
+                    if (read != RemoteRead.DIRECTORY) files.tasks = client.json("tasks", null).optJSONArray("tasks");
+                    if (tasksOnly) return files;
+                    if (client.supportsRoots()) {
+                        files.roots = browser.roots(client);
+                        if (files.roots.length() == 0) {
+                            files.browseMessage = "请在电脑的设备权限中添加可浏览目录。";
+                            return files;
+                        }
+                        if (!containsRoot(files.roots, requestedRoot)) {
+                            files.root = files.roots.getJSONObject(0).getString("id");
+                            files.path = "";
+                            files.offset = 0;
+                        }
+                    }
+                    if (client.supportsBrowse()) {
+                        try {
+                            files.listing = client.json("browse", new JSONObject().put("path", files.path)
+                                    .put("offset", files.offset).put("rootId", files.root).put("sort", requestedSort)).getJSONObject("listing");
+                        } catch (HubFileRetryPolicy.HttpFailure error) {
+                            if (error.status == 401 || error.status == 403) throw error;
+                            files.browseMessage = error.getMessage();
+                        }
+                    } else files.browseMessage = "电脑端尚未支持共享目录浏览，请更新电脑端。";
+                    return files;
+                });
+                main.post(() -> {
+                    if (!acceptRead(generation, requestedScope)) return;
+                    fileConnectionKnown = true;
+                    fileTransferAllowed = result.allowed;
+                    uploadAllowed = result.registration.optBoolean("uploadAllowed", true);
+                    deleteAllowed = result.registration.optBoolean("deleteAllowed");
+                    state.setText(result.statusMessage());
+                    if (read != RemoteRead.DIRECTORY || !result.allowed) renderRemote(result.tasks);
+                    if (!tasksOnly || !result.allowed) {
+                        browseRootId = result.root; browsePath = result.path; browseOffset = result.offset;
+                        renderRoots(result.roots);
+                        renderBrowse(result.listing, result.browseMessage);
+                    }
+                });
+            } catch (Exception error) {
+                main.post(() -> {
+                    if (!acceptRead(generation, requestedScope)) return;
+                    fileConnectionKnown = error instanceof HubFileRetryPolicy.HttpFailure;
+                    fileTransferAllowed = false; deleteAllowed = false;
+                    state.setText((fileConnectionKnown ? "文件访问未完成：" : "未连接：") + error.getMessage());
+                    renderRoots(null); renderRemote(null); renderBrowse(null, "连接电脑后可浏览共享文件夹。");
+                });
+            } finally {
+                main.post(() -> {
+                    if (tasksOnly) pollingTasks = false;
+                    else checking = false;
+                    nextRemoteRefreshAt = SystemClock.elapsedRealtime() + 10000;
+                    if (!isDestroyed()) renderControls();
+                });
+            }
         });
+    }
+    private boolean acceptRead(int generation, String scope) {
+        if (isDestroyed() || generation != readGeneration) return false;
+        if (scope.equals(fileScope())) return true;
+        state.setText("连接设置已改变，请刷新。");
+        clearRemoteFiles();
+        return false;
+    }
+    private void clearRemoteFiles() {
+        fileConnectionKnown = false; fileTransferAllowed = false; deleteAllowed = false;
+        browseScope = ""; browseRootId = ""; browsePath = ""; browseOffset = 0;
+        renderRoots(null); renderRemote(null); renderBrowse(null, "连接电脑后可浏览共享文件夹。");
+    }
+    private static boolean containsRoot(JSONArray roots, String id) {
+        for (int i = 0; i < roots.length(); i++) {
+            JSONObject root = roots.optJSONObject(i);
+            if (root != null && id.equals(root.optString("id"))) return true;
+        }
+        return false;
+    }
+    private static final class RemoteFiles {
+        final JSONObject registration;
+        final boolean allowed;
+        String root, path, browseMessage = "";
+        int offset;
+        JSONArray roots, tasks;
+        JSONObject listing;
+        RemoteFiles(JSONObject registration, String root, String path, int offset) {
+            this.registration = registration;
+            this.root = root; this.path = path; this.offset = offset;
+            allowed = registration.optBoolean("allowed") && registration.optBoolean("enabled");
+        }
+        String statusMessage() {
+            if (allowed) return "已连接";
+            if (registration.optBoolean("allowed")) return "电脑尚未开启文件访问";
+            return registration.optBoolean("usesDevicePermissions") ? "请在电脑的设备权限中开启“文件”。" : "旧版电脑需要核对文件权限，建议更新电脑端。";
+        }
     }
     private void navigateBrowse(String path,int offset) {
         if(checking)return;
-        selectedFiles.clear();renderSelectionBar();browsePath=path; browseOffset=offset; renderedBrowse=""; nextRemoteRefreshAt=0; loadRemote();
+        selectedFiles.clear();renderSelectionBar();browsePath=path; browseOffset=offset; renderedBrowse="";
+        loadRemote(RemoteRead.DIRECTORY);
     }
     private String sortLabel(){return "modified".equals(browseSort)?"最近修改":"size".equals(browseSort)?"文件从大到小":"name-desc".equals(browseSort)?"名称 Z–A":"名称 A–Z";}
     private void showSortChoices(){
@@ -259,6 +360,7 @@ public final class HubFilesActivity extends Activity {
         if(signature.equals(renderedBrowse)){renderSelectionBar();return;} renderedBrowse=signature;browseList.removeAllViews();selectableFiles.clear();fileChecks.clear();
         if(listing==null) { selectedFiles.clear();renderSelectionBar();browseLocation.setText("");browseList.addView(emptyPane(error)); if(!browsePath.isEmpty() || browseOffset>0) button(browseList,"返回共享根目录",()->navigateBrowse("",0)); return; }
         String path=listing.optString("path"); browseLocation.setText(listing.optString("rootName","共享文件夹")+(path.isEmpty()?"":" / "+path));
+        String rootId = browseRootId, scope = fileScope();
         if(!path.isEmpty()) button(browseList,"‹ 上一级",()->navigateBrowse(path.contains("/")?path.substring(0,path.lastIndexOf('/')):"",0));
         JSONArray entries=listing.optJSONArray("entries");
         if(entries==null || entries.length()==0) browseList.addView(emptyPane("此文件夹为空"));
@@ -291,7 +393,7 @@ public final class HubFilesActivity extends Activity {
                 row.setEnabled(HubFileTasks.isSizeAllowed(entry.optLong("size")));
                 if(deleteAllowed) {
                     Button more=button(fileRow,"⋮",()->HubStreamUi.hubDialog(this).setTitle(entry.optString("name"))
-                            .setItems(new String[]{"移到电脑回收站"},(d,w)->confirmRecycle(entry)).setNegativeButton("取消",null).show());
+                            .setItems(new String[]{"移到电脑回收站"},(d,w)->confirmRecycle(entry,rootId,scope)).setNegativeButton("取消",null).show());
                     more.setMinWidth(0);more.setContentDescription("文件操作："+entry.optString("name"));
                     LinearLayout.LayoutParams moreSize=new LinearLayout.LayoutParams(dp(48),dp(52));moreSize.leftMargin=dp(8);more.setLayoutParams(moreSize);
                 }
@@ -302,9 +404,11 @@ public final class HubFilesActivity extends Activity {
         selectedFiles.keySet().retainAll(selectableFiles.keySet());renderSelectionBar();
     }
     private void showFilePane(boolean transfers) {
+        boolean changed = transfers != showingTasks;
         showingTasks=transfers;computerPane.setVisibility(transfers?View.GONE:View.VISIBLE);
         computerTab.setSelected(!transfers);tasksTab.setSelected(transfers);
         styleTab(computerTab,!transfers);styleTab(tasksTab,transfers);renderControls();
+        if (changed && foreground && store.bound()) loadRemote(transfers ? RemoteRead.TASKS : RemoteRead.DIRECTORY);
     }
     private void styleTab(Button tab, boolean selected) {
         tab.setTextColor(selected?accent:muted);
@@ -395,6 +499,8 @@ public final class HubFilesActivity extends Activity {
         Uri uri=savedDestination();String name="";
         if(uri!=null)try { androidx.documentfile.provider.DocumentFile tree=androidx.documentfile.provider.DocumentFile.fromTreeUri(this,uri);if(tree!=null)name=tree.getName(); }catch(RuntimeException ignored) { }
         String description=uri==null?"保存位置未设置，首次下载需选择文件夹":"保存位置："+(name==null?"已选目录":name);
+        destinationButton.setImageTintList(android.content.res.ColorStateList.valueOf(uri==null?HubTheme.warning(this):accent));
+        if(uri==null)destinationButton.setImageResource(R.drawable.ic_hub_folder_pending);else destinationButton.setImageResource(R.drawable.ic_hub_folder);
         actionAvailability(destinationButton,true,description);
     }
     private void queueBrowseDownloads(Uri destination) {
@@ -432,14 +538,15 @@ public final class HubFilesActivity extends Activity {
             if(first!=null&&!HubFileService.busy())begin(first,false);showFilePane(true);renderLocal();
         }catch(Exception error){state.setText("未添加："+error.getMessage());}
     }
-    private void confirmRecycle(JSONObject entry) {
+    private void confirmRecycle(JSONObject entry, String root, String scope) {
+        if (checking || !fileTransferAllowed || !deleteAllowed || !scope.equals(fileScope())) return;
         HubStreamUi.hubDialog(this).setTitle("移到电脑回收站？").setMessage(entry.optString("name")+"\n这会移除电脑上的源文件；清理传输记录不会执行此操作。")
                 .setNegativeButton("取消",null).setPositiveButton("移到回收站",(d,w)->{
-                    final String root=browseRootId;worker.execute(()->{
+                    worker.execute(()->{
                         HubFileClient client=new HubFileClient(this);
-                        try{client.connect();client.json("recycle",new JSONObject().put("rootId",root).put("path",entry.optString("path")));
-                            main.post(()->{if(!isDestroyed())navigateBrowse(browsePath,0);});}
-                        catch(Exception error){main.post(()->{if(!isDestroyed())state.setText("未删除："+error.getMessage());});}
+                        try{if(!scope.equals(fileScope()))throw new CancellationException("连接设置已改变。");client.connect();client.json("recycle",new JSONObject().put("rootId",root).put("path",entry.optString("path")));
+                            main.post(()->{if(!isDestroyed()&&scope.equals(fileScope())&&root.equals(browseRootId))navigateBrowse(browsePath,0);});}
+                        catch(Exception error){main.post(()->{if(!isDestroyed()&&scope.equals(fileScope()))state.setText("未删除："+error.getMessage());});}
                         finally{client.cancel();}
                     });
                 }).show();
@@ -510,20 +617,21 @@ public final class HubFilesActivity extends Activity {
         boolean busy = HubFileService.busy();
         actionAvailability(refreshButton,!checking,checking?"正在读取电脑文件，请稍候":"刷新电脑文件");
         boolean canSend=fileTransferAllowed&&uploadAllowed&&!checking;
-        actionAvailability(sendButton,canSend,checking?"正在读取电脑文件，请稍候":!fileTransferAllowed?"电脑设备权限中的“文件”未开启":!uploadAllowed?"电脑未允许此设备上传文件":"发送文件");
-        actionAvailability(sortButton,fileTransferAllowed&&!checking,checking?"正在读取电脑文件，请稍候":!fileTransferAllowed?"电脑设备权限中的“文件”未开启":"排序："+sortLabel());
         boolean canBrowse=fileTransferAllowed&&(knownRoots.length()>0||browseError.isEmpty());
         browserContent.setVisibility(canBrowse?View.VISIBLE:View.GONE);
         authorizationPane.setVisibility(canBrowse?View.GONE:View.VISIBLE);
         authorizationMessage.setText(!fileTransferAllowed?state.getText():browseError);
-        state.setVisibility((showingTasks?fileTransferAllowed||busy:canBrowse)?View.VISIBLE:View.GONE);
-        requestAuthorization.setText(store.bound()?"重试连接":"添加电脑");requestAuthorization.setEnabled(!checking);
+        state.setVisibility(View.VISIBLE);
+        boolean permissionIssue = store.bound() && (fileTransferAllowed || fileConnectionKnown);
+        requestAuthorization.setText(!store.bound()?"添加电脑":permissionIssue?"刷新文件权限":"重试连接");requestAuthorization.setEnabled(!checking);
         if(rootChoice!=null)rootChoice.setEnabled(!checking);
-        int auxiliaryVisibility=showingTasks||compactToolbar?View.GONE:View.VISIBLE;
+        int auxiliaryVisibility=compactToolbar?View.GONE:View.VISIBLE;
         sortButton.setVisibility(auxiliaryVisibility);((View)sortButton.getParent()).setVisibility(auxiliaryVisibility);
         destinationButton.setVisibility(auxiliaryVisibility);((View)destinationButton.getParent()).setVisibility(auxiliaryVisibility);
-        if(moreButton!=null)((View)moreButton.getParent()).setVisibility(showingTasks?View.GONE:View.VISIBLE);
-        sendButton.setVisibility(showingTasks?View.GONE:View.VISIBLE);((View)sendButton.getTag()).setVisibility(showingTasks?View.GONE:View.VISIBLE);
+        actionAvailability(sortButton, !showingTasks && fileTransferAllowed && !checking, showingTasks ? "电脑文件页可排序" : checking ? "正在读取电脑文件，请稍候" : !fileTransferAllowed ? "电脑设备权限中的“文件”未开启" : "排序："+sortLabel());
+        if(moreButton!=null)((View)moreButton.getParent()).setVisibility(View.VISIBLE);
+        sendButton.setVisibility(View.VISIBLE);((View)sendButton.getTag()).setVisibility(View.VISIBLE);
+        actionAvailability(sendButton,!showingTasks && canSend,showingTasks ? "在电脑文件页发送文件" : checking ? "正在读取电脑文件，请稍候" : !fileTransferAllowed ? "电脑设备权限中的“文件”未开启" : !uploadAllowed ? "电脑未允许此设备上传文件" : "发送文件");
         renderSelectionBar();
         pauseButton.setVisibility(busy ? View.VISIBLE : View.GONE);
         java.util.List<JSONObject> listed = tasks.list();
@@ -571,8 +679,8 @@ public final class HubFilesActivity extends Activity {
             task.put("autoQueued",true);tasks.save(task);if(!HubFileService.busy())begin(task.getString("id"),false);showFilePane(true);renderLocal();
         }catch(Exception error){state.setText("未添加："+error.getMessage());}
     }
-    @Override protected void onResume(){super.onResume();foreground=true;main.post(refresh);}
-    @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(chosenDownload!=null)out.putString("download",chosenDownload.toString());out.putString("browseRootId",browseRootId);out.putString("browseSort",browseSort);JSONArray selected=new JSONArray();for(JSONObject entry:selectedFiles.values())selected.put(entry);out.putString("selectedFiles",selected.toString());out.putString("pendingRootId",pendingRootId);out.putString("pendingComputer",pendingComputer);out.putBoolean("showingTasks",showingTasks);out.putString("pendingBrowseDownloads",pendingBrowseDownloads.toString());out.putString("browsePath",browsePath);out.putInt("browseOffset",browseOffset);}
+    @Override protected void onResume(){super.onResume();foreground=true;loadRemote(showingTasks ? RemoteRead.TASKS : RemoteRead.REFRESH);main.post(refresh);}
+    @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(chosenDownload!=null)out.putString("download",chosenDownload.toString());out.putString("browseScope",browseScope);out.putString("browseRootId",browseRootId);out.putString("browseSort",browseSort);JSONArray selected=new JSONArray();for(JSONObject entry:selectedFiles.values())selected.put(entry);out.putString("selectedFiles",selected.toString());out.putString("pendingRootId",pendingRootId);out.putString("pendingComputer",pendingComputer);out.putBoolean("showingTasks",showingTasks);out.putString("pendingBrowseDownloads",pendingBrowseDownloads.toString());out.putString("browsePath",browsePath);out.putInt("browseOffset",browseOffset);}
     @Override protected void onPause(){foreground=false;main.removeCallbacks(refresh);super.onPause();}
-    @Override protected void onDestroy(){if(control!=null)control.cancel();worker.shutdownNow();main.removeCallbacks(refresh);super.onDestroy();}
+    @Override protected void onDestroy(){browser.close();worker.shutdownNow();main.removeCallbacks(refresh);super.onDestroy();}
 }

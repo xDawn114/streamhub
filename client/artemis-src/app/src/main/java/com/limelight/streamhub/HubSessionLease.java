@@ -13,11 +13,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Each stream owns a fresh lease; ending an old stream cannot tear down its replacement. */
 public final class HubSessionLease {
     private static final ConcurrentHashMap<String, HubSessionLease> leases = new ConcurrentHashMap<>();
+    private static final Object endQueueGate = new Object();
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private final java.util.concurrent.ExecutorService reporter = Executors.newSingleThreadExecutor();
     private final HubStore store;
     private final Context context;
     private final String host, leaseId, mode, requestId;
+    private final HubSessionEndQueue.Owner owner;
     private final HubSessionTiming timing;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean reportPending = new AtomicBoolean();
@@ -27,13 +29,15 @@ public final class HubSessionLease {
     private volatile boolean userExit;
     public void userExit(){userExit=true;}
     private boolean lockConfigured, lockSupported, hostManagedPolicy;
+    private volatile boolean remoteBackendRelease;
     private boolean readyEvidence, fastPrivacyHeartbeat, boundedPrivacyHeartbeat;
     private HubSessionLease(Context context, String host, String leaseId, String mode, String requestId, long started) {
         this.context = context.getApplicationContext(); store = new HubStore(this.context); this.host = host; this.leaseId = leaseId;
         this.mode = mode; this.requestId = requestId; this.timing = new HubSessionTiming(started);
+        this.owner = owner(store);
         this.startupTrace = new HubStartupTrace(this.context, started);
     }
-    /** Normal tablet exits end capture but rotation retains the existing app. */
+    /** Tablet still uses media quit; remote cleanup is owned by the host lease. */
     public static boolean active() { return !leases.isEmpty(); }
     public static boolean shouldQuitBackend(boolean managed, String mode, boolean quitOnStop, boolean rotating) {
         return !rotating && (managed ? "tablet".equals(mode) : quitOnStop);
@@ -58,10 +62,11 @@ public final class HubSessionLease {
     }
     private synchronized HubControlClient client() throws Exception {
         if (control == null) {
-            HubControlClient candidate = new HubControlClient(host, store.invitation());
+            HubControlClient candidate = scopedClient();
             JSONObject info = candidate.probeInfo(); store.rememberHostPolicy(info);
             JSONObject caps = info.optJSONObject("capabilities");
             hostManagedPolicy = caps != null && caps.optBoolean("hostManagedPolicy");
+            rememberCapabilities(info);
             lockSupported=caps!=null && caps.optBoolean("remoteDesktopLock");
             readyEvidence = caps != null && caps.optBoolean("liveSessionState");
             fastPrivacyHeartbeat = caps != null && caps.optBoolean("fastPrivacyHeartbeat");
@@ -71,7 +76,7 @@ public final class HubSessionLease {
         return control;
     }
     private JSONObject body() throws Exception {
-        JSONObject result = new JSONObject().put("leaseId", leaseId).put("mode", mode).put("clientId", store.clientId());
+        JSONObject result = new JSONObject().put("leaseId", leaseId).put("mode", mode).put("clientId", owner.client);
         // Old PC versions reject unknown fields; send readiness only after negotiation.
         if (readyEvidence) result.put("streamReady", timing.mediaConnected());
         if (fastPrivacyHeartbeat && "remote".equals(mode)) result.put("fastPrivacyHeartbeat", true);
@@ -142,15 +147,37 @@ public final class HubSessionLease {
                     || "failed".equals(state) || "rejected".equals(state)) timing.markConnectionReported(generation);
         } catch (Exception ignored) { }
     }
-    /** Called after native streaming and authenticated Sunshine quit have both returned. */
-    public void end() {
+    /** An unused prepared lease must not close a backend application. */
+    public void end() { end(false); }
+
+    /** Called after this activity has finished stopping native streaming. */
+    public void endAfterStream() { end(true); }
+
+    private void end(boolean streamAttempted) {
         if (!closed.compareAndSet(false, true)) return;
         leases.remove(leaseId, this);
         worker.shutdownNow();
         reporter.shutdownNow();
         // End has its own request so cancelling a heartbeat cannot cancel cleanup.
+        boolean releaseBackend = streamAttempted && "remote".equals(mode) && remoteBackendRelease;
         try {
-            HubControlClient cleanup = new HubControlClient(host, store.invitation());
+            if (!sameOwner(owner, owner(store))) throw new IllegalStateException("Binding changed before session cleanup");
+            if (releaseBackend) {
+                synchronized (endQueueGate) {
+                    endQueue(context).remember(owner, leaseId, userExit);
+                    HubControlClient cleanup = scopedClient();
+                    for (int attempt = 0; attempt < 2; attempt++) {
+                        try {
+                            endQueue(context).retry(owner, true, cleanup::requestSessionEnd, () -> { });
+                            return;
+                        } catch (Exception error) {
+                            if (attempt == 1) android.util.Log.w("HubConnection", "Remote backend cleanup pending; retained exact lease for retry");
+                        }
+                    }
+                }
+                return;
+            }
+            HubControlClient cleanup = scopedClient();
             for (int attempt = 0; attempt < 2; attempt++) {
                 try {
                     JSONObject end=body();
@@ -158,11 +185,49 @@ public final class HubSessionLease {
                         end.put("exitReason",userExit?"user":"internal");
                         if (!hostManagedPolicy) end.put("lockOnExit",context.getSharedPreferences("streamhub_controls",Context.MODE_PRIVATE).getBoolean("lock_on_exit",false));
                     }
-                    cleanup.request("session/end",end);break;
+                    cleanup.requestSessionEnd(end);break;
                 }
                 catch (Exception e) { if (attempt == 1) android.util.Log.w("HubConnection", "Lease cleanup deferred to host expiry"); }
             }
-        } catch (Exception ignored) { }
+        } catch (Exception error) {
+            android.util.Log.w("HubConnection", "Lease cleanup not confirmed; host ownership was not bypassed");
+        }
+    }
+
+    static boolean supportsBackendRelease(JSONObject info) {
+        JSONObject caps = info.optJSONObject("capabilities");
+        return caps != null && caps.optBoolean("remoteBackendRelease");
+    }
+    void rememberCapabilities(JSONObject info) { remoteBackendRelease = supportsBackendRelease(info); }
+    private HubControlClient scopedClient() throws Exception {
+        // Match identity and capture immutable transport trust atomically with
+        // binding edits. A later edit cannot substitute the new PC's credentials.
+        synchronized (HubStore.class) {
+            if (!sameOwner(owner, owner(store))) throw new IllegalStateException("Binding changed before lease request");
+            return new HubControlClient(host, store.invitation());
+        }
+    }
+    private static HubSessionEndQueue.Owner owner(HubStore store) {
+        return new HubSessionEndQueue.Owner(store.get("deviceId", ""), store.clientId(), store.get("bindingRevision", ""));
+    }
+    private static boolean sameOwner(HubSessionEndQueue.Owner a, HubSessionEndQueue.Owner b) {
+        return a.device.equals(b.device) && a.client.equals(b.client) && a.revision.equals(b.revision);
+    }
+    private static HubSessionEndQueue endQueue(Context context) {
+        android.content.SharedPreferences preferences = context.getSharedPreferences("streamhub-session-cleanup", Context.MODE_PRIVATE);
+        return new HubSessionEndQueue(new HubSessionEndQueue.Storage() {
+            @Override public String read() { return preferences.getString("pendingRemoteEnd", ""); }
+            @Override public boolean write(String value) { return preferences.edit().putString("pendingRemoteEnd", value).commit(); }
+        });
+    }
+    static boolean retryPending(Context context, HubControlClient control, JSONObject info,
+                                HubSessionEndQueue.Cancellation cancellation) throws Exception {
+        synchronized (endQueueGate) {
+            HubSessionEndQueue.Owner current = owner(new HubStore(context));
+            if (!current.device.equals(info.optString("deviceId"))) throw new IllegalStateException("Binding changed before session cleanup");
+            return endQueue(context).retry(current, supportsBackendRelease(info),
+                    control::requestSessionEnd, cancellation);
+        }
     }
     public static void endPrepared(Context context, String host, String leaseId, String mode, String requestId) {
         HubSessionLease lease = leases.get(leaseId);

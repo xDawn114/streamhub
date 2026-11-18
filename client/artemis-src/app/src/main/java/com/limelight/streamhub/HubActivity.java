@@ -39,9 +39,8 @@ import android.Manifest;
 import android.os.Build;
 import android.content.res.Configuration;
 import org.json.JSONObject;
-import com.limelight.PcView;
+import com.limelight.Game;
 import com.limelight.R;
-import com.limelight.preferences.StreamSettings;
 import com.limelight.profiles.ProfilesManager;
 import com.limelight.streamhub.networking.EmbeddedNetwork;
 import com.limelight.streamhub.networking.EmbeddedVpnService;
@@ -65,10 +64,11 @@ public final class HubActivity extends Activity {
     private HubStore store;
     private HubUpdates updates;
     private final Runnable checkAppUpdates = () -> { if (this.foreground && !this.busy && updates != null) updates.maybeCheck(); };
-    private TextView status, computerName, computerDetail, networkStatus;
+    private TextView status, computerName, networkStatus;
     private TextView lastConnectionSummary, homeChannel, networkDetails;
     private TextView shortcutsState;
-    private TextView deviceState;
+    private TextView deviceState, detailsState,previewCaption;
+    private ImageView homePreview, detailsPreview;
     private View deviceStateDot;
     private boolean computerOnline, lastOperationFailed;
     private boolean presenceChecking;
@@ -91,6 +91,15 @@ public final class HubActivity extends Activity {
     private Button loginAccountButton, authorizationButton, copyAuthorizationButton, connectNetworkButton,
             disconnectNetworkButton, logoutAccountButton;
     private TextView bindingSummary;
+    private TextView bindingFeedback, accountFeedback;
+    private Button checkComputerButton, searchNearbyButton;
+    private boolean searchingNearby;
+    private boolean renderingProvider;
+    private boolean providerChoicePending;
+    private int accountParentPage;
+    private boolean fullBindingOpen;
+    private Object pageBack;
+    private android.widget.PopupMenu homeMenu;
     private LinearLayout nearbyList;
     private TextView nearbyStatus;
     private HubLanDiscovery lanDiscovery;
@@ -133,14 +142,15 @@ public final class HubActivity extends Activity {
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BACKGROUND));
         getWindow().getDecorView().setBackgroundColor(BACKGROUND);
     }
-    private final Runnable poll = new Runnable() { @Override public void run() { if (foreground) { refreshNetwork(); refreshComputerPresence(); main.postDelayed(this, 3000); } } };
+    private final Runnable poll = new Runnable() { @Override public void run() { if (foreground) { refreshNetwork(); refreshComputerPresence(); main.postDelayed(this, Game.isHubConnectionStopping() ? 500 : 3000); } } };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); HubNavigation.prepareWindow(this); store = new HubStore(this); updates = HubUpdates.get(this); network = EmbeddedNetwork.get(this); refreshPalette();
+        if (state != null) { currentPage = state.getInt("hubPage", 0); accountParentPage = state.getInt("hubAccountParent", 0); }
         build();
         if (HubReceiverService.isEnabled(this) && store.bound()) HubReceiverService.enable(this, true);
         handleReceiverIntent(getIntent());
-        if (getIntent().hasExtra("HubPage")) showPage(getIntent().getIntExtra("HubPage", 0));
+        if (state == null && getIntent().hasExtra("HubPage")) showPage(getIntent().getIntExtra("HubPage", 0));
         if (getIntent().getBooleanExtra("HubReconnect", false)) {
             int degrees = getIntent().getIntExtra("HubOrientation", 0);
             String reconnectLink = getIntent().getStringExtra("HubLink");
@@ -169,10 +179,9 @@ public final class HubActivity extends Activity {
         }
     }
     @Override protected void onResume() {
-        super.onResume(); refreshShortcutsState(); main.postDelayed(() -> { if(foreground)refreshShortcutsState(); },600); foreground = true; main.removeCallbacks(poll); main.post(poll);
+        super.onResume(); mediaState="";nextPresenceAt=0;renderDeviceState();refreshPreview();refreshShortcutsState(); main.postDelayed(() -> { if(foreground)refreshShortcutsState(); },600); foreground = true; main.removeCallbacks(poll); main.post(poll);
         HubReceiverService.listen(this::showPcRequest);
         if (!busy && activeCoordinator == null) {
-            boolean returning = "true".equals(store.get("sessionWasLaunched", "false"));
             store.put("sessionWasLaunched", "false");
             status.setVisibility(store.bound() ? View.GONE : View.VISIBLE);
             if (!store.bound()) showProgress("请先绑定电脑。");
@@ -191,8 +200,9 @@ public final class HubActivity extends Activity {
         build();
         showPage(currentPage);
     }
-    @Override protected void onPause() { foreground = false; if (lanDiscovery != null) lanDiscovery.stop(); cancelLocalBinding.set(true); if (localBinding != null) localBinding.cancel(); if (presenceCoordinator != null) presenceCoordinator.cancel(); HubReceiverService.listen(null); dismissPcRequest(); main.removeCallbacks(poll); super.onPause(); }
+    @Override protected void onPause() { foreground = false; searchingNearby = false; if (searchNearbyButton != null) { searchNearbyButton.setEnabled(!busy); searchNearbyButton.setText("查找附近电脑"); } if (lanDiscovery != null) lanDiscovery.stop(); cancelLocalBinding.set(true); if (localBinding != null) localBinding.cancel(); if (presenceCoordinator != null) presenceCoordinator.cancel(); HubReceiverService.listen(null); dismissPcRequest(); main.removeCallbacks(poll); super.onPause(); }
     @Override protected void onDestroy() {
+        if (Build.VERSION.SDK_INT >= 33 && pageBack != null) Api33Back.unregister(this, pageBack);
         main.removeCallbacks(checkAppUpdates); HubUpdates.setPreparing(false);
         if (activeCoordinator != null) activeCoordinator.cancel();
         if (presenceCoordinator != null) presenceCoordinator.cancel();
@@ -200,6 +210,47 @@ public final class HubActivity extends Activity {
         FallbackWait pending = pendingFallback;
         if (pending != null) completeFallback(pending, Collections.emptyList(), new java.io.IOException("连接界面已关闭。"));
         worker.shutdown(); main.removeCallbacks(poll); super.onDestroy();
+    }
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putInt("hubPage", currentPage); state.putInt("hubAccountParent", accountParentPage);
+        super.onSaveInstanceState(state);
+    }
+    @Override public void onBackPressed() {
+        if (homeMenu != null) { homeMenu.dismiss(); homeMenu = null; return; }
+        if (currentPage == 6) { showPage(0); return; }
+        if (currentPage == 5) { showPage(2); return; }
+        if (currentPage == 4) { showPage(accountParentPage); return; }
+        if (currentPage != 0) { showPage(0); return; }
+        // Keep the root page visible instead of returning to the app that launched this task.
+    }
+    private static final class Api33Back {
+        static Object register(Activity activity, Runnable action) {
+            android.window.OnBackInvokedCallback callback = action::run;
+            activity.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback);
+            return callback;
+        }
+        static void unregister(Activity activity, Object callback) {
+            activity.getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback((android.window.OnBackInvokedCallback) callback);
+        }
+    }
+    private void openAccount() { accountParentPage = currentPage == 2 ? 2 : 0; showPage(4); }
+    private void pageHeader(LinearLayout parent, String title, String backLabel) {
+        LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+        android.widget.ImageButton back = new android.widget.ImageButton(this);
+        back.setImageResource(R.drawable.ic_hub_back); back.setImageTintList(android.content.res.ColorStateList.valueOf(TEXT));
+        back.setContentDescription(backLabel); back.setPadding(dp(12), dp(12), dp(12), dp(12));
+        GradientDrawable feedback = new GradientDrawable(); feedback.setColor(Color.WHITE);
+        back.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(RIPPLE), null, feedback));
+        back.setOnClickListener(v -> onBackPressed()); header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView heading = label(title, 24, TEXT); heading.setTypeface(null, Typeface.BOLD);
+        heading.setGravity(Gravity.CENTER_VERTICAL); heading.setIncludeFontPadding(false);
+        header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        parent.addView(header, new LinearLayout.LayoutParams(-1, -2)); gap(parent, 8);
+    }
+    private TextView pageFeedback(LinearLayout parent) {
+        TextView feedback = label("", 14, TEXT); feedback.setVisibility(View.GONE);
+        feedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        parent.addView(feedback, new LinearLayout.LayoutParams(-1, -2)); return feedback;
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private LinearLayout column() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); return view; }
@@ -318,11 +369,15 @@ public final class HubActivity extends Activity {
     }
     private void gap(LinearLayout parent, int height) { View gap = new View(this); parent.addView(gap, new LinearLayout.LayoutParams(1, dp(height))); }
     private LinearLayout card(String title) {
-        LinearLayout card = column(); card.setPadding(0, dp(12), 0, dp(8));
-        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2); size.bottomMargin = dp(12); content.addView(card, size);
-        View divider = new View(this); divider.setBackgroundColor(BORDER); card.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
-        TextView heading = label(title, 13, ACCENT_DARK); heading.setTypeface(null, Typeface.BOLD);
-        LinearLayout.LayoutParams headingSize = new LinearLayout.LayoutParams(-1, -2); headingSize.topMargin = dp(18); headingSize.bottomMargin = dp(8); card.addView(heading, headingSize); return card;
+        LinearLayout section = column();
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2); size.bottomMargin = dp(16); content.addView(section, size);
+        if (!title.isEmpty()) {
+            TextView heading = label(title, 13, ACCENT_DARK); heading.setTypeface(null, Typeface.BOLD);
+            LinearLayout.LayoutParams headingSize = new LinearLayout.LayoutParams(-1, -2); headingSize.topMargin = dp(12); headingSize.bottomMargin = dp(8); section.addView(heading, headingSize);
+        }
+        LinearLayout card = column(); card.setPadding(dp(16), dp(8), dp(16), dp(12));
+        GradientDrawable background = new GradientDrawable(); background.setColor(SURFACE); background.setCornerRadius(dp(16));
+        card.setBackground(background); card.setElevation(0); section.addView(card, new LinearLayout.LayoutParams(-1,-2)); return card;
     }
     private LinearLayout nestedCard(String title) {
         LinearLayout card = column(); card.setPadding(0, dp(12), 0, dp(12));
@@ -354,7 +409,7 @@ public final class HubActivity extends Activity {
         final View[] holder=new View[1];
         holder[0]=settingLink(parent,title,"",v->{
             AlertDialog.Builder dialog=HubStreamUi.hubDialog(this).setTitle(title);
-            if(note!=null)dialog.setNeutralButton("说明",(d,w)->HubStreamUi.hubDialog(this).setTitle(title).setMessage(note).setPositiveButton("关闭",null).show());
+            if(note!=null)dialog.setNeutralButton("说明",(d,w)->HubStreamUi.hubDialog(this).setTitle(title).setMessage(note).setPositiveButton("取消",null).show());
             dialog.setSingleChoiceItems(values,choice[0],(d,which)->{
                 choice[0]=which;settingValue(holder[0],values[which]);d.dismiss();changed.accept(which);
             }).setNegativeButton("取消",null).show();
@@ -369,15 +424,10 @@ public final class HubActivity extends Activity {
     /** Compact entry cards keep the common actions visible without a long settings scroll. */
     private View moduleCell(String title, String detail, boolean primary, View.OnClickListener action) {
         LinearLayout cell = column();
-        cell.setGravity(Gravity.CENTER_VERTICAL);
+        cell.setGravity(Gravity.CENTER);
         cell.setPadding(dp(16), dp(14), dp(16), dp(14));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(primary ? SELECTED : FIELD);
-        bg.setCornerRadius(dp(12));
-        bg.setStroke(dp(1), primary ? ACCENT_DARK : BORDER);
-        cell.setBackground(new android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(RIPPLE), bg, null));
-        TextView name = label(title, 16, primary ? ACCENT_DARK : TEXT);
+        cell.setBackground(moduleBackground(primary,false));
+        TextView name = label(title, 16, primary ? HubTheme.onAccent(this) : ACCENT_DARK); name.setGravity(Gravity.CENTER);
         name.setTypeface(null, Typeface.BOLD);
         TextView caption = label(detail, 12, MUTED);
         caption.setMaxLines(2);
@@ -387,8 +437,14 @@ public final class HubActivity extends Activity {
         cell.setClickable(true);
         cell.setFocusable(true);
         cell.setOnClickListener(action);
-        modeActions.add(cell);
+        cell.setTag(Boolean.valueOf(primary));modeActions.add(cell);
         return cell;
+    }
+    private android.graphics.drawable.Drawable moduleBackground(boolean primary,boolean disabled) {
+        GradientDrawable face=new GradientDrawable();
+        face.setColor(disabled?FIELD:primary?HubTheme.primary(this):SELECTED);face.setCornerRadius(dp(12));
+        if(disabled)face.setStroke(dp(1),BORDER);
+        return new RippleDrawable(android.content.res.ColorStateList.valueOf(RIPPLE),face,null);
     }
     private void moduleRow(LinearLayout parent, View first, View second) {
         HubWindowLayout.ActionRow row = new HubWindowLayout.ActionRow(this, 176, 12);
@@ -469,13 +525,16 @@ public final class HubActivity extends Activity {
         return bounds.width() > bounds.height();
     }
     private void showPage(int pageIndex) {
-        if (pageSlot == null || pageIndex < 0 || pageIndex > 2) return;
+        if (pageSlot == null || pageIndex < 0 || pageIndex > 6 || pageIndex == 3) return;
         currentPage = pageIndex;
-        for (int i = 0; i < pageSlot.getChildCount(); i++) pageSlot.getChildAt(i).setVisibility(i == pageIndex ? View.VISIBLE : View.GONE);
-        View selected = pageSlot.getChildAt(pageIndex);
+        int slot = pageIndex == 6 ? 5 : pageIndex == 4 ? 3 : pageIndex == 5 ? 4 : pageIndex;
+        for (int i = 0; i < pageSlot.getChildCount(); i++) pageSlot.getChildAt(i).setVisibility(i == slot ? View.VISIBLE : View.GONE);
+        View selected = pageSlot.getChildAt(slot);
         selected.requestFocus();
-        if (selected instanceof ScrollView) selected.post(() -> ((ScrollView)selected).scrollTo(0, 0));
-        if (navigation != null) navigation.select(pageIndex);
+        if (navigation != null) navigation.select(pageIndex == 6 ? 0 : pageIndex == 4 ? accountParentPage : pageIndex == 5 ? 2 : pageIndex);
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (pageBack == null) pageBack = Api33Back.register(this, this::onBackPressed);
+        }
         if(pageIndex==2)refreshShortcutsState();
     }
     private void build() {
@@ -484,11 +543,14 @@ public final class HubActivity extends Activity {
         FrameLayout page = new FrameLayout(this); pageRoot = page;
         page.setFocusableInTouchMode(true); page.setBackgroundColor(BACKGROUND); setContentView(page); page.requestFocus();
         pageSlot = new FrameLayout(this);
-        LinearLayout home = column(), connection = column(), settings = column();
+        LinearLayout home = column(), connection = column(), settings = column(), accountPage = column(), advancedPage = column(), devicePage=column();
         HubWindowLayout homeLayout = HubWindowLayout.of(this);
-        pageSlot.addView(pageScroll(home, homeLayout.widthDp > homeLayout.heightDp ? 840 : 640, true), new FrameLayout.LayoutParams(-1, -1));
+        pageSlot.addView(pageScroll(home), new FrameLayout.LayoutParams(-1, -1));
         pageSlot.addView(pageScroll(connection), new FrameLayout.LayoutParams(-1, -1));
-        pageSlot.addView(pageScroll(settings, 680), new FrameLayout.LayoutParams(-1, -1));
+        pageSlot.addView(pageScroll(settings), new FrameLayout.LayoutParams(-1, -1));
+        pageSlot.addView(pageScroll(accountPage), new FrameLayout.LayoutParams(-1, -1));
+        pageSlot.addView(pageScroll(advancedPage), new FrameLayout.LayoutParams(-1, -1));
+        pageSlot.addView(pageScroll(devicePage),new FrameLayout.LayoutParams(-1,-1));
         navigation = new HubNavigation(this, pageSlot, currentPage, index -> {
             if (index == 3) HubFilesActivity.open(this); else showPage(index);
         });
@@ -498,18 +560,25 @@ public final class HubActivity extends Activity {
         LinearLayout homeHeader = new LinearLayout(this); homeHeader.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = label("全部设备", 24, TEXT); title.setTypeface(null, Typeface.BOLD); homeHeader.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         Button add = textButton(homeHeader, HubWindowLayout.of(this).compact() ? "+" : "+ 添加电脑", ACCENT_DARK, v -> showPage(1)); add.setContentDescription("添加电脑"); add.setGravity(Gravity.CENTER); add.setLayoutParams(new LinearLayout.LayoutParams(HubWindowLayout.of(this).compact() ? dp(48) : -2, dp(48)));
-        Button more = textButton(homeHeader, "⋯", TEXT, v -> HubStreamUi.hubDialog(this).setItems(new String[]{"账号与连接", "连接诊断", "使用手册"}, (d, which) -> { if (which == 0) showPage(1); else if(which == 1) showConnectionDiagnostics(); else showManual(); }).show());
+        Button more = textButton(homeHeader, "⋯", TEXT, v -> {
+            android.widget.PopupMenu menu = new android.widget.PopupMenu(HubStreamUi.hubContext(this), v);
+            menu.getMenu().add("连接诊断").setOnMenuItemClickListener(item -> { showConnectionDiagnostics(); return true; });
+            homeMenu = menu;
+            menu.setOnDismissListener(closed -> { if (homeMenu == closed) homeMenu = null; });
+            menu.show();
+        });
         more.setContentDescription("更多"); more.setGravity(Gravity.CENTER); more.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48)));
         home.addView(homeHeader, new LinearLayout.LayoutParams(-1, -2)); gap(home, 8);
         LinearLayout computer = column(); computer.setPadding(dp(20),dp(20),dp(20),dp(20));
-        GradientDrawable computerBg = new GradientDrawable(); computerBg.setColor(SURFACE);computerBg.setCornerRadius(dp(20));computerBg.setStroke(dp(1),BORDER);computer.setBackground(computerBg);
+        GradientDrawable computerBg = new GradientDrawable(); computerBg.setColor(SURFACE);computerBg.setCornerRadius(dp(20));computer.setBackground(computerBg);computer.setElevation(0);
         LinearLayout.LayoutParams computerSize = new LinearLayout.LayoutParams(-1,-2);computerSize.topMargin=dp(16);home.addView(computer,computerSize);
         LinearLayout identity = new LinearLayout(this); identity.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView icon = new ImageView(this); icon.setImageResource(R.drawable.ic_hub_computer);
+        ImageView icon = new ImageView(this);homePreview=icon;icon.setImageResource(R.drawable.ic_hub_computer);
         icon.setImageTintList(android.content.res.ColorStateList.valueOf(ACCENT_DARK)); icon.setPadding(dp(12),dp(12),dp(12),dp(12));
         GradientDrawable iconBg = new GradientDrawable(); iconBg.setColor(SELECTED); iconBg.setCornerRadius(dp(8)); icon.setBackground(iconBg);
         icon.setContentDescription("电脑");
-        identity.addView(icon, new LinearLayout.LayoutParams(dp(54), dp(54)));
+        identity.addView(icon, new LinearLayout.LayoutParams(dp(homeLayout.compact()?72:112),dp(70)));
+        identity.setClickable(true);identity.setFocusable(true);identity.setContentDescription("打开已绑定电脑详情");identity.setOnClickListener(v->showPage(6));
         LinearLayout identityText = column(); LinearLayout.LayoutParams nameSize = new LinearLayout.LayoutParams(0, -2, 1); nameSize.leftMargin = dp(14); identity.addView(identityText, nameSize);
         computerName = label(store.get("deviceName", "未绑定电脑"), 20, TEXT); computerName.setTypeface(null, Typeface.BOLD);
         computerName.setMaxLines(1); computerName.setEllipsize(android.text.TextUtils.TruncateAt.END); identityText.addView(computerName);
@@ -517,35 +586,18 @@ public final class HubActivity extends Activity {
         deviceStateDot = new View(this); deviceStateDot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); stateRow.addView(deviceStateDot, new LinearLayout.LayoutParams(dp(8), dp(8)));
         deviceState = label("已绑定 · 待检查", 14, MUTED); LinearLayout.LayoutParams stateSize = new LinearLayout.LayoutParams(-2, -2); stateSize.leftMargin = dp(7); stateRow.addView(deviceState, stateSize); identityText.addView(stateRow);
         computer.addView(identity); gap(computer, 18);
-        computerDetail = label("", 14, MUTED); computerDetail.setSingleLine(true); computerDetail.setMaxLines(1);
-        computerDetail.setEllipsize(android.text.TextUtils.TruncateAt.END); computerDetail.setPadding(dp(12), dp(9), dp(12), dp(9));
-        GradientDrawable addressBg = new GradientDrawable(); addressBg.setColor(FIELD); addressBg.setCornerRadius(dp(8)); computerDetail.setBackground(addressBg);
-        computerDetail.setMinHeight(dp(48)); computerDetail.setGravity(Gravity.CENTER_VERTICAL); computerDetail.setClickable(true); computerDetail.setFocusable(true);
-        computerDetail.setOnClickListener(v -> {
-            List<String> annotated = new ArrayList<>();
-            List<HubAddressLabels.Link> links = HubAddressLabels.currentLinks();
-            String current = computerOnline ? presenceHost : "";
-            for (String address : HubRoutes.usableAddresses(bindingAddresses())) annotated.add(HubAddressLabels.line(address, current, links));
-            String addresses = android.text.TextUtils.join("\n\n", annotated);
-            String detail = addresses.isEmpty() ? "尚未发现可用的 IPv4 地址" : addresses;
-            if (store.bound()) detail += "\n\n已绑定，可检查电脑状态或开始连接。";
-            HubStreamUi.hubDialog(this).setTitle("连接地址").setMessage(detail)
-                .setPositiveButton("关闭", null).show();
-        });
-        computerDetail.setText(""); computerDetail.setContentDescription("电脑详情");
-        android.graphics.drawable.Drawable infoIcon=getDrawable(R.drawable.ic_hub_info);infoIcon.setTint(MUTED);
-        computerDetail.setCompoundDrawablesWithIntrinsicBounds(infoIcon,null,null,null); computerDetail.setGravity(Gravity.CENTER);
-        computerDetail.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48))); identity.addView(computerDetail); updateComputerAddress(); gap(computer, 10);
+        computer.setOnClickListener(v->showPage(6)); computer.setFocusable(true);
         moduleRow(computer,
                 moduleCell("远程控制", "查看并操作电脑主屏", true, v -> startSession("remote", "auto", false, 0)),
-                moduleCell("用作扩展屏", "作为电脑第二块屏幕", false, v -> HubStreamUi.hubDialog(this)
-                        .setTitle("扩展屏连接方式").setItems(new String[]{"无线网络", "USB 网络共享"},
+                moduleCell("用作副屏", "作为电脑第二块屏幕", false, v -> HubStreamUi.hubDialog(this)
+                        .setTitle("副屏连接方式").setItems(new String[]{"无线网络", "USB 网络共享"},
                             (dialog, which) -> startSession("tablet", which == 0 ? "lan" : "usb", false, selectedOrientation())).show()));
 
         gap(computer,20);
         View connectionDivider=new View(this);connectionDivider.setBackgroundColor(BORDER);computer.addView(connectionDivider,new LinearLayout.LayoutParams(-1,dp(1)));gap(computer,16);
         homeChannel = label("",13,MUTED);computer.addView(homeChannel);gap(computer,8);
         lastConnectionSummary = label("",13,MUTED);computer.addView(lastConnectionSummary);refreshDiagnosticsCard();updateComputerAddress();
+        textButton(computer,"查看设备详情 ›",ACCENT_DARK,v->showPage(6));
         status = label(store.bound() ? "" : "点“+ 添加电脑”绑定。", 14, MUTED);
         status.setVisibility(store.bound() ? View.GONE : View.VISIBLE);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); computer.addView(status); renderDeviceState();
@@ -556,19 +608,22 @@ public final class HubActivity extends Activity {
         cancelConnection.setVisibility(View.GONE);
 
         content = connection;
-        LinearLayout connectionHeader = new LinearLayout(this); connectionHeader.setGravity(Gravity.CENTER_VERTICAL);
-        Button backHome = textButton(connectionHeader, "‹", ACCENT_DARK, v -> showPage(0)); backHome.setContentDescription("返回全部设备"); backHome.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView connectionTitle = label("添加电脑", 24, TEXT); connectionTitle.setTypeface(null, Typeface.BOLD); connectionHeader.addView(connectionTitle); connection.addView(connectionHeader); gap(connection, 8);
+        pageHeader(connection, "添加电脑", "返回全部设备");
+        bindingFeedback = pageFeedback(connection);
         buildNearbyComputers();
-        LinearLayout binding = card("设备绑定");
+        LinearLayout binding = card("当前绑定");
         bindingSummary = label("", 15, TEXT); binding.addView(bindingSummary);
         bindingForm = column(); binding.addView(bindingForm);
-        button(binding, "绑定 / 重新绑定", false, v -> bindingForm.setVisibility(bindingForm.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
+        textButton(binding, "使用完整绑定码", ACCENT_DARK, v -> { fullBindingOpen = !fullBindingOpen; bindingForm.setVisibility(fullBindingOpen ? View.VISIBLE : View.GONE); });
         hosts = field(bindingForm, "电脑地址", "输入电脑地址", false); hosts.setId(View.generateViewId()); hosts.setContentDescription("电脑地址"); hosts.setText(bindingAddresses());
         invitation = field(bindingForm, "电脑端设备绑定码", "粘贴电脑端显示的绑定码", true); invitation.setContentDescription("电脑端设备绑定码"); invitation.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
-        button(bindingForm, "保存并验证绑定", true, v -> bindComputer());
+        button(bindingForm, "验证并绑定", true, v -> bindComputer());
+        checkComputerButton = null;
         refreshBindingSummary();
-        button(binding, "检查电脑状态", false, v -> run(() -> { new HubSessionCoordinator(this, this::showProgress).check(); return "电脑在线，可以连接。"; }));
+
+        content = accountPage;
+        pageHeader(accountPage, "账号与连接", "返回上一级");
+        accountFeedback = pageFeedback(accountPage);
         buildProviderCard();
         LinearLayout account = card("账号与异地连接"); networkStatus = label("正在读取异地网络状态…", 14, MUTED); account.addView(networkStatus);
         networkDetails = label("", 14, TEXT); networkDetails.setPadding(dp(12), dp(9), dp(12), dp(9));
@@ -576,7 +631,7 @@ public final class HubActivity extends Activity {
         GradientDrawable networkDetailBg = new GradientDrawable(); networkDetailBg.setColor(FIELD); networkDetailBg.setCornerRadius(dp(8)); networkDetails.setBackground(networkDetailBg);
         networkDetails.setVisibility(View.GONE); networkDetails.setOnClickListener(v -> { revealNetworkDetails = !revealNetworkDetails; renderNetworkDetails(lastNetworkState); }); account.addView(networkDetails);
         remoteAccount = column(); account.addView(remoteAccount);
-        loginAccountButton = button(remoteAccount, "登录连接账号", false, v -> { showProgress("正在获取账号授权地址…"); setBusy(true); network.login((state, error) -> { if (!isDestroyed()) setBusy(false); renderNetwork(state, error); if (state != null && !state.authorizationUrl.isEmpty()) openAuthorization(); }); });
+        loginAccountButton = button(remoteAccount, "登录连接账号", false, v -> loginAccount());
         authorizationButton = button(remoteAccount, "打开账号授权页", false, v -> openAuthorization());
         copyAuthorizationButton = button(remoteAccount, "复制授权链接", false, v -> { if (authorizationUrl.isEmpty()) { showProgress("请先获取授权地址。"); return; } ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("我控制账号授权", authorizationUrl)); showProgress("授权链接已复制。"); });
         connectNetworkButton = button(remoteAccount, "连接异地网络", true, v -> { Intent consent = network.prepareVpn(); if (consent != null) startActivityForResult(consent, 81); else network.connect(this::renderNetwork); });
@@ -584,7 +639,9 @@ public final class HubActivity extends Activity {
         logoutAccountButton = button(account, "退出当前账号", false, v -> HubStreamUi.hubDialog(this).setTitle("退出当前连接账号？")
                 .setMessage("退出后可登录其他账号；电脑绑定和本地通道设置会保留。")
                 .setNegativeButton("取消", null).setPositiveButton("退出并切换", (dialog, which) -> { authorizationUrl = ""; network.logout(this::renderNetwork); }).show());
-        gap(account, 12); account.addView(label("账号内的电脑", 15, TEXT)); peerList = column(); account.addView(peerList);
+        boolean accountRequired = store.transport().transport().usesAccount();
+        remoteAccount.setVisibility(accountRequired ? View.VISIBLE : View.GONE); updateAccountActions(accountRequired, false, false);
+        gap(account, 12); account.addView(label("账号内的电脑", 15, TEXT)); account.addView(label("离线电脑可从本机列表移除；彻底删除账号内设备需到相应账号后台。",13,MUTED)); peerList = column(); account.addView(peerList);
 
         content = settings;
         TextView settingsTitle = label("设置", 24, TEXT); settingsTitle.setTypeface(null, Typeface.BOLD); settings.addView(settingsTitle); gap(settings, 18);
@@ -592,11 +649,11 @@ public final class HubActivity extends Activity {
         choiceSetting(appearance,"应用主题",new String[]{getString(R.string.hub_theme_system),getString(R.string.hub_theme_light),getString(R.string.hub_theme_dark)},HubTheme.mode(this),position->{
             if(position!=HubTheme.mode(this)){HubTheme.setMode(this,position);refreshPalette();build();}
         });
+        LinearLayout connectionSettings = card("连接");
+        settingLink(connectionSettings, "账号与连接", "", v -> openAccount());
 
-        LinearLayout receiver = card("电脑主动副屏");
-        receiverSwitch = new Switch(this); receiverSwitch.setText("接收电脑副屏请求"); receiverSwitch.setTextColor(TEXT); receiverSwitch.setTextSize(16); receiverSwitch.setPadding(0, dp(8), 0, dp(8));
-        receiverSwitch.setThumbTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{ACCENT_DARK, MUTED}));
-        receiverSwitch.setTrackTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{ACCENT, BORDER}));
+        LinearLayout receiver = card("副屏");
+        receiverSwitch = new HubSwitch(this); receiverSwitch.setText("接收电脑副屏请求"); receiverSwitch.setTextColor(TEXT); receiverSwitch.setTextSize(16); receiverSwitch.setPadding(0, dp(8), 0, dp(8));
         receiverSwitch.setChecked(HubReceiverService.isEnabled(this)); receiver.addView(receiverSwitch, new LinearLayout.LayoutParams(-1, dp(56)));
         receiverSwitch.setOnCheckedChangeListener((view, enabled) -> {
             if (enabled && !store.bound()) { receiverSwitch.setChecked(false); showProgress("请先绑定电脑。"); return; }
@@ -606,17 +663,20 @@ public final class HubActivity extends Activity {
             try { HubReceiverService.enable(this, enabled); showProgress(enabled ? "已开启接收；电脑可在副屏页面发起请求。" : "已关闭接收电脑副屏请求。"); }
             catch (RuntimeException e) { receiverSwitch.setChecked(false); showProgress("暂时无法启用接收，请重新打开应用后重试。"); }
         });
-        LinearLayout display = card("显示与串流");
-        choiceSetting(display,"副屏方向",new String[]{"自动","横屏","竖屏","反向横屏","反向竖屏"},selectedOrientationIndex,position->selectedOrientationIndex=position);
-        settingLink(display, "远程控制画质", "三档预设与高级选项；串流中可从顶部控制菜单调整", v -> showQualityPresets());
+        try { selectedOrientationIndex = Math.max(0, Math.min(4, Integer.parseInt(store.get("tabletOrientation", "0")))); } catch (NumberFormatException ignored) { selectedOrientationIndex = 0; }
+        choiceSetting(receiver,"平板发起时的方向",new String[]{"自动","横屏","竖屏","反向横屏","反向竖屏"},selectedOrientationIndex,position->{selectedOrientationIndex=position;store.put("tabletOrientation", Integer.toString(position));},"仅用于平板点击“用作副屏”。电脑发起时采用电脑端的方向设置。");
 
         final View[] tabletQualityRow = new View[1];
-        tabletQualityRow[0] = settingLink(display, "扩展屏画质", tabletQualityLabel(), v -> HubStreamUi.hubDialog(this)
-                .setTitle("扩展屏画质 · 下次连接生效")
+        tabletQualityRow[0] = settingLink(receiver, "副屏画质", tabletQualityLabel(), v -> HubStreamUi.hubDialog(this)
+                .setTitle("副屏画质 · 下次连接生效")
                 .setSingleChoiceItems(new String[]{"稳定优先", "清晰优先（需要更好网络）"}, "clear".equals(store.get("tabletQuality", "stable")) ? 1 : 0,
                         (dialog, which) -> { store.put("tabletQuality", which == 1 ? "clear" : "stable");
                             ((TextView)((LinearLayout)((LinearLayout)tabletQualityRow[0]).getChildAt(0)).getChildAt(1)).setText(tabletQualityLabel()); dialog.dismiss(); }).setNegativeButton("取消", null).show());
-        settingLink(display, "USB 网络共享设置", "打开系统网络设置，配置 USB 直连副屏", v -> { try { startActivity(new Intent("android.settings.TETHER_SETTINGS")); } catch (Exception e) { startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS)); } });
+        settingLink(receiver, "USB 网络共享设置", "", v -> { try { startActivity(new Intent("android.settings.TETHER_SETTINGS")); } catch (Exception e) { startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS)); } });
+        LinearLayout display = card("远程控制");
+        settingLink(display, "远程控制画质", "", v -> showQualityPresets());
+        final View[] panelMode={null};
+        panelMode[0]=settingLink(display,"面板展开方式",HubPanelLayout.label(this),v->HubPanelLayout.show(this,()->settingValue(panelMode[0],HubPanelLayout.label(this))));
         LinearLayout sound = card("声音输出");
 
         android.content.SharedPreferences audioPrefs=androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
@@ -632,44 +692,256 @@ public final class HubActivity extends Activity {
         shortcutsState = (TextView)((LinearLayout)((LinearLayout)shortcutsRow).getChildAt(0)).getChildAt(1);
         shortcutsState.setVisibility(View.VISIBLE); refreshShortcutsState();
         LinearLayout updateCard = card("版本与更新");
+        // Match the visible inset of the vertically centered check row.
+        updateCard.setPadding(dp(16), dp(28), dp(16), dp(12));
         updateCard.addView(new HubUpdatePanel(this, updates, () -> !busy && activeCoordinator == null), new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout advanced = card("高级与兼容");
-        settingLink(advanced, "音视频与输入高级设置", "", v -> startActivity(new Intent(this, StreamSettings.class)));
-        settingLink(advanced, "兼容主机列表", "", v -> startActivity(new Intent(this, PcView.class)));
+        LinearLayout advanced = card("高级");
+        settingLink(advanced, "音视频与输入高级设置", "", v -> showPage(5));
+        settingLink(advanced,"屏幕键盘布局","",v->startActivity(new Intent(this,HubKeyboardLayoutsActivity.class)));
+        settingLink(advanced,"兼容主机","独立管理兼容串流主机与配对",v->startActivity(new Intent(this,HubCompatibleActivity.class)));
         if (new HubLoginSecrets(this).saved() || "legacy".equals(store.hostPolicyMode()))
-            settingLink(advanced, "旧版登录设置", "", v -> HubStreamUi.hubDialog(this).setTitle("旧版登录设置").setView(HubLoginSettings.view(this,false,null)).setPositiveButton("关闭",null).show());
+            settingLink(advanced, "旧版登录设置", "", v -> HubStreamUi.hubDialog(this).setTitle("旧版登录设置").setView(HubLoginSettings.view(this,false,null)).setPositiveButton("取消",null).show());
         LinearLayout help = card("帮助");
         settingLink(help, "使用手册", "", v -> showManual());
         LinearLayout authorization = card("设备授权");
-        authorization.addView(label("绑定码仅用于已授权设备；重新绑定会替换当前电脑信任。", 14, MUTED));
         Button clearBinding = textButton(authorization, "清除当前电脑绑定", DANGER, v -> HubStreamUi.hubDialog(this)
                 .setTitle("清除电脑绑定？").setMessage("清除后需要重新输入电脑端绑定码，已保存的串流证书也会失效。")
                 .setNegativeButton("取消", null).setPositiveButton("清除", (dialog, which) -> {
-                    store.clearBinding(); computerOnline = false; presenceValidUntil = 0; lastOperationFailed = false; mediaState = "";
-                    computerName.setText("未绑定电脑"); computerDetail.setText(""); showProgress("电脑绑定已清除。");
+                    store.clearBinding(); refreshPreview();computerOnline = false; presenceValidUntil = 0; lastOperationFailed = false; mediaState = "";
+                    computerName.setText("未绑定电脑"); showProgress("电脑绑定已清除。");
                 }).show().getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(DANGER));
-        settings.addView(label("我控制 · iControl\n版本 " + com.limelight.BuildConfig.VERSION_NAME +
-                (com.limelight.BuildConfig.STREAMHUB_INTERNAL ? " · 内测版" : ""), 13, MUTED));
-        showPage(Math.min(currentPage, pageSlot.getChildCount() - 1));
+        settings.addView(label("我控制 · iControl", 13, MUTED));
+        content = advancedPage;
+        pageHeader(advancedPage, "音视频与输入", "返回设置");
+        buildAdvancedSettings();
+        content=devicePage;pageHeader(devicePage,store.get("deviceName","设备详情"),"返回全部设备");
+        detailsState=label("",14,MUTED);detailsState.setPadding(dp(48),0,0,dp(8));devicePage.addView(detailsState);
+        LinearLayout preview=card("");preview.setPadding(dp(16),dp(16),dp(16),dp(16));
+        FrameLayout previewArea=new FrameLayout(this);previewArea.setBackgroundColor(FIELD);
+        preview.addView(previewArea,new LinearLayout.LayoutParams(-1,dp(220)));
+        detailsPreview=new ImageView(this);detailsPreview.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        detailsPreview.setContentDescription("上次连接预览，仅保存在此平板");
+        previewArea.addView(detailsPreview,new FrameLayout.LayoutParams(-1,-1));
+        previewCaption=label("连接成功后显示预览\n仅保存在此平板",13,MUTED);previewCaption.setGravity(Gravity.CENTER);
+        previewCaption.setPadding(dp(16),dp(16),dp(16),dp(16));
+        previewArea.addView(previewCaption,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout operations=card("连接与操作");
+        moduleRow(operations,moduleCell("远程控制","进入电脑桌面",true,v->startSession("remote","auto",false,0)),
+            moduleCell("用作副屏","作为电脑第二块屏幕",false,v->startSession("tablet","auto",false,selectedOrientation())));
+        settingLink(operations,"文件传输","浏览电脑文件和传输任务",v->HubFilesActivity.open(this));
+        settingLink(operations,"连接诊断","查看最近连接记录并检查连接",v->showConnectionDiagnostics());
+        settingLink(operations,"连接地址","已绑定电脑的地址信息",v->showConnectionAddresses());
+        settingLink(operations,"设备设置","方向、画质、输入与声音",v->showPage(2));
+        LinearLayout previews=card("本机预览");
+        textButton(previews,"清除上次连接预览",DANGER,v->HubStreamUi.hubDialog(this).setTitle("清除电脑预览？")
+            .setMessage("只清除此平板缓存的预览图片；下次连接成功后会重新生成。")
+            .setNegativeButton("取消",null).setPositiveButton("清除",(d,w)->{HubDevicePreview.forget(this,store.get("deviceId",""));refreshPreview();}).show());
+        refreshPreview();renderDeviceState();
+        showPage(currentPage);
         setBusy(busy);
+    }
+    private void refreshPreview(){
+        if(homePreview==null)return;
+        android.graphics.Bitmap image=HubDevicePreview.read(this,store.get("deviceId",""));
+        if(previewCaption!=null)previewCaption.setVisibility(image==null?View.VISIBLE:View.GONE);
+        if(detailsPreview!=null)detailsPreview.setVisibility(image==null?View.INVISIBLE:View.VISIBLE);
+        for(ImageView target:new ImageView[]{homePreview,detailsPreview})if(target!=null){
+            if(image!=null){target.setPadding(0,0,0,0);target.setImageTintList(null);target.setImageBitmap(image);target.setScaleType(ImageView.ScaleType.CENTER_CROP);}
+            else{target.setImageResource(R.drawable.ic_hub_computer);target.setImageTintList(android.content.res.ColorStateList.valueOf(ACCENT_DARK));target.setScaleType(ImageView.ScaleType.CENTER_INSIDE);target.setPadding(dp(12),dp(12),dp(12),dp(12));}
+        }
+    }
+    private String actualRoute(String host) {
+        List<HubAddressLabels.Link> links = HubAddressLabels.currentLinks();
+        try {
+            HubTransports.Settings settings = store.transport();
+            return HubAddressLabels.actualRoute(host, links, settings.provider,
+                    lastNetworkState != null && lastNetworkState.vpnActive,
+                    HubRoutes.usableAddresses(settings.manualAddresses));
+        } catch (IllegalArgumentException ignored) { return HubAddressLabels.describe(host, links); }
+    }
+    private void buildAdvancedSettings() {
+        android.content.SharedPreferences prefs = HubAdvancedPreferences.active(this);
+        LinearLayout video = card("视频 · 下次连接生效");
+        final View[] fps = new View[1];
+        fps[0] = settingLink(video,"帧率","",v -> {
+            String current=HubAdvancedPreferences.active(this).getString("list_fps","60");
+            String[] values={"30","60","90","120"};int selected=4;
+            for(int i=0;i<values.length;i++)if(values[i].equals(current))selected=i;
+            HubStreamUi.hubDialog(this).setTitle("帧率")
+                .setSingleChoiceItems(new String[]{"30 FPS","60 FPS","90 FPS","120 FPS","自定义…"},selected,(d,which)->{
+                    d.dismiss();if(which==4){showCustomFrameRate(fps[0]);return;}
+                    String value=values[which];
+                    if(!HubAdvancedPreferences.save(this,java.util.Map.of("list_fps",value,"custom_refresh_rate",value)))return;
+                    store.put("qualityPreset","advanced");settingValue(fps[0],value+" FPS");
+                }).setNegativeButton("取消",null).show();
+        });
+        settingValue(fps[0],prefs.getString("list_fps","60")+" FPS");
+        final View[] bitrate = new View[1];
+        bitrate[0] = settingLink(video, "码率", "", v -> {
+            LinearLayout input = column(); input.setPadding(dp(24), dp(8), dp(24), dp(8));
+            EditText value = field(input, "码率（Mbps）", "1–150", false); value.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+            value.setText(scaledNumber(prefs.getInt("seekbar_bitrate_kbps", prefs.getInt("seekbar_bitrate",18)*1000),1000));
+            AlertDialog dialog = HubStreamUi.hubDialog(this).setTitle("码率").setView(input).setNegativeButton("取消", null).setPositiveButton("保存", null).create();
+            dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                int selected; try { selected = scaledInput(value.getText().toString(),1,150,1000); }
+                catch (IllegalArgumentException error) { value.setError("请输入1–150之间的数值，最多三位小数"); return; }
+                if (!HubAdvancedPreferences.save(this, java.util.Map.of("seekbar_bitrate_kbps", selected))) return; store.put("qualityPreset", "advanced");
+                settingValue(bitrate[0], scaledNumber(selected,1000) + " Mbps"); dialog.dismiss();
+            })); dialog.show();
+        });
+        settingValue(bitrate[0], prefs.contains("seekbar_bitrate_kbps") || prefs.contains("seekbar_bitrate")
+            ? scaledNumber(prefs.getInt("seekbar_bitrate_kbps",prefs.getInt("seekbar_bitrate",18)*1000),1000)+" Mbps" : "自动");
+        preferenceChoice(video,"视频编码","video_format",new String[]{"自动","H.264","HEVC","AV1"},new String[]{"auto","neverh265","forceh265","forceav1"},"auto");
+        preferenceChoice(video,"画面缩放","list_video_scale_mode",new String[]{"保持比例","填满画面","拉伸"},new String[]{"fit","fill","stretch"},"fit");
+        preferenceChoice(video,"帧调度","frame_pacing",new String[]{"低延迟","均衡","限制帧率","流畅优先"},new String[]{"latency","balanced","cap-fps","smoothness"},"latency");
+        preferenceNumber(video,"移动网络码率","seekbar_metered_bitrate_kbps",0,0,150,"Mbps",1000,"0为自动；仅在系统标记为按流量计费的网络上使用。");
+        preferenceToggle(video,"完整色彩范围","checkbox_full_range",false);
+        Switch hdr=preferenceToggle(video,"HDR画面","checkbox_enable_hdr",false);
+        android.view.Display display=getWindowManager().getDefaultDisplay();
+        boolean hdrAvailable=Build.VERSION.SDK_INT>=24 && display!=null && display.getHdrCapabilities()!=null && display.getHdrCapabilities().getSupportedHdrTypes().length>0;
+        hdr.setEnabled(hdrAvailable);
+        if (!hdrAvailable) hdr.setTooltipText("当前屏幕不支持 HDR。");
+        LinearLayout controls = card("输入 · 下次连接生效");
+        preferenceToggle(controls,"绝对鼠标坐标","checkbox_absolute_mouse_mode",false);
+        preferenceToggle(controls,"显示本地鼠标指针","checkbox_mouse_local_cursor",false);
+        preferenceToggle(controls,"多指手势","checkbox_multi_touch_gestures",false);
+        preferenceToggle(controls,"将鼠标侧键发送到电脑","checkbox_mouse_nav_buttons",false);
+        preferenceNumber(controls,"触控板水平灵敏度","seekbar_trackpad_sensitivity_x",100,-200,200,"%",1,"100为原速，负值反转方向，0停用此方向移动。");
+        preferenceNumber(controls,"触控板垂直灵敏度","seekbar_trackpad_sensitivity_y",100,-200,200,"%",1,null);
+        preferenceNumber(controls,"触控板拖动等待","seekbar_trackpad_drag_drop_threshold",250,0,2000,"ms",1,null);
+        preferenceToggle(controls,"触控板拖动振动反馈","checkbox_trackpad_drag_drop_vibration",false);
+        preferenceToggle(controls,"交换触控板横纵方向","checkbox_trackpad_swap_axis",false);
+        preferenceToggle(controls,"实体键盘使用标准QWERTY映射","checkbox_force_qwerty",true);
+        LinearLayout gamepadCard = card("手柄 · 下次连接生效");
+        LinearLayout gamepad=column();gamepad.setVisibility(View.GONE);
+        Button expandGamepad=textButton(gamepadCard,"展开手柄设置 ▾",ACCENT_DARK,v->{});
+        expandGamepad.setOnClickListener(v->{boolean expanded=gamepad.getVisibility()!=View.VISIBLE;
+            gamepad.setVisibility(expanded?View.VISIBLE:View.GONE);expandGamepad.setText(expanded?"收起手柄设置 ▴":"展开手柄设置 ▾");});
+        gamepadCard.addView(gamepad);
+        preferenceToggle(gamepad,"屏幕手柄","checkbox_show_onscreen_controls",false);
+        preferenceToggle(gamepad,"连接手柄时隐藏屏幕手柄","checkbox_hide_osc_when_has_gamepad",true);
+        preferenceToggle(gamepad,"多手柄分别控制","checkbox_multi_controller",true);
+        preferenceToggle(gamepad,"互换 A/B 与 X/Y 按键","checkbox_flip_face_buttons",false);
+        preferenceToggle(gamepad,"手柄触控板控制鼠标","checkbox_gamepad_touchpad_as_mouse",false);
+        preferenceNumber(gamepad,"摇杆死区","seekbar_deadzone",5,-20,20,"%",1,"正值过滤中心抖动，负值用于补偿手柄已有死区。");
+        preferenceToggle(gamepad,"USB手柄驱动","checkbox_usb_driver",true);
+        preferenceToggle(gamepad,"手柄运动传感器","checkbox_gamepad_motion_sensors",true);
+        preferenceToggle(gamepad,"屏幕手柄振动","checkbox_vibrate_osc",true);
+        preferenceToggle(gamepad,"使用平板振动反馈","checkbox_vibrate_fallback",false);
+        preferenceNumber(gamepad,"平板振动强度","seekbar_vibrate_fallback_strength",100,0,100,"%",1,null);
+        LinearLayout audio = card("声音 · 下次连接生效");
+        preferenceChoice(audio,"声道","list_audio_config",new String[]{"立体声","5.1声道","7.1声道"},new String[]{"2","51","71"},"2");
+        preferenceToggle(audio,"系统音效处理","checkbox_enable_audiofx",false);
+        LinearLayout window=card("窗口 · 下次连接生效");
+        Switch pip=preferenceToggle(window,"离开串流时使用小窗","checkbox_enable_pip",false);
+        boolean pipAvailable=Build.VERSION.SDK_INT>=26 && getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE);
+        pip.setEnabled(pipAvailable);
+        if (!pipAvailable) pip.setTooltipText("当前系统不支持画中画。");
+    }
+    private void preferenceNumber(LinearLayout parent,String title,String key,int fallback,int min,int max,String unit,int multiplier,String note) {
+        final View[] row={null};
+        java.util.function.IntFunction<String> format=value->value==0 && multiplier==1000?"自动":scaledNumber(value,multiplier)+" "+unit;
+        row[0]=settingLink(parent,title,"",v->{
+            LinearLayout input=column();input.setPadding(dp(24),dp(8),dp(24),dp(8));
+            EditText value=field(input,title+"（"+unit+"）",min+"–"+max,false);
+            value.setInputType(InputType.TYPE_CLASS_NUMBER|(min<0?InputType.TYPE_NUMBER_FLAG_SIGNED:0)|(multiplier>1?InputType.TYPE_NUMBER_FLAG_DECIMAL:0));
+            value.setText(scaledNumber(HubAdvancedPreferences.active(this).getInt(key,fallback),multiplier));
+            if(note!=null)input.addView(label(note,13,MUTED));
+            AlertDialog dialog=HubStreamUi.hubDialog(this).setTitle(title).setView(input).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+            dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button->{
+                int selected;
+                try{selected=scaledInput(value.getText().toString(),min,max,multiplier);}
+                catch(IllegalArgumentException error){value.setError("请输入"+min+"–"+max+"之间的"+(multiplier>1?"数值，最多三位小数":"整数"));return;}
+                if(!HubAdvancedPreferences.save(this,java.util.Map.of(key,selected)))return;
+                settingValue(row[0],format.apply(selected));dialog.dismiss();
+            }));dialog.show();
+        });
+        settingValue(row[0],format.apply(HubAdvancedPreferences.active(this).getInt(key,fallback)));
+    }
+    private static String scaledNumber(int value,int multiplier) {
+        return java.math.BigDecimal.valueOf(value).divide(java.math.BigDecimal.valueOf(multiplier)).stripTrailingZeros().toPlainString();
+    }
+    private static int scaledInput(String text,int min,int max,int multiplier) {
+        try {
+            java.math.BigDecimal value=new java.math.BigDecimal(text.trim());
+            if(value.compareTo(java.math.BigDecimal.valueOf(min))<0||value.compareTo(java.math.BigDecimal.valueOf(max))>0)throw new IllegalArgumentException();
+            return value.multiply(java.math.BigDecimal.valueOf(multiplier)).intValueExact();
+        } catch(ArithmeticException error) { throw new IllegalArgumentException(error); }
+    }
+    private void showCustomFrameRate(View row) {
+        android.content.SharedPreferences prefs=HubAdvancedPreferences.active(this);
+        LinearLayout input=column();input.setPadding(dp(24),dp(8),dp(24),dp(8));
+        EditText value=field(input,"帧率（FPS）","30–120",false);
+        value.setSingleLine(true);value.setInputType(InputType.TYPE_CLASS_NUMBER);value.setText(prefs.getString("list_fps","60"));
+        AlertDialog dialog=HubStreamUi.hubDialog(this).setTitle("自定义帧率").setView(input).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String selected=value.getText().toString().trim();
+            try{int fps=Integer.parseInt(selected);if(fps<30||fps>120)throw new IllegalArgumentException();}
+            catch(IllegalArgumentException error){value.setError("请输入30–120之间的整数");return;}
+            if(!HubAdvancedPreferences.save(this,java.util.Map.of("list_fps",selected,"custom_refresh_rate",selected)))return;
+            store.put("qualityPreset","advanced");settingValue(row,selected+" FPS");dialog.dismiss();
+        }));dialog.show();
+    }
+    private void preferenceChoice(LinearLayout parent, String title, String key, String[] labels, String[] values, String fallback) {
+        android.content.SharedPreferences prefs = HubAdvancedPreferences.active(this);
+        String saved = prefs.getString(key, fallback); int selected = 0;
+        for (int i = 0; i < values.length; i++) if (values[i].equals(saved)) selected = i;
+        choiceSetting(parent,title,labels,selected,position->{
+            java.util.Map<String,Object> changed = new java.util.LinkedHashMap<>(); changed.put(key, values[position]);
+            if ("list_fps".equals(key)) changed.put("custom_refresh_rate", values[position]);
+            if (!HubAdvancedPreferences.save(this, changed)) { build(); return; }
+            store.put("qualityPreset", "advanced");
+        });
+    }
+    private Switch preferenceToggle(LinearLayout parent, String title, String key, boolean fallback) {
+        android.content.SharedPreferences prefs = HubAdvancedPreferences.active(this);
+        Switch control = new HubSwitch(this); control.setText(title); control.setTextColor(TEXT); control.setTextSize(15);
+        control.setMinimumHeight(dp(56)); control.setChecked(prefs.getBoolean(key, fallback));
+        parent.addView(control, new LinearLayout.LayoutParams(-1,-2));
+        final boolean[] restoring = {false};
+        control.setOnCheckedChangeListener((button, enabled)->{
+            if (restoring[0]) return;
+            if (!HubAdvancedPreferences.save(this,java.util.Map.of(key,enabled))) {
+                restoring[0] = true; button.setChecked(!enabled); restoring[0] = false;
+            }
+        });
+        return control;
     }
     private void refreshShortcutsState() {
         if (shortcutsState != null) shortcutsState.setText(!HubSystemShortcuts.requested(this) ? "已关闭" : HubSystemShortcuts.authorized(this) ? "已开启" : "待系统授权");
     }
     private void showShortcuts() {
-        HubStreamUi.hubDialog(this).setTitle("系统快捷键")
-            .setMessage(getString(R.string.hub_shortcuts_description))
-            .setNegativeButton("关闭功能", (d, w) -> { HubSystemShortcuts.request(this, false); refreshShortcutsState(); })
-            .setNeutralButton("取消", null)
-            .setPositiveButton("前往系统授权", (d, w) -> {
-                HubSystemShortcuts.request(this, true); refreshShortcutsState();
-                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-            }).show();
+        boolean requested = HubSystemShortcuts.requested(this), authorized = HubSystemShortcuts.authorized(this);
+        AlertDialog.Builder dialog = HubStreamUi.hubDialog(this).setTitle("系统快捷键")
+            .setMessage(!requested ? "已关闭" : authorized ? "已开启并取得系统授权" : "已开启，等待系统授权")
+            .setNegativeButton("取消", null);
+        if (requested) dialog.setNeutralButton("停用快捷键", (d,w)->{HubSystemShortcuts.request(this,false);refreshShortcutsState();});
+        if (!requested || !authorized) dialog.setPositiveButton(authorized ? "开启" : "前往系统授权",(d,w)->{
+            HubSystemShortcuts.request(this,true);refreshShortcutsState();
+            if (!authorized) startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        });
+        dialog.show();
     }
     private void showManual() {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout sections = column(); sections.setPadding(dp(24), dp(8), dp(24), dp(16)); scroll.addView(sections);
+        manualSection(sections, "添加电脑", "电脑点“+ 绑定设备”，平板点“+ 添加电脑”，选择附近电脑并输入六位短码；核对两端校验码后在电脑确认。短码三分钟有效。");
+        manualSection(sections, "连接", "同一网络直接连接。外出前，在“账号与连接”中选择两端相同的异地通道并登录。");
+        manualSection(sections, "副屏", "平板点“用作副屏”；电脑发起时，先在平板开启接收请求，再在电脑“全部设备”的对应卡片点“连接副屏”。");
+        manualSection(sections, "文件", "电脑在设备权限中允许访问并选择目录。平板文件页可浏览、下载或发送；删除权限单独开启。");
+        manualSection(sections, "键盘", "Ctrl+Alt+Tab 切换电脑窗口。可选“系统快捷键”需手动授权：Alt+Tab 按住选择、松开确认，Win+Tab 打开任务视图。");
+        manualSection(sections, "停止连接", "电脑顶栏可断开连接或暂停接受连接。暂停会断开当前连接，重启后仍保持暂停。Ctrl+Alt+F12 恢复隐私屏。");
         HubStreamUi.hubDialog(this).setTitle("使用手册")
-            .setMessage("添加电脑\n电脑点“+ 绑定设备”，安卓点“+ 添加电脑”，选择附近电脑并输入六位短码；核对两端校验码后在电脑确认。短码三分钟有效。\n\n连接\n同一网络直接连接。外出前，两端选同一异地通道并完成登录。\n\n副屏\n安卓点“用作扩展屏”；电脑发起时，先在安卓开启接收请求，再在电脑顶栏选择设备。\n\n文件\n电脑在设备权限中允许访问并选择目录。安卓文件页直接浏览、下载或发送，删除权限单独开启。\n\n键盘\nCtrl+Alt+Tab 切换电脑窗口。可选“系统快捷键”需手动授权：Alt+Tab 按住选择、松开确认，Win+Tab 打开任务视图。\n\n停止连接\n电脑顶栏可断开连接或暂停接受连接。Ctrl+Alt+F12 恢复隐私屏。")
-            .setPositiveButton("关闭", null).show();
+            .setView(scroll)
+            .setPositiveButton("取消", null).show();
+        scroll.getLayoutParams().height = dp(Math.min(520, Math.max(160, (int)(HubWindowLayout.of(this).heightDp * .6f))));
+        scroll.requestLayout();
+    }
+    private void manualSection(LinearLayout parent, String title, String body) {
+        TextView heading = label(title, 18, TEXT); heading.setTypeface(null, Typeface.BOLD);
+        if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2); size.topMargin = dp(16); size.bottomMargin = dp(6);
+        parent.addView(heading, size); parent.addView(label(body, 14, TEXT));
     }
     private int selectedOrientation() { int i = selectedOrientationIndex; return i == 0 ? deviceOrientation() : (i - 1) * 90; }
     private int deviceOrientation() {
@@ -678,15 +950,51 @@ public final class HubActivity extends Activity {
         return (naturalPortrait ? new int[]{90, 0, 270, 180} : new int[]{0, 90, 180, 270})[rotation];
     }
     private interface Work { String execute() throws Exception; }
+    private void checkComputer() {
+        if (!store.bound()) { showProgress("请先添加电脑。"); return; }
+        run("正在检查电脑状态…", () -> {
+            HubSessionCoordinator checker = new HubSessionCoordinator(this, this::showProgress); activeCoordinator = checker;
+            try { return checker.checkStatus(); } finally { activeCoordinator = null; }
+        });
+    }
+    private void loginAccount() {
+        if (busy) return;
+        try {
+            if (!store.transport().transport().usesAccount()) { showProgress("当前通道无需登录账号。"); return; }
+            if (applyProvider.isEnabled()) { showProgress("请先保存并应用通道。"); return; }
+        } catch (IllegalArgumentException error) { showProgress(error.getMessage()); return; }
+        setBusy(true); loginAccountButton.setText("正在获取授权…"); showProgress("正在获取账号授权地址…");
+        network.login((state, error) -> {
+            if (isDestroyed()) return;
+            setBusy(false); loginAccountButton.setText("登录连接账号"); renderNetwork(state, error);
+            if (error != null) { showProgress(error); return; }
+            if (state == null) { showProgress("未取得账号状态，请重试。"); return; }
+            if (!authorizationUrl.isEmpty()) { showProgress("请在浏览器完成账号授权。"); openAuthorization(); }
+            else showProgress(state.loggedIn() ? "账号已登录。" : "未取得授权链接，请重试。");
+        });
+    }
     private void setBusy(boolean value) {
         HubUpdates.setPreparing(value);
-        if (provider != null) { provider.setEnabled(!value); for (int i=0;i<provider.getChildCount();i++) provider.getChildAt(i).setEnabled(!value); providerServer.setEnabled(!value); providerManual.setEnabled(!value); } busy = value; if (value && presenceCoordinator != null) presenceCoordinator.cancel(); for (Button button : actions) if (button != cancelConnection) { button.setEnabled(!value); button.setAlpha(value ? 0.5f : 1f); } for (View view : modeActions) { view.setEnabled(!value); view.setAlpha(value ? 0.5f : 1f); } renderDeviceState(); updateProviderApply(); }
-    private void run(Work work) {
-        if (busy) return; final long operation = ++operationGeneration; setBusy(true);
+        if (provider != null) { provider.setEnabled(!value); for (int i=0;i<provider.getChildCount();i++) provider.getChildAt(i).setEnabled(!value); providerServer.setEnabled(!value); providerManual.setEnabled(!value); } busy = value; if (value && presenceCoordinator != null) presenceCoordinator.cancel(); for (Button button : actions) if (button != cancelConnection) { button.setEnabled(!value); button.setAlpha(1f); } for (View view : modeActions) {
+            view.setEnabled(!value);view.setAlpha(1f);
+            if(!(view.getTag() instanceof Boolean))continue;
+            boolean primary=Boolean.TRUE.equals(view.getTag());
+            view.setBackground(moduleBackground(primary,value));
+            ((TextView)((LinearLayout)view).getChildAt(0)).setTextColor(value?MUTED:primary?HubTheme.onAccent(this):ACCENT_DARK);
+        } renderDeviceState(); updateProviderApply(); }
+    private void run(Work work) { run("正在处理…", work); }
+    private void run(String progress, Work work) {
+        if (busy) return; final long operation = ++operationGeneration; setBusy(true); showProgress(progress);
         worker.execute(() -> { String message; boolean success = false; try { message = work.execute(); success = true; } catch (java.util.concurrent.CancellationException e) { message = e.getMessage(); } catch (Exception e) { message = "未完成：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()); }
             final String result = message; final boolean succeeded = success; main.post(() -> { if (!isDestroyed() && operation == operationGeneration) { computerOnline = succeeded && store.bound(); presenceValidUntil = computerOnline ? android.os.SystemClock.elapsedRealtime() + 15000 : 0; presenceNetwork = HubNetworkStamp.current(); lastOperationFailed = !succeeded; nextPresenceAt = android.os.SystemClock.elapsedRealtime() + 12000; setBusy(false); showProgress(result); computerName.setText(store.get("deviceName", "我的电脑")); updateComputerAddress(); refreshBindingSummary(); refreshDiagnosticsCard(); if (!hosts.hasFocus()) hosts.setText(bindingAddresses()); } }); });
     }
     private void refreshComputerPresence() {
+        if (Game.isHubConnectionStopping()) {
+            // Do not cache the host's pre-disconnect snapshot for another 12 seconds.
+            nextPresenceAt = 0;
+            renderDeviceState();
+            return;
+        }
         long now = android.os.SystemClock.elapsedRealtime(); String networkKey = HubNetworkStamp.current();
         if (now >= presenceValidUntil || !networkKey.equals(presenceNetwork)) { computerOnline = false; mediaState = ""; renderDeviceState(); }
         if (busy || presenceChecking || !store.bound() || now < nextPresenceAt) return;
@@ -713,7 +1021,13 @@ public final class HubActivity extends Activity {
             });
         });
     }
-    private void showProgress(String message) { main.post(() -> { if (!isDestroyed()) { status.setText(message); status.setVisibility(View.VISIBLE); } }); }
+    private void showProgress(String message) { main.post(() -> {
+        if (isDestroyed()) return;
+        TextView target = currentPage == 1 ? bindingFeedback : currentPage == 4 ? accountFeedback : status;
+        if (target == null) return;
+        target.setText(message == null ? "操作未完成，请重试。" : message); target.setVisibility(View.VISIBLE);
+        if (currentPage == 1 || currentPage == 4) target.post(() -> target.requestRectangleOnScreen(new Rect(0, 0, target.getWidth(), target.getHeight()), true));
+    }); }
     private void refreshDiagnosticsCard() {
         if (lastConnectionSummary == null) return;
         String summary="尚无连接记录";
@@ -727,27 +1041,42 @@ public final class HubActivity extends Activity {
         lastConnectionSummary.setText(summary);
     }
     private void showConnectionDiagnostics() {
-        HubStreamUi.hubDialog(this).setTitle("最近一次连接")
-            .setView(HubStreamUi.diagnosticsView(this,"连接："+HubSessionDiagnostics.summary(this)))
-            .setPositiveButton("关闭",null)
-            .setNeutralButton("检查连接",(d,w)->run(()->{new HubSessionCoordinator(this,this::showProgress).check();return "电脑在线，可以连接。";}))
-            .setNegativeButton("复制诊断",(d,w)->((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("我控制连接诊断",HubSessionDiagnostics.read(this)))).show();
+        LinearLayout panel = column();
+        TextView result = label("",14,TEXT); result.setPadding(dp(24),dp(8),dp(24),dp(8)); result.setVisibility(View.GONE);
+        result.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        View divider = new View(this); divider.setBackgroundColor(BORDER); panel.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
+        panel.addView(HubStreamUi.diagnosticsView(this,null)); panel.addView(result);
+        AlertDialog dialog = HubStreamUi.hubDialog(this).setTitle("最近一次连接").setView(panel)
+            .setPositiveButton("取消",null).setNeutralButton("检查连接",null)
+            .setNegativeButton("复制诊断",(d,w)->((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("我控制连接诊断",HubSessionDiagnostics.read(this)))).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            Button check = dialog.getButton(AlertDialog.BUTTON_NEUTRAL); check.setEnabled(false);result.setText("正在检查…");result.setVisibility(View.VISIBLE);
+            worker.execute(()->{
+                String message;try { message=new HubSessionCoordinator(this,ignored->{}).checkStatus(); }
+                catch(Exception error) { message="检查未完成："+error.getMessage(); }
+                final String feedback=message;main.post(()->{if(dialog.isShowing()){result.setText(feedback);check.setEnabled(true);}});
+            });
+        }));dialog.show();
     }
     private String bindingAddresses() {
         try { HubTransports.Settings settings = store.transport(); return "manual".equals(settings.provider) ? settings.manualAddresses : store.get("hosts", ""); }
         catch (IllegalArgumentException error) { return ""; }
     }
+    private void showConnectionAddresses() {
+            List<String> annotated = new ArrayList<>();
+            List<HubAddressLabels.Link> links = HubAddressLabels.currentLinks();
+            String current = computerOnline ? presenceHost : "";
+            for (String address : HubRoutes.usableAddresses(bindingAddresses())) annotated.add(HubAddressLabels.line(address, current, links));
+            String addresses = android.text.TextUtils.join("\n\n", annotated);
+            String detail = addresses.isEmpty() ? "尚未发现可用的 IPv4 地址" : addresses;
+            if (store.bound()) detail += "\n\n已绑定，可检查电脑状态或开始连接。";
+            HubStreamUi.hubDialog(this).setTitle("连接地址").setMessage(detail)
+                .setPositiveButton("取消", null).show();
+    }
     private void updateComputerAddress() {
-        if (computerDetail == null) return;
-        List<String> addresses = HubRoutes.usableAddresses(bindingAddresses());
-        String text;
-        try { text = (computerOnline && !presenceHost.isEmpty() ? HubAddressLabels.describe(presenceHost, HubAddressLabels.currentLinks()) : "通道待检测") + " · " + (addresses.isEmpty() ? "尚无可用地址" : "点按查看连接详情"); }
-        catch (IllegalArgumentException error) { text = "请重新设置连接通道"; }
-        computerDetail.setContentDescription("连接地址：" + text + "，点按查看全部");
-        computerDetail.setText("");
         if(homeChannel!=null) {
             String channel="通道待设置";
-            try { channel=computerOnline&&!presenceHost.isEmpty()?HubAddressLabels.describe(presenceHost, HubAddressLabels.currentLinks())+" · "+presenceHost:store.transport().transport().label(); }
+            try { channel=computerOnline&&!presenceHost.isEmpty()?actualRoute(presenceHost)+" · "+presenceHost:"实际连接待检测"; }
             catch(IllegalArgumentException ignored) { }
             homeChannel.setText(store.bound()?channel:"添加电脑后显示连接信息");
         }
@@ -755,7 +1084,8 @@ public final class HubActivity extends Activity {
     private void renderDeviceState() {
         if (deviceState == null || deviceStateDot == null) return;
         int color = busy ? WARNING : lastOperationFailed ? DANGER : computerOnline ? SUCCESS : MUTED;
-        deviceState.setText(busy ? "正在连接" : lastOperationFailed ? "连接未完成" : computerOnline ? "在线" + mediaState : store.bound() ? "暂不可达" : "未绑定");
+        if(detailsState!=null)detailsState.setText((computerOnline?"在线":store.bound()?"正在检查连接":"尚未绑定电脑")+(computerOnline&&!presenceHost.isEmpty()?" · "+actualRoute(presenceHost)+" · "+presenceHost:""));
+        deviceState.setText(busy ? "正在连接" : Game.isHubConnectionStopping() ? "正在结束连接" : lastOperationFailed ? "连接未完成" : computerOnline ? "在线" + mediaState : store.bound() ? "暂不可达" : "未绑定");
         deviceState.setTextColor(busy || lastOperationFailed ? color : MUTED); GradientDrawable dot = new GradientDrawable(); dot.setShape(GradientDrawable.OVAL); dot.setColor(color); deviceStateDot.setBackground(dot);
     }
     private void finishBindingInput() {
@@ -765,7 +1095,7 @@ public final class HubActivity extends Activity {
     private void buildProviderCard() {
         LinearLayout card = card("连接通道");
         providerSaved = label("正在读取通道设置…", 14, MUTED); card.addView(providerSaved); gap(card, 12);
-        card.addView(label("通道", 14, MUTED));
+
         provider = new RadioGroup(this); provider.setOrientation(RadioGroup.VERTICAL); provider.setContentDescription("连接通道");
         String[] descriptions = {"跨网络连接，使用 Tailscale 账号", "连接自己的 Headscale 服务", "同一网络或 USB 共享，无需账号", "指定电脑 IPv4 地址，无需账号"};
         for (int i = 0; i < HubTransports.IDS.length; i++) {
@@ -784,18 +1114,23 @@ public final class HubActivity extends Activity {
         providerManualPanel = column(); card.addView(providerManualPanel);
         providerManual = field(providerManualPanel, "电脑 IPv4 地址", "最多 8 个，用逗号或换行分隔", false);
         providerManualPanel.addView(label("仅使用填写的地址，不自动启用 VPN。首次使用仍需电脑绑定码。", 14, MUTED));
-        providerMessage = label("保存会暂停异地连接。更换服务区前须先退出连接账号，电脑绑定保留。", 14, MUTED);
+        providerMessage = label("选择后自动应用；地址输入需保存。更换服务区前请先退出连接账号。", 14, MUTED);
         card.addView(providerMessage);
         try {
             HubTransports.Settings settings = store.transport();
-            hosts.setEnabled(!"manual".equals(settings.provider));
+            hosts.setEnabled(true);
             for (int i = 0; i < HubTransports.IDS.length; i++) if (HubTransports.IDS[i].equals(settings.provider)) provider.check(provider.getChildAt(i).getId());
             providerServer.setText(settings.serverUrl); providerManual.setText(settings.manualAddresses);
-            providerSaved.setText(getString(R.string.streamhub_transport_current, settings.transport().label()));
+            providerSaved.setText("已应用：" + settings.transport().label());
         } catch (IllegalArgumentException error) { providerSaved.setText(error.getMessage()); }
-        provider.setOnCheckedChangeListener((group, checkedId) -> showProviderFields());
+        provider.setOnCheckedChangeListener((group, checkedId) -> {
+            if (renderingProvider || providerChoicePending) return;
+            // Coalesce RadioGroup broadcasts before restoring or applying the selection.
+            providerChoicePending = true;
+            main.post(() -> { providerChoicePending=false; if(!isDestroyed())providerChoiceChanged(); });
+        });
         showProviderFields();
-        applyProvider = button(card, "保存并应用通道", true, v -> saveProvider());
+        applyProvider = button(card, "保存地址", false, v -> saveProvider());
         android.text.TextWatcher changes = new android.text.TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             public void onTextChanged(CharSequence s, int start, int before, int count) { updateProviderApply(); }
@@ -808,6 +1143,41 @@ public final class HubActivity extends Activity {
         for (int i=0;i<provider.getChildCount();i++) if (provider.getChildAt(i).getId()==provider.getCheckedRadioButtonId()) return i;
         return 0;
     }
+    private void restoreProviderSelection() {
+        try {
+            HubTransports.Settings saved = store.transport();
+            renderingProvider = true;
+            for (int i=0;i<HubTransports.IDS.length;i++) if (saved.provider.equals(HubTransports.IDS[i])) provider.check(provider.getChildAt(i).getId());
+        } finally { renderingProvider = false; }
+        showProviderFields();
+    }
+    private void providerChoiceChanged() {
+        if (renderingProvider) return;
+        String requested = HubTransports.IDS[selectedProviderIndex()];
+        restoreProviderSelection();
+        if (busy || requested.equals(store.transport().provider)) return;
+        if ("self-hosted".equals(requested) || "manual".equals(requested)) {
+            LinearLayout input = column(); input.setPadding(dp(24),dp(8),dp(24),dp(8));
+            boolean server = "self-hosted".equals(requested);
+            EditText address = field(input, server ? "服务区 HTTPS 地址" : "电脑 IPv4 地址", server ? "https://vpn.example.com" : "用逗号分隔多个地址", false);
+            address.setInputType(InputType.TYPE_CLASS_TEXT | (server ? InputType.TYPE_TEXT_VARIATION_URI : 0));
+            address.setText(server ? providerServer.getText() : providerManual.getText());
+            AlertDialog dialog = HubStreamUi.hubDialog(this).setTitle(server ? "配置自建通道" : "配置手动通道").setView(input)
+                    .setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+            dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                try {
+                    HubTransports.Settings next = new HubTransports.Settings(requested, server ? address.getText().toString().trim() : "", server ? "" : address.getText().toString().trim());
+                    dialog.dismiss(); confirmProvider(next);
+                } catch (IllegalArgumentException error) { address.setError(error.getMessage()); }
+            })); dialog.show();
+        } else confirmProvider(new HubTransports.Settings(requested,"",""));
+    }
+    private void confirmProvider(HubTransports.Settings settings) {
+        if (lastNetworkState != null && lastNetworkState.vpnActive) {
+            HubStreamUi.hubDialog(this).setTitle("切换连接通道？").setMessage("当前异地连接将断开，电脑绑定和账号保留。")
+                    .setNegativeButton("取消",null).setPositiveButton("切换",(d,w)->applyProviderSettings(settings)).show();
+        } else applyProviderSettings(settings);
+    }
     private void showProviderFields() {
         String id = HubTransports.IDS[selectedProviderIndex()];
         providerServerPanel.setVisibility("self-hosted".equals(id) ? View.VISIBLE : View.GONE);
@@ -816,11 +1186,15 @@ public final class HubActivity extends Activity {
     }
     private void refreshBindingSummary() {
         if (bindingSummary == null) return;
-        bindingSummary.setText(store.bound() ? "已绑定 · " + store.get("deviceName", "我的电脑") : "首次使用，请输入电脑地址和绑定码");
-        bindingForm.setVisibility(store.bound() ? View.GONE : View.VISIBLE);
+        bindingSummary.setText(store.bound() ? "已绑定 · " + store.get("deviceName", "我的电脑") : "尚未绑定");
+        bindingForm.setVisibility(fullBindingOpen ? View.VISIBLE : View.GONE);
+        if (checkComputerButton != null) checkComputerButton.setVisibility(store.bound() ? View.VISIBLE : View.GONE);
     }
     private void updateProviderApply() {
         if (applyProvider == null) return;
+        String id = HubTransports.IDS[selectedProviderIndex()];
+        applyProvider.setVisibility("manual".equals(id) || "self-hosted".equals(id) ? View.VISIBLE : View.GONE);
+        applyProvider.setText("self-hosted".equals(id) ? "保存服务区地址" : "保存电脑地址");
         boolean changed = true;
         try {
             HubTransports.Settings current = store.transport();
@@ -828,48 +1202,57 @@ public final class HubActivity extends Activity {
                     providerServer.getText().toString().trim(), providerManual.getText().toString().trim());
             changed = !current.provider.equals(selected.provider) || !current.serverUrl.equals(selected.serverUrl) || !current.manualAddresses.equals(selected.manualAddresses);
         } catch (IllegalArgumentException ignored) { }
-        applyProvider.setEnabled(!busy && changed); applyProvider.setAlpha(!busy && changed ? 1f : 0.45f);
+        applyProvider.setEnabled(!busy && changed); applyProvider.setAlpha(1f);
     }
     private String tabletQualityLabel() { return "clear".equals(store.get("tabletQuality", "stable")) ? "清晰优先 · 下次连接生效" : "稳定优先 · 下次连接生效"; }
     private void showQualityPresets() {
-        HubQualitySettings.show(this, false, () -> startActivity(new Intent(this, StreamSettings.class)));
+        HubQualitySettings.show(this, false, () -> showPage(5));
     }
     private void saveProvider() {
-        if (busy || HubFileService.busy() || HubSessionLease.active()) { providerMessage.setText("请先结束串流和文件传输，再切换通道。"); return; }
         final HubTransports.Settings settings;
         try { settings = new HubTransports.Settings(HubTransports.IDS[selectedProviderIndex()],
                 providerServer.getText().toString().trim(), providerManual.getText().toString().trim()); }
         catch (IllegalArgumentException error) { providerMessage.setText(error.getMessage()); return; }
+        confirmProvider(settings);
+    }
+    private void applyProviderSettings(HubTransports.Settings settings) {
+        if (busy || HubFileService.busy() || HubSessionLease.active()) { providerMessage.setText("请先结束串流和文件传输，再切换通道。"); restoreProviderSelection(); return; }
         if (presenceCoordinator != null) presenceCoordinator.cancel();
         authorizationUrl = ""; setBusy(true); providerMessage.setText("正在应用通道设置…");
         network.configure(settings, (state, error) -> {
             if (isDestroyed()) return;
             setBusy(false); authorizationUrl = "";
+            restoreProviderSelection();
             if (error != null) { providerMessage.setText(error); renderNetwork(null, error); return; }
-            providerSaved.setText(getString(R.string.streamhub_transport_current, settings.transport().label()));
+            providerServer.setText(settings.serverUrl); providerManual.setText(settings.manualAddresses);
+            providerSaved.setText("已应用：" + settings.transport().label());
             providerMessage.setText("已保存。异地连接已暂停，账号与电脑绑定保留。");
             updateProviderApply();
-            hosts.setText(bindingAddresses()); hosts.setEnabled(!"manual".equals(settings.provider));
+            hosts.setText(bindingAddresses()); hosts.setEnabled(true);
             presenceValidUntil = nextPresenceAt = 0; computerOnline = false; renderDeviceState();
             renderNetwork(state, null); refreshComputerPresence();
         });
     }
     private void buildNearbyComputers() {
         if (lanDiscovery != null) lanDiscovery.stop();
+        searchingNearby = false;
         lanDiscovery = new HubLanDiscovery(this);
         LinearLayout nearby = card("附近电脑");
-        nearby.addView(label("同一 Wi-Fi 或 USB 共享网络内，无需填写 IP。请先在电脑端生成短码。", 14, MUTED));
-        nearbyStatus = label("点按查找，选择需要绑定的电脑。", 14, MUTED);
+        nearby.addView(label("电脑点“+ 绑定设备”，再选择电脑并输入六位短码。", 14, MUTED));
+        nearbyStatus = label("", 14, MUTED); nearbyStatus.setVisibility(View.GONE);
         nearbyStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); nearby.addView(nearbyStatus);
         nearbyList = column(); nearby.addView(nearbyList);
-        button(nearby, "查找附近电脑", false, v -> startNearbySearch(""));
+        searchNearbyButton = button(nearby, "查找附近电脑", false, v -> startNearbySearch(""));
         settingLink(nearby,"使用电脑地址与短码","自动查找无结果时，填写电脑显示的局域网地址。",v->showNearbyAddress());
-        textButton(nearby,"查找详情",MUTED,v->HubStreamUi.hubDialog(this).setTitle("附近电脑查找详情")
-                .setMessage(lanDiscovery.diagnostics()).setPositiveButton("关闭",null).show());
+        textButton(nearby,"查找详情",ACCENT_DARK,v->HubStreamUi.hubDialog(this).setTitle("附近电脑查找详情")
+                .setMessage(lanDiscovery.summary()).setPositiveButton("取消",null).show());
     }
     private void startNearbySearch(String address) {
-        if (busy) return;
-        lanDiscovery.start((devices, message) -> {
+        if (busy || searchingNearby) return;
+        searchingNearby = true; searchNearbyButton.setEnabled(false); searchNearbyButton.setText("正在查找…");
+        nearbyStatus.setText("正在查找附近电脑…"); nearbyStatus.setVisibility(View.VISIBLE);
+        lanDiscovery.start(new HubLanDiscovery.Listener() {
+            @Override public void update(List<HubLanDiscovery.Device> devices, String message) {
                 if (isDestroyed() || !foreground) return;
                 nearbyStatus.setText(message); nearbyList.removeAllViews();
                 for (HubLanDiscovery.Device device : devices) {
@@ -878,7 +1261,12 @@ public final class HubActivity extends Activity {
                             ignored -> showShortCode(device));
                     modeActions.remove(row); // Discovery replaces these rows; do not retain detached views.
                 }
-            },address);
+            }
+            @Override public void finished() {
+                searchingNearby=false;
+                if(searchNearbyButton!=null){searchNearbyButton.setEnabled(!busy);searchNearbyButton.setText("重新查找附近电脑");}
+            }
+        },address);
     }
     private void showNearbyAddress() {
         if(busy)return;
@@ -902,8 +1290,9 @@ public final class HubActivity extends Activity {
     private EditText shortCodeField(LinearLayout input) {
         EditText code = field(input, "六位短码", "例如 012345", false);
         code.setInputType(InputType.TYPE_CLASS_NUMBER); code.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(6)});
-        code.setSingleLine(true); code.setGravity(Gravity.CENTER); code.setTextSize(26); code.setTypeface(Typeface.MONOSPACE);
-        code.setLetterSpacing(0.12f); code.setMinimumHeight(dp(64));
+        code.setHint("输入六位数字");
+        code.setSingleLine(true); code.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); code.setTextSize(22); code.setTypeface(Typeface.MONOSPACE);
+        code.setLetterSpacing(0f); code.setMinimumHeight(dp(64));
         return code;
     }
     private void showShortCode(HubLanDiscovery.Device device) {
@@ -1014,7 +1403,7 @@ public final class HubActivity extends Activity {
         run(() -> {
             HubSessionCoordinator binder = new HubSessionCoordinator(this, this::showProgress); activeCoordinator = binder;
             try { binder.bind(bindingAddress, code); } finally { activeCoordinator = null; }
-            main.post(() -> invitation.setText("")); return "绑定已保存。现在可以远程控制或用作副屏。";
+            main.post(() -> { invitation.setText(""); fullBindingOpen = false; }); return "绑定已保存。现在可以远程控制或用作副屏。";
         });
     }
     private void startSession(String mode, String link, boolean reconnect, int degrees) {
@@ -1087,7 +1476,7 @@ public final class HubActivity extends Activity {
                 .setOnCancelListener(dialog -> { receiverDialogId = ""; }).create();
         receiverDialog.show(); receiverDialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(ACCENT_DARK); receiverDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(TEXT);
     }
-    private void refreshNetwork() { if (networkChecking) return; networkChecking = true; network.status((state, error) -> { networkChecking = false; renderNetwork(state, error); }); }
+    private void refreshNetwork() { if (networkChecking || busy) return; networkChecking = true; network.status((state, error) -> { networkChecking = false; renderNetwork(state, error); }); }
 
     private List<String> enableTailnetFallback(HubConnectBudget budget) throws Exception {
         if (!store.transport().transport().usesAccount()) throw new java.io.IOException("当前通道不会自动启用异地连接。");
@@ -1188,7 +1577,13 @@ public final class HubActivity extends Activity {
     }
     private void renderNetwork(EmbeddedNetwork.Status state, String error) {
         if (isDestroyed()) return;
-        if (error != null) { authorizationUrl = ""; lastNetworkState = null; peerList.removeAllViews(); networkStatus.setText(error); if (networkDetails != null) { networkDetails.setVisibility(View.GONE); } updateAccountActions(false, false, false); return; }
+        if (error != null) {
+            authorizationUrl = ""; lastNetworkState = null; peerList.removeAllViews(); networkStatus.setText(error);
+            if (networkDetails != null) networkDetails.setVisibility(View.GONE);
+            boolean usesAccount = store.transport().transport().usesAccount();
+            remoteAccount.setVisibility(usesAccount ? View.VISIBLE : View.GONE);
+            updateAccountActions(usesAccount, false, false); return;
+        }
         if (state == null || !state.revision.equals(store.get("transportRevision", ""))) return;
         HubTransports.Settings settings;
         try { settings = store.transport(); } catch (IllegalArgumentException invalid) { authorizationUrl = ""; networkStatus.setText(invalid.getMessage()); return; }
@@ -1200,36 +1595,63 @@ public final class HubActivity extends Activity {
         updateAccountActions(settings.transport().usesAccount(), state.loggedIn(), state.vpnActive);
         peerList.removeAllViews();
         List<EmbeddedNetwork.Peer> visiblePeers = new ArrayList<>();
-        for (EmbeddedNetwork.Peer peer : state.peers) if ("windows".equalsIgnoreCase(peer.operatingSystem) && !peer.addresses.isEmpty()) visiblePeers.add(peer);
+        java.util.Set<String> hiddenPeers=getSharedPreferences("streamhub_controls",MODE_PRIVATE).getStringSet("hidden_account_peers",java.util.Collections.emptySet());
+        int removedPeers=0;
+        for (EmbeddedNetwork.Peer peer : state.peers) if ("windows".equalsIgnoreCase(peer.operatingSystem) && !peer.addresses.isEmpty()) {
+            if(!peer.online&&hiddenPeers.contains(accountPeerKey(peer)))removedPeers++;else visiblePeers.add(peer);
+        }
         visiblePeers.sort((left, right) -> Boolean.compare(right.online, left.online));
         LinearLayout offlineList = column();
         long offlineCount = visiblePeers.stream().filter(peer -> !peer.online).count();
         for (EmbeddedNetwork.Peer peer : visiblePeers) {
             Button entry = new Button(this); entry.setStateListAnimator(null); entry.setElevation(0);
             String route = peer.routeText == null || peer.routeText.isEmpty() ? "路径未知" : peer.routeText;
-            entry.setText(peer.name + "\n" + (peer.online ? "在线" : "离线") + " · " + route + " · " + peerAddressSummary(peer.addresses));
-            entry.setTextColor(TEXT); entry.setTextSize(14); entry.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            HubButtons.apply(entry,false);
+            entry.setText(peer.name + "\n" + (peer.online ? "在线 · " + route : "离线") + " · " + android.text.TextUtils.join("、", peer.addresses));
+            entry.setTextColor(peer.online?TEXT:MUTED); entry.setTextSize(14); entry.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             entry.setPadding(dp(14), dp(8), dp(14), dp(8)); entry.setAllCaps(false); entry.setMinHeight(dp(68));
             GradientDrawable peerBackground = new GradientDrawable(); peerBackground.setColor(FIELD); peerBackground.setCornerRadius(dp(8)); peerBackground.setStroke(dp(1), BORDER);
             entry.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(RIPPLE), peerBackground, null));
-            LinearLayout.LayoutParams peerSize = new LinearLayout.LayoutParams(-1, dp(72)); peerSize.topMargin = dp(6); (peer.online ? peerList : offlineList).addView(entry, peerSize);
+            LinearLayout peerRow=new LinearLayout(this);peerRow.setGravity(Gravity.CENTER_VERTICAL);
+            peerRow.addView(entry,new LinearLayout.LayoutParams(0,-2,1));
+            LinearLayout.LayoutParams peerSize = new LinearLayout.LayoutParams(-1, -2); peerSize.topMargin = dp(6); (peer.online ? peerList : offlineList).addView(peerRow, peerSize);
+            entry.setEnabled(peer.online && !busy);
+            entry.setContentDescription(peer.name + (peer.online ? "，在线，打开绑定表单" : "，离线，无法选择") + "，" + android.text.TextUtils.join("、", peer.addresses));
+            if(!peer.online){
+                Button remove=textButton(peerRow,"移除",ACCENT_DARK,v->HubStreamUi.hubDialog(this).setTitle("从本机列表移除？")
+                    .setMessage(peer.name+"\n"+android.text.TextUtils.join("、",peer.addresses)+"\n仅从此平板隐藏离线记录，不删除账号内设备，也不会更换当前绑定。")
+                    .setNegativeButton("取消",null).setPositiveButton("移除",(d,w)->{
+                        android.content.SharedPreferences prefs=getSharedPreferences("streamhub_controls",MODE_PRIVATE);
+                        java.util.Set<String> next=new java.util.HashSet<>(prefs.getStringSet("hidden_account_peers",java.util.Collections.emptySet()));next.add(accountPeerKey(peer));
+                        if(prefs.edit().putStringSet("hidden_account_peers",next).commit())renderNetwork(lastNetworkState,null);
+                        else android.widget.Toast.makeText(this,"记录未移除，请重试",android.widget.Toast.LENGTH_LONG).show();
+                    }).show());
+                remove.setContentDescription("从本机列表移除 "+peer.name+"，"+android.text.TextUtils.join("、",peer.addresses));
+                LinearLayout.LayoutParams removeSize=new LinearLayout.LayoutParams(dp(64),-2);removeSize.leftMargin=dp(8);remove.setLayoutParams(removeSize);
+                remove.setGravity(Gravity.CENTER);remove.setMinWidth(0);remove.setEnabled(!busy);
+            }
             entry.setOnClickListener(v -> {
-                String saved = store.get("hosts", "");
-                StringBuilder merged = new StringBuilder(saved);
-                for (String address : peer.addresses) if (!saved.contains(address)) {
-                    if (merged.length() > 0) merged.append(",");
-                    merged.append(address);
-                }
-                String addresses = merged.toString();
-                hosts.setText(addresses); store.put("hosts", addresses); updateComputerAddress();
-                showProgress("已选择账号内电脑 · " + peer.routeText + "；首次使用仍需绑定码确认远控权限。");
+                if (!peer.online || busy) return;
+                fullBindingOpen = true; refreshBindingSummary();
+                hosts.setText(android.text.TextUtils.join(",", peer.addresses));
+                showPage(1);
+                showProgress("待绑定：" + peer.name + "。填写绑定码后验证，成功前不会更换当前电脑。");
+                android.widget.Toast.makeText(this, "已带入绑定表单，尚未保存", android.widget.Toast.LENGTH_SHORT).show();
             });
         }
         if (offlineCount > 0) {
-            textButton(peerList, (showOfflinePeers ? "收起" : "查看") + "离线电脑（" + offlineCount + "）", MUTED, v -> { showOfflinePeers = !showOfflinePeers; renderNetwork(lastNetworkState, null); });
+            textButton(peerList, (showOfflinePeers ? "收起" : "查看") + "离线电脑（" + offlineCount + "） "+(showOfflinePeers?"▴":"▾"), ACCENT_DARK, v -> { showOfflinePeers = !showOfflinePeers; renderNetwork(lastNetworkState, null); });
             offlineList.setVisibility(showOfflinePeers ? View.VISIBLE : View.GONE); peerList.addView(offlineList);
         }
+        if(removedPeers>0)textButton(peerList,"恢复本机已移除的离线记录（"+removedPeers+"）",ACCENT_DARK,v->{
+            if(getSharedPreferences("streamhub_controls",MODE_PRIVATE).edit().remove("hidden_account_peers").commit())renderNetwork(lastNetworkState,null);
+            else android.widget.Toast.makeText(this,"记录未恢复，请重试",android.widget.Toast.LENGTH_LONG).show();
+        });
         if (peerList.getChildCount() == 0) peerList.addView(label(settings.transport().usesAccount() ? "登录后显示同账号的 Windows 电脑。" : "当前通道使用已绑定的电脑地址，无需云账号。", 13, MUTED));
+    }
+    private String accountPeerKey(EmbeddedNetwork.Peer peer){
+        java.util.List<String> addresses=new java.util.ArrayList<>(peer.addresses);java.util.Collections.sort(addresses);
+        return selectedProviderIndex()+"|"+providerServer.getText().toString().trim()+"|"+android.text.TextUtils.join(",",addresses);
     }
     private String peerAddressSummary(List<String> addresses) {
         if (addresses == null || addresses.isEmpty()) return "地址未知";

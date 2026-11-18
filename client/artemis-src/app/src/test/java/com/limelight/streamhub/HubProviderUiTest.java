@@ -1,59 +1,56 @@
 package com.limelight.streamhub;
 
-import android.os.Looper;
+import android.app.AlertDialog;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.RadioGroup;
-import android.widget.TextView;
+import com.limelight.streamhub.networking.EmbeddedNetwork;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowAlertDialog;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk=28, application=android.app.Application.class)
+@Config(sdk=34, application=android.app.Application.class)
 public class HubProviderUiTest {
-    @Test public void applyRequiresARealChangeEvenAfterBusyWorkFinishes() throws Exception {
-        try (org.robolectric.android.controller.ActivityController<HubActivity> controller = Robolectric.buildActivity(HubActivity.class).create()) {
-            HubActivity activity = controller.get();
-            View apply = (View)field(activity, "applyProvider");
-            assertFalse(apply.isEnabled());
-            RadioGroup group = (RadioGroup)field(activity, "provider"); group.check(group.getChildAt(2).getId());
-            Shadows.shadowOf(Looper.getMainLooper()).idle(); assertTrue(apply.isEnabled());
-            java.lang.reflect.Method busy = HubActivity.class.getDeclaredMethod("setBusy", boolean.class); busy.setAccessible(true);
-            busy.invoke(activity, true); assertFalse(apply.isEnabled());
-            busy.invoke(activity, false); assertTrue(apply.isEnabled());
-            group.check(group.getChildAt(0).getId());
-            Shadows.shadowOf(Looper.getMainLooper()).idle(); assertFalse(apply.isEnabled());
+    private static Object field(Object target,String name) throws Exception {
+        var f=target.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(target);
+    }
+    private static void replaceNetwork(HubActivity activity, EmbeddedNetwork network) throws Exception {
+        var f=HubActivity.class.getDeclaredField("network");f.setAccessible(true);f.set(activity,network);
+    }
+    @Test public void choiceAppliesImmediatelyAndFailureRestoresSavedProvider() throws Exception {
+        try(var controller=Robolectric.buildActivity(HubActivity.class).create()) {
+            HubActivity activity=controller.get();HubStore store=new HubStore(activity);
+            EmbeddedNetwork backend=mock(EmbeddedNetwork.class);
+            doAnswer(call->{HubTransports.Settings settings=call.getArgument(0);store.saveTransport(settings);((EmbeddedNetwork.Callback)call.getArgument(1)).complete(null,null);return null;}).when(backend).configure(any(),any());
+            replaceNetwork(activity,backend);
+            RadioGroup providers=(RadioGroup)field(activity,"provider");
+            providers.check(providers.getChildAt(2).getId()); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertEquals("lan",store.transport().provider);
+            assertEquals(providers.getChildAt(2).getId(),providers.getCheckedRadioButtonId());
+            assertEquals(View.GONE,((View)field(activity,"applyProvider")).getVisibility());
+            doAnswer(call->{((EmbeddedNetwork.Callback)call.getArgument(1)).complete(null,"模拟失败");return null;}).when(backend).configure(any(),any());
+            providers.check(providers.getChildAt(0).getId()); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            assertEquals("lan",store.transport().provider);
+            assertEquals(providers.getChildAt(2).getId(),providers.getCheckedRadioButtonId());
+            assertFalse(((Boolean)field(activity,"busy")));
+            verify(backend,times(2)).configure(any(),any());
         }
     }
-    private static Object field(HubActivity activity, String name) throws Exception {
-        java.lang.reflect.Field field = HubActivity.class.getDeclaredField(name); field.setAccessible(true); return field.get(activity);
-    }
-    @Test public void providerFieldsAppearOnlyWhenRelevant() throws Exception {
-        try (org.robolectric.android.controller.ActivityController<HubActivity> controller = Robolectric.buildActivity(HubActivity.class).create()) {
-            HubActivity activity = controller.get();
-            RadioGroup providers = (RadioGroup)field(activity, "provider");
-            assertEquals(4, providers.getChildCount()); assertEquals("连接通道", providers.getContentDescription());
-            for (int index = 0; index < 4; index++) {
-                providers.check(providers.getChildAt(index).getId()); Shadows.shadowOf(Looper.getMainLooper()).idle();
-                assertEquals(index == 1 ? View.VISIBLE : View.GONE, ((View)field(activity, "providerServerPanel")).getVisibility());
-                assertEquals(index == 3 ? View.VISIBLE : View.GONE, ((View)field(activity, "providerManualPanel")).getVisibility());
-            }
-        }
-    }
-    @Test public void invalidSelfHostedUrlShowsAnInlineErrorAndLeavesConfigurationUntouched() throws Exception {
-        try (org.robolectric.android.controller.ActivityController<HubActivity> controller = Robolectric.buildActivity(HubActivity.class).create()) {
-            HubActivity activity = controller.get();
-            RadioGroup group = (RadioGroup)field(activity, "provider"); group.check(group.getChildAt(1).getId());
-            ((EditText)field(activity, "providerServer")).setText("http://vpn.example.com");
-            java.lang.reflect.Method save = HubActivity.class.getDeclaredMethod("saveProvider"); save.setAccessible(true); save.invoke(activity);
-            assertTrue(((TextView)field(activity, "providerMessage")).getText().toString().contains("HTTPS"));
-            assertEquals("tailscale", new HubStore(activity).transport().provider);
-            assertEquals("", new HubStore(activity).get("transportRevision", ""));
+    @Test public void addressChoiceRemainsUnchangedUntilValidInputIsSaved() throws Exception {
+        try(var controller=Robolectric.buildActivity(HubActivity.class).create()) {
+            HubActivity activity=controller.get();EmbeddedNetwork backend=mock(EmbeddedNetwork.class);replaceNetwork(activity,backend);
+            RadioGroup providers=(RadioGroup)field(activity,"provider");
+            providers.check(providers.getChildAt(1).getId()); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+            AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();assertTrue(dialog.isShowing());
+            assertEquals(providers.getChildAt(0).getId(),providers.getCheckedRadioButtonId());
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();assertTrue(dialog.isShowing());
+            assertEquals("tailscale",new HubStore(activity).transport().provider);verifyNoInteractions(backend);
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();assertFalse(dialog.isShowing());
         }
     }
 }
