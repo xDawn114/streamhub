@@ -33,11 +33,12 @@ export async function serve(request, fetchUpstream = fetch, signedManifests = ma
   try {
     const result = await fetchUpstream(upstream, {
       method: request.method,
-      redirect: "error",
+      redirect: "manual",
       headers: { "Accept-Encoding": "identity" },
       cf: { cacheTtl: 31536000, cacheEverything: true },
     });
-    if (result.status !== 200 || result.redirected) return response(null, result.status === 404 ? 404 : 502);
+    if (result.status !== 200 || result.redirected) return response(null, result.status === 404 ? 404 : 502,
+      { "X-Update-Upstream-Status": String(result.status) });
     const headers = new Headers({
       "Cache-Control": "public, max-age=31536000, immutable",
       "Content-Type": "application/vnd.android.package-archive",
@@ -46,8 +47,9 @@ export async function serve(request, fetchUpstream = fetch, signedManifests = ma
     const size = result.headers.get("Content-Length");
     if (size) headers.set("Content-Length", size);
     return new Response(request.method === "HEAD" ? null : result.body, { status: 200, headers });
-  } catch {
-    return response(null, 502);
+  } catch (error) {
+    console.warn("Update package upstream fetch failed:", error instanceof Error ? error.message : "unknown error");
+    return response(null, 502, { "X-Update-Upstream-Error": "fetch-failed" });
   }
 }
 

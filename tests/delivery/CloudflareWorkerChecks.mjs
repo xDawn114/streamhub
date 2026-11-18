@@ -21,7 +21,7 @@ const apk = await serve(request(packagePath), fetcher);
 assert.equal(apk.status, 200);
 assert.match(apk.headers.get("Cache-Control"), /immutable/);
 assert.equal(calls[0].url, "https://xdawn114.github.io/streamhub" + packagePath);
-assert.equal(calls[0].options.redirect, "error");
+assert.equal(calls[0].options.redirect, "manual");
 const allowedCalls = calls.length;
 for (const path of ["/credentials", "/updates/stable/android.json", "/updates/internal/android.json?url=https://evil.example",
   "/packages/internal/0.8.26-168/" + "a".repeat(64) + "/windows.exe", "/updates/internal/%61ndroid.json"]) {
@@ -29,6 +29,10 @@ for (const path of ["/credentials", "/updates/stable/android.json", "/updates/in
 }
 assert.equal((await serve(request("/updates/internal/android.json", "POST"), fetcher)).status, 405);
 assert.equal(calls.length, allowedCalls);
-assert.equal((await serve(request(packagePath), async () => new Response(null, { status: 302 }))).status, 502);
-assert.equal((await serve(request(packagePath), async () => { throw new Error("upstream unavailable"); })).status, 502);
+const redirectFailure = await serve(request(packagePath), async () => new Response(null, { status: 302 }));
+assert.equal(redirectFailure.status, 502);
+assert.equal(redirectFailure.headers.get("X-Update-Upstream-Status"), "302");
+const fetchFailure = await serve(request(packagePath), async () => { throw new Error("upstream unavailable"); });
+assert.equal(fetchFailure.status, 502);
+assert.equal(fetchFailure.headers.get("X-Update-Upstream-Error"), "fetch-failed");
 console.log("Cloudflare worker boundary checks passed");

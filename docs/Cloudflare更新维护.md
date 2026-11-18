@@ -3,7 +3,11 @@
 当前内置源仍为既有 GitHub Pages；新地址通过隐私检查、直连和完整在线校验后，才能写入安装包。Cloudflare 试验入口尚未作为正式更新源发布。
 RSA3072 公钥与 Android 发布签名延续 168；Windows 发布者列表仍为空，只查询版本。
 
-当前试验入口为 `https://icontrol-updates.icontrol-release-7d91.workers.dev`，只托管公开的 168 签名清单及固定 APK 代理。手机在开启代理时能看到清单，用户确认关闭代理后无法访问；电脑直连也超时。即使代理路径响应头符合要求，也不满足默认源的直连条件。因此没有生成或安装带此源的 169，也没有改写既有 Pages 清单。
+2026-11-18，试验入口 `https://icontrol-updates.icontrol-release-7d91.workers.dev` 已更新为 0.8.40 / 182 fix145 的独立签名清单及固定 APK 代理。双端清单经代理返回 HTTPS 200，字节与已验签的发布目录一致，响应含 `no-store, no-cache, max-age=0, must-revalidate`；完整 APK 为 34,459,669 字节，SHA256 为 `7E7E29D2075BD4D129E285E43340A32C9137C4C663740254678299EE19DFDAA4`，不可变路径缓存一年。
+
+本轮电脑不经代理读取两份 Worker 清单仍在 12 秒超时，未收到 HTTP 响应。用户暂无自有域名，明确保留既有 GitHub Pages 源；没有迁移客户端、重建或安装产品。Pages 的十分钟清单缓存及无需代理完整下载仍单列缺口，不能用 Worker 的代理结果代替默认源或直连验收。
+
+此前 168 试验只核对清单，未完成 APK 代理验收。此次线上发现包请求返回 502：Cloudflare 运行时不支持 `fetch` 的 `redirect: "error"`。现改用 `manual`，继续拒绝非 200 和重定向响应，不跟随跳转；上游失败写入受控日志并返回固定诊断头。Node 隔离检查不能替代 Cloudflare 实际运行和完整下载核对。
 
 ## 公开地址
 
@@ -18,7 +22,7 @@ RSA3072 公钥与 Android 发布签名延续 168；Windows 发布者列表仍为
 3. 用 `Build-CloudflareWorker.ps1` 从已验证发布目录生成代码，在 `icontrol-updates` 的 Quick Edit 中部署该文件。代码只含公开的签名清单和固定包源，不含私钥。清单随部署直接返回，不从 Pages 读取，因此不受 Pages 清单十分钟缓存影响。
 4. 执行 `Test-UpdatePublication.ps1 -Online`。要求清单与 APK 直接 HTTPS 200，清单响应为 `no-store, no-cache, max-age=0, must-revalidate`，并逐字节校验 SHA256。不可变 APK 可缓存一年。
 
-既有 168 客户端仍指向 Pages。使用 `New-UpdateFeedTransition.ps1` 为旧源生成过渡清单和相同字节的包；仅重签包 URL，保留版本、有效期、大小和哈希。先上传包，再替换旧清单。更新后的应用内置新源，不能只替换旧源 URL 而假称已迁移客户端。旧 Pages 清单仍有十分钟缓存，过渡入口不计为新源缓存验收。
+既有 168 和 182 客户端仍指向 Pages。本轮 Worker 发布目录仅为托管试验，未写入正式客户端信任配置。将来直连条件满足后，使用 `New-UpdateFeedTransition.ps1` 为旧源生成过渡清单和相同字节的包；仅重签包 URL，保留版本、有效期、大小和哈希。先上传包，再替换旧清单。更新后的应用内置新源，不能只替换旧源 URL 而假称已迁移客户端。旧 Pages 清单仍有十分钟缓存，过渡入口不计为新源缓存验收。
 
 ## 续签
 
