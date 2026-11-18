@@ -1,6 +1,6 @@
 # Code signing policy
 
-Status: **application preparation; no SignPath approval or signed StreamHub release yet** (2026-11-12).
+Status: **application submitted; approval pending; no signed StreamHub release yet**. The application was submitted on November 12, 2026, and followed up on November 18. The maintainer has confirmed that approval has not arrived.
 
 The project is applying for free open source code signing through [SignPath.io](https://signpath.io) and the [SignPath Foundation](https://signpath.org). The attribution “Free code signing provided by SignPath.io, certificate by SignPath Foundation” will apply only after acceptance and actual signing; it is not a claim about the current unsigned internal candidates.
 
@@ -17,9 +17,9 @@ Signing is limited to the project's Windows app (`我控制.exe`), service (`串
 
 Third-party binaries keep their upstream identity and license. No third-party binary is re-signed with the StreamHub project's identity. Modified Sunshine builds need separate review against the Foundation's visible-fork and upstream-branch requirements.
 
-The public `Source checks` workflow compiles the own Windows projects and runs input policy checks. It is **not** a complete installer or signing pipeline. Before actual signing, configure the approved SignPath project/policy, artifact restrictions, product/version metadata, fixed publisher trust, signing order and independent verification. Signing secrets must never be passed to untrusted pull requests or committed to source.
+The public `Source checks` workflow compiles the own Windows projects and runs isolated checks. The separate, manually dispatched `Windows signing` workflow defaults to configuration checking and unsigned program builds. Its production path signs the three owned programs before packaging, then separately signs and verifies the installer and embedded payload. Actual signing still requires approved SignPath configuration and a separately verified publisher committed to the client trust. See [integration instructions](docs/SignPath接入.md). Signing secrets must never be passed to untrusted pull requests or committed to source.
 
-Current gaps include the project's short public history, a public release of the complete binary form intended for signing, approved signing-service configuration, and verified publisher identity. Foundation acceptance is not guaranteed.
+The complete unsigned 182 fix145 candidate is now publicly available with its source and hashes. Remaining external requirements include approved signing-service configuration and verified publisher identity; successful production signing and an actual Windows in-app upgrade have not been demonstrated. Foundation acceptance is not guaranteed.
 
 ## Privacy
 

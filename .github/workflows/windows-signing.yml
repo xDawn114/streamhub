@@ -1,0 +1,147 @@
+name: Windows signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Check integration or request approved production signing
+        type: choice
+        options: [check, sign]
+        default: check
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-signing-main
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    if: github.repository == 'xDawn114/streamhub' && github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    outputs:
+      ready: ${{ steps.readiness.outputs.ready }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: readiness
+        name: Check actual signing configuration without submitting a request
+        shell: pwsh
+        env:
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_POLICY_SLUG: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          SIGNPATH_OWNED_CONFIGURATION: ${{ vars.SIGNPATH_OWNED_CONFIGURATION }}
+          SIGNPATH_INSTALLER_CONFIGURATION: ${{ vars.SIGNPATH_INSTALLER_CONFIGURATION }}
+          TOKEN_CONFIGURED: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $result = & ./scripts/Test-SignPathReadiness.ps1 -RequireGitHubHosted -TokenConfigured:($env:TOKEN_CONFIGURED -eq 'true') -Output "$env:RUNNER_TEMP/signpath-readiness.json" | ConvertFrom-Json
+          "ready=$($result.ready.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "## Windows signing readiness" >> $env:GITHUB_STEP_SUMMARY
+          "Ready: $($result.ready). No signing request submitted by this check." >> $env:GITHUB_STEP_SUMMARY
+          foreach ($item in $result.missing) { "- Missing: $item" >> $env:GITHUB_STEP_SUMMARY }
+          if ($env:OPERATION -eq 'sign' -and -not $result.ready) { throw 'Signing configuration is incomplete; no signing request was submitted.' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: signpath-readiness
+          path: ${{ runner.temp }}/signpath-readiness.json
+          if-no-files-found: error
+          retention-days: 14
+
+  build-and-sign:
+    needs: readiness
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build the three owned programs from this revision
+        shell: pwsh
+        run: |
+          & ./scripts/Prepare-WindowsOwnedSigning.ps1 -OutputRoot "$env:RUNNER_TEMP/owned" -SourceRevision $env:GITHUB_SHA
+      - id: unsigned-owned
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: unsigned-owned-windows
+          path: ${{ runner.temp }}/owned/unsigned-owned/*
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: owned-build-origin
+          path: ${{ runner.temp }}/owned/owned-build.json
+          if-no-files-found: error
+          retention-days: 14
+      - id: sign-owned
+        name: Request signing of owned programs
+        if: inputs.operation == 'sign' && needs.readiness.outputs.ready == 'true'
+        uses: SignPath/github-action-submit-signing-request@2290a7b806cc1cfa69cdc6eec875e730554c6ab1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_OWNED_CONFIGURATION }}
+          github-artifact-id: ${{ steps.unsigned-owned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: ${{ runner.temp }}/signed-owned
+      - name: Verify owned signatures, recover pinned components and package
+        if: inputs.operation == 'sign' && needs.readiness.outputs.ready == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./scripts/Test-WindowsSignedArtifacts.ps1 -Directory "$env:RUNNER_TEMP/signed-owned" -Kind Owned
+          & ./scripts/Get-WindowsSigningInputs.ps1 -OutputRoot "$env:RUNNER_TEMP/component-inputs"
+          $inputs = Get-Content "$env:RUNNER_TEMP/component-inputs/component-inputs.json" -Raw | ConvertFrom-Json
+          & ./scripts/构建电脑端.ps1 -ReleaseRoot "$env:RUNNER_TEMP/pending-installer" -BuildRoot "$env:RUNNER_TEMP/package-build" -SunshineSource $inputs.sunshine -NetworkSource $inputs.network -DisplaySource $inputs.display -SignedOwnedArtifactsRoot "$env:RUNNER_TEMP/signed-owned" -DeferInstallerSigning
+      - id: unsigned-installer
+        if: inputs.operation == 'sign' && needs.readiness.outputs.ready == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: unsigned-windows-installer
+          path: ${{ runner.temp }}/pending-installer/我控制-电脑端安装.exe
+          if-no-files-found: error
+          retention-days: 14
+      - id: sign-installer
+        name: Request signing of the installer after payload hashes are final
+        if: inputs.operation == 'sign' && needs.readiness.outputs.ready == 'true'
+        uses: SignPath/github-action-submit-signing-request@2290a7b806cc1cfa69cdc6eec875e730554c6ab1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_CONFIGURATION }}
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: ${{ runner.temp }}/signed-installer
+      - name: Verify outer signature, embedded signatures and exact payload
+        if: inputs.operation == 'sign' && needs.readiness.outputs.ready == 'true'
+        shell: pwsh
+        env:
+          OWNED_REQUEST: ${{ steps.sign-owned.outputs.signing-request-id }}
+          INSTALLER_REQUEST: ${{ steps.sign-installer.outputs.signing-request-id }}
+        run: |
+          & ./scripts/Complete-WindowsSigning.ps1 -PendingReleaseRoot "$env:RUNNER_TEMP/pending-installer" -SignedInstallerRoot "$env:RUNNER_TEMP/signed-installer" -OutputRoot "$env:RUNNER_TEMP/signed-release" -VerificationRoot "$env:RUNNER_TEMP/signed-payload-check" -SourceRevision $env:GITHUB_SHA -OwnedSigningRequestId $env:OWNED_REQUEST -InstallerSigningRequestId $env:INSTALLER_REQUEST
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: inputs.operation == 'sign' && needs.readiness.outputs.ready == 'true'
+        with:
+          name: verified-signed-windows
+          path: ${{ runner.temp }}/signed-release/*
+          if-no-files-found: error
+          retention-days: 14

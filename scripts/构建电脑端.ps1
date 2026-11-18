@@ -10,14 +10,22 @@ param(
     [string]$WindowsSigningCertificateThumbprint = '',
     [ValidateSet('CurrentUser','LocalMachine')][string]$WindowsSigningCertificateStore = 'CurrentUser',
     [string]$SignToolPath = '',
-    [string]$WindowsSigningScript = ''
+    [string]$WindowsSigningScript = '',
+    [string]$SignedOwnedArtifactsRoot = '',
+    [switch]$DeferInstallerSigning
 )
 
 $ErrorActionPreference = 'Stop'
 $sourceRoot = [IO.Path]::GetFullPath($SourceRoot)
 $productVersion = & (Join-Path $PSScriptRoot '读取产品版本.ps1') -SourceRoot $sourceRoot
 if($WindowsSigningScript -and $WindowsSigningCertificateThumbprint){throw '证书存储与外部签名服务只能选择一种。'}
-if ($productVersion.Channel -eq 'stable' -and -not $WindowsSigningCertificateThumbprint -and -not $WindowsSigningScript) { throw '正式渠道必须配置受信 Windows 代码签名。' }
+if ([bool]$SignedOwnedArtifactsRoot -ne [bool]$DeferInstallerSigning) { throw '外部分段签名必须同时提供已签程序目录和 DeferInstallerSigning。' }
+if ($SignedOwnedArtifactsRoot -and ($WindowsSigningScript -or $WindowsSigningCertificateThumbprint -or $SkipPublish)) { throw '分段签名不能与本机签名或 SkipPublish 混用。' }
+if ($productVersion.Channel -eq 'stable' -and -not $WindowsSigningCertificateThumbprint -and -not $WindowsSigningScript -and -not $SignedOwnedArtifactsRoot) { throw '正式渠道必须配置受信 Windows 代码签名。' }
+if ($SignedOwnedArtifactsRoot) {
+    if (Test-Path -LiteralPath $ReleaseRoot) { throw '分段签名必须使用新的待签安装器目录，不能覆盖既有工件。' }
+    & (Join-Path $PSScriptRoot 'Test-WindowsSignedArtifacts.ps1') -Directory $SignedOwnedArtifactsRoot -Kind Owned -SourceRoot $sourceRoot | Out-Null
+}
 if($WindowsSigningScript){
     $provider=(Resolve-Path -LiteralPath $WindowsSigningScript).Path
     if($provider.StartsWith($sourceRoot+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw '签名服务适配器及凭据必须在源码归档范围之外。'}
@@ -78,7 +86,14 @@ function Get-RelativePath([string]$BasePath,[string]$TargetPath) {
     return [Uri]::UnescapeDataString($relative).Replace('/',[IO.Path]::DirectorySeparatorChar)
 }
 
-if (-not $SkipPublish) {
+if ($SignedOwnedArtifactsRoot) {
+    New-Item -ItemType Directory -Path (Join-Path $stage 'service') -Force | Out-Null
+    Copy-Required (Join-Path $SignedOwnedArtifactsRoot '我控制.exe') (Join-Path $stage '我控制.exe')
+    Copy-Required (Join-Path $SignedOwnedArtifactsRoot '串流中心后台.exe') (Join-Path $stage 'service/串流中心后台.exe')
+    Copy-Required (Join-Path $SignedOwnedArtifactsRoot '卸载串流中心.exe') (Join-Path $uninstaller '串流中心安装.exe')
+    & dotnet run --project "$PSScriptRoot\ResourceVerifier\ResourceVerifier.csproj" -c Release -- "$uninstaller\串流中心安装.exe" none
+    if ($LASTEXITCODE -ne 0) { throw '已签卸载器静态资源校验失败。' }
+} elseif (-not $SkipPublish) {
     Publish-Project "$sourceRoot\host\StreamHub.Host.csproj" $stage
     Publish-Project "$sourceRoot\service\StreamHub.Service.csproj" "$stage\service"
     $uninstallerObj = Join-Path $packageWork 'obj-uninstaller\'
@@ -220,7 +235,7 @@ Sign-Owned @("$ReleaseRoot\我控制-电脑端安装.exe")
 } | ConvertTo-Json | Set-Content -LiteralPath "$ReleaseRoot\Windows签名状态.json" -Encoding utf8
 Copy-Required "$stage\组件清单.json" "$ReleaseRoot\组件清单.json"
 Copy-Required "$licenses\我控制-电脑端源码.zip" "$ReleaseRoot\我控制-电脑端源码.zip"
-[ordered]@{ installer="$ReleaseRoot\我控制-电脑端安装.exe"; payload=$stage; archive=$archive; version=$productVersion.Name; versionCode=$productVersion.Code; releaseChannel=$productVersion.Channel; sha256=(Get-FileHash -LiteralPath "$ReleaseRoot\我控制-电脑端安装.exe" -Algorithm SHA256).Hash } |
+[ordered]@{ installer="$ReleaseRoot\我控制-电脑端安装.exe"; payload=$stage; archive=$archive; version=$productVersion.Name; versionCode=$productVersion.Code; releaseChannel=$productVersion.Channel; installerSigningPending=[bool]$DeferInstallerSigning; sha256=(Get-FileHash -LiteralPath "$ReleaseRoot\我控制-电脑端安装.exe" -Algorithm SHA256).Hash } |
     ConvertTo-Json | Set-Content -LiteralPath "$ReleaseRoot\构建结果.json" -Encoding utf8
 Write-Output "已生成：$ReleaseRoot\我控制-电脑端安装.exe"
 Write-Output "安装资源：$stage"

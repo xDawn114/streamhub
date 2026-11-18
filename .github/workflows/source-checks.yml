@@ -58,6 +58,10 @@ jobs:
           & ./tests/publication/Run.ps1 -FixtureRoot (Join-Path $env:RUNNER_TEMP 'icontrol-release-catalogs')
           dotnet run --project tests/delivery/DeliveryChecks.csproj -c Release -- (Join-Path $env:RUNNER_TEMP 'icontrol-update-delivery')
           if ($LASTEXITCODE -ne 0) { throw 'Update delivery checks failed' }
+      - name: Check signing integration refusal paths without credentials
+        shell: pwsh
+        run: |
+          & ./tests/signing/Run.ps1 -FixtureRoot (Join-Path $env:RUNNER_TEMP 'icontrol-signing-fixtures')
       - name: Archive unsigned app and service build evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
