@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using StreamHub.Host;
@@ -28,6 +29,25 @@ internal static class Program
             Check(((UIElement)window.FindName("AssistancePage")).Visibility == Visibility.Collapsed, "frozen page hidden");
             typeof(MainWindow).GetMethod("OpenAssistance", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
             Check(pages.SelectedItem == window.FindName("HomePage"), "old assistance launch routes to devices");
+            var permissions = (FrameworkElement)window.FindName("DevicePermissionsDialog");
+            permissions.Visibility = Visibility.Visible;
+            using var inputSource = new System.Windows.Interop.HwndSource(
+                new System.Windows.Interop.HwndSourceParameters("Permission keyboard fixture")
+                    { WindowStyle = 0, Width = 1, Height = 1 });
+            var previewEscape = new KeyEventArgs(Keyboard.PrimaryDevice, inputSource, 0, Key.Escape)
+                { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+            permissions.RaiseEvent(previewEscape);
+            Check(permissions.Visibility == Visibility.Visible && !previewEscape.Handled,
+                "permission dialog leaves preview Escape to an open dropdown");
+            var consumedEscape = new KeyEventArgs(Keyboard.PrimaryDevice, inputSource, 0, Key.Escape)
+                { RoutedEvent = Keyboard.KeyDownEvent, Handled = true };
+            permissions.RaiseEvent(consumedEscape);
+            Check(permissions.Visibility == Visibility.Visible,
+                "Escape handled by a nested control does not close the permission dialog");
+            permissions.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, inputSource, 0, Key.Escape)
+                { RoutedEvent = Keyboard.KeyDownEvent });
+            Check(permissions.Visibility == Visibility.Collapsed,
+                "unhandled Escape still closes the permission dialog");
             foreach (string theme in new[] { "Light", "Dark", "HighContrast", "Light" })
             {
                 window.Resources.MergedDictionaries[0] = new ResourceDictionary { Source = new Uri(

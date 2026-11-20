@@ -32,6 +32,11 @@ jobs:
         run: |
           dotnet run --project tests/desktop-input/DesktopInputChecks.csproj -c Release -- service/bin/Release/net8.0-windows/串流中心后台.dll
           if ($LASTEXITCODE -ne 0) { throw 'Desktop policy checks failed' }
+      - name: Check themes, dropdown geometry and nested Escape handling offscreen
+        shell: pwsh
+        run: |
+          dotnet run --project tests/theme-controls/ThemeControlChecks.csproj -c Release -- (Join-Path $env:RUNNER_TEMP 'icontrol-theme-controls')
+          if ($LASTEXITCODE -ne 0) { throw 'Theme and keyboard routing checks failed' }
       - name: Check isolated control boundary, computer policies and firewall rules
         shell: pwsh
         run: |

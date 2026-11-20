@@ -1030,7 +1030,7 @@
     </StackPanel></ScrollViewer>
    </Grid></Border>
   </Grid>
-  <Grid x:Name="DevicePermissionsDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="64" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="DevicePermissions_KeyDown">
+  <Grid x:Name="DevicePermissionsDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="64" KeyboardNavigation.TabNavigation="Cycle" KeyDown="DevicePermissions_KeyDown">
    <Border x:Name="DevicePermissionsFrame" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="8" Padding="24" MaxWidth="760" Margin="24">
     <Grid>
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
