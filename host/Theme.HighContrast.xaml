@@ -1,0 +1,34 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <SolidColorBrush x:Key="Muted" Color="{DynamicResource {x:Static SystemColors.GrayTextColorKey}}" />
+ <SolidColorBrush x:Key="ScrollThumb" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+ <SolidColorBrush x:Key="Accent" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+ <SolidColorBrush x:Key="AccentHover" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+ <SolidColorBrush x:Key="AccentPressed" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+ <SolidColorBrush x:Key="SuccessText" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="DangerText" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="WarningText" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="Canvas" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="TextPrimary" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="BorderDefault" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="Selection" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="AccentText" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="ActionPressedText" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="IconSurface" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="Divider" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="BorderSubtle" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="InsetSurface" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="FeedbackSurface" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="FeedbackTextBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="Surface" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="OnAccent" Color="{DynamicResource {x:Static SystemColors.HighlightTextColorKey}}" />
+ <SolidColorBrush x:Key="SidebarSurface" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="NavigationHover" Color="{DynamicResource {x:Static SystemColors.ControlColorKey}}" />
+ <SolidColorBrush x:Key="NavigationSelected" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+ <SolidColorBrush x:Key="SwitchOff" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="ControlBorder" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="ControlHover" Color="{DynamicResource {x:Static SystemColors.ControlColorKey}}" />
+ <SolidColorBrush x:Key="ControlPressed" Color="{DynamicResource {x:Static SystemColors.ControlColorKey}}" />
+ <SolidColorBrush x:Key="Focus" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+ <SolidColorBrush x:Key="DisabledText" Color="{DynamicResource {x:Static SystemColors.GrayTextColorKey}}" />
+ <SolidColorBrush x:Key="DisabledSurface" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+</ResourceDictionary>

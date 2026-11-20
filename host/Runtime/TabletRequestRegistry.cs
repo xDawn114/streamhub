@@ -47,7 +47,7 @@ public sealed class TabletRequestRegistry(Func<DateTimeOffset>? clock = null)
         }
     }
 
-    public TabletConnectionRequest Create(string clientId, int orientation, string link)
+    public TabletConnectionRequest Create(string clientId, int orientation, string link, bool autoOrientation = false)
     {
         lock (_gate)
         {
@@ -55,9 +55,11 @@ public sealed class TabletRequestRegistry(Func<DateTimeOffset>? clock = null)
             if (!_receivers.TryGetValue(clientId, out var receiver))
                 throw new InvalidOperationException("设备尚未开启接收，或已经离线。请在平板开启“接收电脑副屏请求”。");
             if (!receiver.Orientations.Contains(orientation)) throw new InvalidOperationException("设备不支持所选方向。");
+            if (autoOrientation && !receiver.AutomaticOrientation)
+                throw new InvalidOperationException("请先更新平板端以使用自动旋转，或选择固定方向。");
             if (_requests.Values.Any(x => Active(x.State))) throw new InvalidOperationException("已有副屏请求或连接，请先取消或断开。");
             var request = new TabletConnectionRequest(Guid.NewGuid().ToString("N"), clientId, "waiting", orientation,
-                link, Now.AddSeconds(45), "等待平板接受");
+                link, Now.AddSeconds(45), "等待平板接受", autoOrientation);
             _requests.Add(request.Id, request);
             return request;
         }
@@ -93,7 +95,9 @@ public sealed class TabletRequestRegistry(Func<DateTimeOffset>? clock = null)
         lock (_gate)
         {
             Prune();
-            if (!_requests.TryGetValue(id, out var request) || request.ClientId != clientId || request.State is not ("accepted" or "connecting"))
+            if (!_requests.TryGetValue(id, out var request) || request.ClientId != clientId ||
+                (request.State is not ("accepted" or "connecting") &&
+                 !(request.State == "connected" && _leases.GetValueOrDefault(id) == lease)))
                 throw new InvalidOperationException("电脑的副屏请求已取消或过期。");
             if (_leases.TryGetValue(id, out var current) && current != lease)
                 throw new InvalidOperationException("此副屏请求已绑定另一会话，请取消后重新发起。");

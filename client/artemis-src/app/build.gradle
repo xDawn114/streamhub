@@ -151,6 +151,7 @@ android {
             // overrides in src/debug/res, so release lint sees real defaults.
 
             minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro', 'networking-proguard.pro'
         }
     }

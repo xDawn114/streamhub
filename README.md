@@ -4,7 +4,7 @@
 
 Windows remote desktop and extended display for Android phones and tablets, with file transfer and manual clipboard sync.
 
-> **2026-11-18：电脑和平板已安装 0.8.40 / 182 fix145 / internal，配套源码已公开为 `v0.8.40-source.182`。** 1174个源码文件与冻结快照一致，Windows 294项实装文件及平板回读APK匹配。此次只核对安装身份与设置保留，没有重跑完整功能或性能验收。不同182变体以SHA256区分；手机最近核对168，本次不安装。来源、哈希及测试边界见[公开源码基线](docs/公开源码基线.md)。
+> **2026-11-20：当前产品源码为 0.8.43 / 185 / internal。** 电脑实装为 dropdown171 修订，581项文件匹配；平板实装为 theme168 修订，APK回读匹配。公开源码标签 `v0.8.43-source.185` 对应这两份冻结源码；main 上后续修改另行说明。当前完成限定的主题、下拉框、焦点和文件入口真机走查，尚未完成全部交付专项。来源、哈希及测试边界见[公开源码基线](docs/公开源码基线.md)。
 
 ## 可以做什么
 
@@ -22,7 +22,8 @@ Windows remote desktop and extended display for Android phones and tablets, with
 
 - **平台**：当前维护 Windows 被控端和 Android 控制端，没有 iOS、macOS、Linux 或 Web 版本。
 - **发现与网络**：局域网发现受设备、Wi-Fi 隔离和防火墙影响；可用“地址 + 六位短码”绑定，但电脑地址必须可达。异地直连、中继和速度取决于 Tailscale 与实际网络。
-- **性能**：沿用178同机实测：缓存命中冷连中位4.044秒、最慢4.202秒，通过中位≤5秒／最慢≤5.5秒；热连中位1.944秒、最慢3.224秒，长尾未归因。178至当前182的原生引擎相同，本轮没有新增性能采样，也不作跨环境速度承诺。详见[178验收](docs/178安装验收-2026-11-17.md)和[首帧验收规则](docs/首帧验收规则.md)。
+- **性能**：178同机实测的缓存命中冷连中位4.044秒、最慢4.202秒；热连中位1.944秒、最慢3.224秒。本次主题和文件页修订没有新增性能采样，不作跨环境速度承诺。详见[178验收](docs/178安装验收-2026-11-17.md)和[首帧验收规则](docs/首帧验收规则.md)。
+- **Windows 远程协助**：实验源码保留，正式界面入口隐藏，开发和专项测试已暂停；不作为当前可交付功能。
 - **会话收尾**：176改为电脑核对租约后关闭后端应用，实机12次正常退出均恢复FREE、保留原引擎进程；失败重试及旧请求边界已做隔离检查。物理旋转、强制断网恢复及副屏未在本轮重测，不扩大为所有故障路径均通过。
 - **隐私与输入**：隐私屏支持 `Ctrl+Alt+F12` 紧急恢复；显示器热插拔、Windows 用户切换及所有安卓机型的系统键行为仍需专项验证。连接提示会自动收起，设备授权和托盘断开入口保留。
 - **签名**：Windows 内测包尚无本项目的可信 Authenticode 签名。SignPath 申请已经提交，申请和源码公开都不等于已获批或已签名。
@@ -32,7 +33,7 @@ Windows remote desktop and extended display for Android phones and tablets, with
 
 ## 获取与构建
 
-[Releases](https://github.com/xDawn114/streamhub/releases) 的182 fix145内测预发布提供配套APK、源码、SHA256及明确标为`UNSIGNED`的Windows手动安装器。Windows没有可信代码签名，应用内下载安装继续拒绝；本次公开不等于稳定发布或免交互更新通过。Android内测源用于较低构建码升级；已装其他182变体不会触发同码升级。默认分支为 `main`，不可变源码标签为 `v0.8.40-source.182`；[公开源码基线](docs/公开源码基线.md)列明身份与测试边界。
+最新源码标签为 `v0.8.43-source.185`，默认分支为 `main`。[Releases](https://github.com/xDawn114/streamhub/releases) 中182 fix145仍是历史内测包，本次185源码同步不替换历史安装器，也不移动在线更新清单。Windows尚无可信代码签名，应用内下载安装继续拒绝；Android同构建码的不同本机修订不会触发自动升级。[公开源码基线](docs/公开源码基线.md)列明身份与测试边界。
 
 ### Windows
 
@@ -46,6 +47,10 @@ dotnet run --project tests/desktop-input/DesktopInputChecks.csproj -c Release --
 ```
 
 完整安装器还需要已核对的 Sunshine、Tailscale 和虚拟显示驱动等材料。见 [构建脚本](scripts/构建电脑端.ps1)、[原生组件说明](native/README.md)和 [Sunshine 构建锁](native/Sunshine.build.json)。这些检查不等于完整安装器、真实串流或设备验收。
+
+安装器构建结束（成功或失败）默认清理本次独立构建目录，包括展开载荷、临时安装器和编译中间文件；最终安装包、源码归档和构建结果留在 `ReleaseRoot`，共享下载缓存留在 `BuildRoot/downloads`。排错需要保留中间文件时传入 `-KeepBuildWorkspace`。清理结果写入 `构建结果.json` 的 `workspaceCleanup`；清理失败会提示具体目录，不记为已清理。旧冻结版本及安装后的回滚备份不属于这项构建清理。
+
+每次构建开始先清理超过 24 小时、带本项目标记的临时目录；仍有构建持有文件锁或显式要求保留的目录跳过。随后检查构建盘和输出盘的可用空间，默认至少 8 GiB，可通过 `-MinimumFreeSpaceGB` 调整；不足时列出任务目录和下载缓存位置并停止构建。规则与主题规范见 [UI 与构建维护](docs/ui-theme.md)。
 
 ### Android
 

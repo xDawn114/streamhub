@@ -1,4 +1,5 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:local="clr-namespace:StreamHub.Host" xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="StreamHub.Host.MainWindow" local:FocusInput.Track="True" Title="我控制" Width="1080" Height="760" MinWidth="940" MinHeight="660" WindowStyle="None" ResizeMode="CanResize" WindowStartupLocation="CenterScreen" Background="{DynamicResource Surface}" FontFamily="{DynamicResource DesktopFont}" FontSize="14" Foreground="{DynamicResource TextPrimary}" Loaded="ThemeWindow_Loaded" Closed="ThemeWindow_Closed" StateChanged="ChromeState_Changed" SourceInitialized="ChromeSource_Initialized">
+ <ToolTipService.IsEnabled>False</ToolTipService.IsEnabled>
  <shell:WindowChrome.WindowChrome>
   <shell:WindowChrome CaptionHeight="48" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="10" UseAeroCaptionButtons="False" />
  </shell:WindowChrome.WindowChrome>
@@ -19,18 +20,27 @@
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
      <StackPanel>
-      <ToggleButton x:Name="HeaderToggle" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" FocusVisualStyle="{x:Null}" HorizontalContentAlignment="Stretch" Content="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}" FontWeight="{TemplateBinding FontWeight}">
+      <ToggleButton x:Name="HeaderToggle" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" FocusVisualStyle="{x:Null}" HorizontalContentAlignment="Stretch" Content="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}" FontWeight="{TemplateBinding FontWeight}" MinHeight="44" Cursor="Hand" AutomationProperties.Name="{Binding Header, RelativeSource={RelativeSource TemplatedParent}}">
        <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
-        <Border x:Name="HeaderFrame" Padding="2,8" BorderBrush="Transparent" BorderThickness="1" CornerRadius="4">
-         <DockPanel><Path x:Name="Arrow" DockPanel.Dock="Left" Data="M1,1 L6,6 L1,11" Width="8" Height="12" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Margin="0,0,10,0" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"><Path.RenderTransform><RotateTransform Angle="0"/></Path.RenderTransform></Path><ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{TemplateBinding Foreground}"/></DockPanel>
+        <Border x:Name="HeaderFrame" Padding="12,10" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="6">
+         <DockPanel LastChildFill="True">
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0">
+           <TextBlock x:Name="ExpansionLabel" Text="展开" Foreground="{DynamicResource AccentText}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+           <Path x:Name="Arrow" Data="M1,1 L6,6 L1,11" Width="8" Height="12" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"><Path.RenderTransform><RotateTransform Angle="0"/></Path.RenderTransform></Path>
+          </StackPanel>
+          <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{TemplateBinding Foreground}"/>
+         </DockPanel>
         </Border>
         <ControlTemplate.Triggers>
+         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderFrame" Property="Background" Value="{DynamicResource NavigationHover}"/></Trigger>
+         <Trigger Property="IsPressed" Value="True"><Setter TargetName="HeaderFrame" Property="Background" Value="{DynamicResource Selection}"/></Trigger>
          <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocused" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions><Setter TargetName="HeaderFrame" Property="BorderBrush" Value="{DynamicResource Accent}"/></MultiTrigger>
-         <Trigger Property="IsChecked" Value="True"><Setter TargetName="Arrow" Property="RenderTransform"><Setter.Value><RotateTransform Angle="90"/></Setter.Value></Setter></Trigger>
+         <Trigger Property="IsChecked" Value="True"><Setter TargetName="ExpansionLabel" Property="Text" Value="收起"/><Setter TargetName="Arrow" Property="RenderTransform"><Setter.Value><RotateTransform Angle="90"/></Setter.Value></Setter></Trigger>
+         <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="ExpansionLabel" Property="Foreground" Value="{DynamicResource Muted}"/></Trigger>
         </ControlTemplate.Triggers>
        </ControlTemplate></ToggleButton.Template>
       </ToggleButton>
-      <ContentPresenter x:Name="Body" ContentSource="Content" Visibility="Collapsed"/>
+      <ContentPresenter x:Name="Body" ContentSource="Content" Visibility="Collapsed" Margin="0,12,0,0"/>
      </StackPanel>
      <ControlTemplate.Triggers><Trigger Property="IsExpanded" Value="True"><Setter TargetName="Body" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
@@ -59,44 +69,50 @@
     <Setter Property="MinHeight" Value="40" />
     <Setter Property="Padding" Value="16,8" />
     <Setter Property="Background" Value="{DynamicResource Surface}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderDefault}" />
-    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentText}" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="Template">
      <Setter.Value>
       <ControlTemplate TargetType="Button">
-       <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
-        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
-       </Border>
+       <Grid>
+        <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
+        </Border>
+        <Border x:Name="FocusRing" Margin="-3" BorderThickness="2" CornerRadius="10" BorderBrush="{DynamicResource Focus}" Visibility="Collapsed" IsHitTestVisible="False"/>
+       </Grid>
        <ControlTemplate.Triggers>
-        <Trigger Property="IsMouseOver" Value="True">
-         <Setter TargetName="Frame" Property="Opacity" Value="0.8" />
-        </Trigger>
-        <Trigger Property="IsPressed" Value="True">
-         <Setter TargetName="Frame" Property="Opacity" Value="0.6" />
-        </Trigger>
         <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocused" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions>
-         <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Accent}" />
-         <Setter TargetName="Frame" Property="BorderThickness" Value="2" />
+         <Setter TargetName="FocusRing" Property="Visibility" Value="Visible" />
         </MultiTrigger>
         <Trigger Property="IsEnabled" Value="False">
-         <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Background" Value="{DynamicResource InsetSurface}"/>
+         <Setter Property="Foreground" Value="{DynamicResource DisabledText}"/>
+         <Setter TargetName="Frame" Property="Background" Value="{DynamicResource DisabledSurface}"/>
+         <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource ControlBorder}"/>
         </Trigger>
        </ControlTemplate.Triggers>
       </ControlTemplate>
      </Setter.Value>
     </Setter>
+    <Style.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource ControlHover}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="{DynamicResource ControlPressed}"/><Setter Property="Foreground" Value="{DynamicResource ActionPressedText}"/></Trigger>
+    </Style.Triggers>
    </Style>
    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
     <Setter Property="Background" Value="{DynamicResource Accent}" />
     <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+    <Style.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource AccentHover}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="{DynamicResource AccentPressed}"/><Setter Property="Foreground" Value="{DynamicResource OnAccent}"/></Trigger>
+    </Style.Triggers>
    </Style>
-   <Style x:Key="DangerAction" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Foreground" Value="{DynamicResource DangerText}"/><Setter Property="BorderBrush" Value="{DynamicResource DangerText}"/></Style>
+   <Style x:Key="DangerAction" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Foreground" Value="{DynamicResource DangerText}"/><Setter Property="BorderBrush" Value="{DynamicResource DangerText}"/><Style.Triggers><Trigger Property="IsPressed" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerText}"/></Trigger></Style.Triggers></Style>
    <Style TargetType="TextBox"><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     <Setter Property="Padding" Value="10,8" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderDefault}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
     <Setter Property="Background" Value="{DynamicResource InsetSurface}" />
     <Setter Property="MinHeight" Value="40" />
@@ -107,13 +123,13 @@
      </Border>
      <ControlTemplate.Triggers>
       <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocused" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions><Setter TargetName="InputFrame" Property="BorderBrush" Value="{DynamicResource Accent}"/></MultiTrigger>
-      <Trigger Property="IsEnabled" Value="False"><Setter TargetName="InputFrame" Property="Opacity" Value="0.45"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource DisabledText}"/><Setter TargetName="InputFrame" Property="Background" Value="{DynamicResource DisabledSurface}"/></Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
    </Style>
    <Style TargetType="PasswordBox"><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     <Setter Property="Padding" Value="10,8" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderDefault}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
     <Setter Property="Background" Value="{DynamicResource InsetSurface}" />
     <Setter Property="MinHeight" Value="40" />
@@ -124,7 +140,7 @@
      </Border>
      <ControlTemplate.Triggers>
       <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocused" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions><Setter TargetName="InputFrame" Property="BorderBrush" Value="{DynamicResource Accent}"/></MultiTrigger>
-      <Trigger Property="IsEnabled" Value="False"><Setter TargetName="InputFrame" Property="Opacity" Value="0.45"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource DisabledText}"/><Setter TargetName="InputFrame" Property="Background" Value="{DynamicResource DisabledSurface}"/></Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
    </Style>
@@ -146,6 +162,8 @@
     </Setter>
    </Style>
    <Style x:Key="ComboBoxItemBase" TargetType="ComboBoxItem">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="MinHeight" Value="36" />
     <Setter Property="Padding" Value="12,8" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
@@ -156,34 +174,51 @@
     <Setter Property="Template">
      <Setter.Value>
       <ControlTemplate TargetType="ComboBoxItem">
-       <Border x:Name="ItemFrame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="0" Padding="{TemplateBinding Padding}">
-        <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" ContentStringFormat="{TemplateBinding ContentStringFormat}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" TextElement.Foreground="{TemplateBinding Foreground}" />
-       </Border>
+       <Grid>
+        <Border x:Name="ItemFrame" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+         <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" ContentStringFormat="{TemplateBinding ContentStringFormat}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" TextElement.Foreground="{TemplateBinding Foreground}" />
+        </Border>
+        <Border x:Name="SelectedMark" Width="3" Margin="0,6" HorizontalAlignment="Left" Background="{DynamicResource AccentText}" Visibility="Collapsed"/>
+       </Grid>
        <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+         <Setter TargetName="ItemFrame" Property="Background" Value="{DynamicResource ControlHover}" />
+        </Trigger>
         <Trigger Property="IsSelected" Value="True">
          <Setter TargetName="ItemFrame" Property="Background" Value="{DynamicResource Selection}" />
          <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
+         <Setter TargetName="SelectedMark" Property="Visibility" Value="Visible" />
         </Trigger>
-        <Trigger Property="IsMouseOver" Value="True">
-         <Setter TargetName="ItemFrame" Property="Background" Value="{DynamicResource Selection}" />
-        </Trigger>
+        <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocused" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions><Setter TargetName="ItemFrame" Property="BorderBrush" Value="{DynamicResource Focus}"/></MultiTrigger>
         <Trigger Property="IsEnabled" Value="False">
-         <Setter TargetName="ItemFrame" Property="Opacity" Value="0.42" />
+         <Setter Property="Foreground" Value="{DynamicResource DisabledText}"/>
+         <Setter TargetName="ItemFrame" Property="Background" Value="{DynamicResource DisabledSurface}" />
         </Trigger>
        </ControlTemplate.Triggers>
       </ControlTemplate>
      </Setter.Value>
     </Setter>
    </Style>
+   <Style x:Key="ComboBoxScrollViewer" TargetType="ScrollViewer" BasedOn="{StaticResource OverlayScrollViewer}">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
+     <Grid Background="{TemplateBinding Background}" ClipToBounds="True">
+      <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}" CanContentScroll="{TemplateBinding CanContentScroll}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"/>
+      <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Orientation="Vertical" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+     </Grid>
+    </ControlTemplate></Setter.Value></Setter>
+   </Style>
    <Style x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
     <Setter Property="Focusable" Value="False" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Template">
      <Setter.Value>
       <ControlTemplate TargetType="ToggleButton">
        <Border Background="{TemplateBinding Background}">
-        <Path Data="M 0,0 L 8,0 L 4,4 Z" Fill="{DynamicResource Muted}" HorizontalAlignment="Right" Margin="0,0,16,0" VerticalAlignment="Center" />
+        <Path x:Name="Arrow" Data="M 0,0 L 8,0 L 4,4 Z" Fill="{DynamicResource AccentText}" HorizontalAlignment="Right" Margin="0,0,16,0" VerticalAlignment="Center" />
        </Border>
+       <ControlTemplate.Triggers><Trigger Property="IsEnabled" Value="False"><Setter TargetName="Arrow" Property="Fill" Value="{DynamicResource DisabledText}"/></Trigger></ControlTemplate.Triggers>
       </ControlTemplate>
      </Setter.Value>
     </Setter>
@@ -193,7 +228,7 @@
     <Setter Property="Padding" Value="10,5" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
     <Setter Property="Background" Value="{DynamicResource InsetSurface}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderDefault}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentText}" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="ItemContainerStyle" Value="{StaticResource ComboBoxItemBase}" />
@@ -208,17 +243,21 @@
          </Grid>
         </Border>
         <Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" StaysOpen="False" VerticalOffset="3">
-         <Border Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="8" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
-          <ScrollViewer MaxHeight="320" CanContentScroll="True">
-           <ItemsPresenter />
+         <Border Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource AccentText}" BorderThickness="1" CornerRadius="8" Padding="4" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+          <ScrollViewer Style="{StaticResource ComboBoxScrollViewer}" MaxHeight="320" CanContentScroll="True" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+           <ItemsPresenter HorizontalAlignment="Stretch"/>
           </ScrollViewer>
          </Border>
         </Popup>
        </Grid>
        <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="InputFrame" Property="Background" Value="{DynamicResource ControlHover}"/></Trigger>
+        <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="InputFrame" Property="Background" Value="{DynamicResource Selection}"/></Trigger>
         <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocusWithin" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions><Setter TargetName="InputFrame" Property="BorderBrush" Value="{DynamicResource Accent}"/></MultiTrigger>
         <Trigger Property="IsEnabled" Value="False">
-         <Setter TargetName="InputFrame" Property="Opacity" Value="0.42" />
+         <Setter Property="Foreground" Value="{DynamicResource DisabledText}"/>
+         <Setter TargetName="InputFrame" Property="Background" Value="{DynamicResource DisabledSurface}" />
+         <Setter TargetName="InputFrame" Property="BorderBrush" Value="{DynamicResource ControlBorder}" />
         </Trigger>
        </ControlTemplate.Triggers>
       </ControlTemplate>
@@ -238,13 +277,14 @@
     <Setter Property="Template">
      <Setter.Value>
       <ControlTemplate TargetType="TabItem">
-       <Border x:Name="TabFrame" Padding="16,8" BorderThickness="2" BorderBrush="Transparent" CornerRadius="12" Background="Transparent" HorizontalAlignment="Stretch" MinHeight="48">
+       <Border x:Name="TabFrame" Padding="16,8" BorderThickness="2" BorderBrush="Transparent" CornerRadius="8" Background="Transparent" HorizontalAlignment="Stretch" MinHeight="48">
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
          <TextBlock x:Name="TabIcon" Text="{TemplateBinding Tag}" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{TemplateBinding Foreground}" Width="22" VerticalAlignment="Center" />
          <TextBlock x:Name="TabLabel" Text="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}" FontWeight="{TemplateBinding FontWeight}" Margin="12,0,0,0" VerticalAlignment="Center" />
         </StackPanel>
        </Border>
        <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabFrame" Property="Background" Value="{DynamicResource ControlHover}"/></Trigger>
         <Trigger Property="IsSelected" Value="True">
          <Setter TargetName="TabFrame" Property="Background" Value="{DynamicResource Selection}" />
          <Setter TargetName="TabIcon" Property="Foreground" Value="{DynamicResource AccentText}" />
@@ -267,17 +307,22 @@
     <Setter Property="Template">
      <Setter.Value>
       <ControlTemplate TargetType="TabItem">
-       <Border x:Name="Frame" Padding="2,8" BorderThickness="0,0,0,2" BorderBrush="Transparent">
-        <ContentPresenter x:Name="CategoryHeader" ContentSource="Header" RecognizesAccessKey="True" TextElement.Foreground="{DynamicResource Muted}"/>
-       </Border>
+       <Grid>
+        <Border x:Name="HoverFrame" CornerRadius="6" Background="Transparent"/>
+        <Border x:Name="Frame" Padding="2,8" BorderThickness="0,0,0,2" BorderBrush="Transparent">
+         <ContentPresenter x:Name="CategoryHeader" ContentSource="Header" RecognizesAccessKey="True" TextElement.Foreground="{DynamicResource Muted}"/>
+        </Border>
+        <Border x:Name="FocusRing" Margin="-3" BorderThickness="2" CornerRadius="4" BorderBrush="{DynamicResource Focus}" Visibility="Collapsed" IsHitTestVisible="False"/>
+       </Grid>
        <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HoverFrame" Property="Background" Value="{DynamicResource ControlHover}"/></Trigger>
         <Trigger Property="IsSelected" Value="True">
          <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Accent}" />
          <Setter TargetName="CategoryHeader" Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
          <Setter TargetName="CategoryHeader" Property="TextElement.FontWeight" Value="SemiBold" />
         </Trigger>
         <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsKeyboardFocused" Value="True"/><Condition Property="local:FocusInput.KeyboardMode" Value="True"/></MultiTrigger.Conditions>
-         <Setter TargetName="CategoryHeader" Property="TextElement.Foreground" Value="{DynamicResource AccentText}" /><Setter TargetName="Frame" Property="BorderThickness" Value="1,1,1,3"/><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+         <Setter TargetName="FocusRing" Property="Visibility" Value="Visible"/>
         </MultiTrigger>
        </ControlTemplate.Triggers>
       </ControlTemplate>
@@ -300,14 +345,22 @@
      </Setter.Value>
     </Setter>
    </Style>
+   <Style x:Key="DeviceCardFrame" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource Surface}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource Divider}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="8"/>
+    <Setter Property="Padding" Value="14,12"/>
+    <Setter Property="Margin" Value="0,0,0,8"/>
+   </Style>
    <DataTemplate x:Key="UnifiedDeviceTemplate">
-    <Border BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,0,0,8">
+    <Border Style="{StaticResource DeviceCardFrame}">
      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <TextBlock Text="{Binding Icon}" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
       <StackPanel Grid.Column="1" Margin="0,0,12,0">
        <Grid HorizontalAlignment="Left">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <TextBlock Text="{Binding Name}" MaxWidth="280" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" VerticalAlignment="Center"/>
+        <TextBlock Text="{Binding Name}" MaxWidth="280" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
         <Border Grid.Column="1" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="{Binding TypeText}" FontSize="11" Foreground="{DynamicResource Muted}"/></Border>
        </Grid>
        <WrapPanel Margin="0,7,0,0">
@@ -317,9 +370,9 @@
        <TextBlock Text="{Binding RequestMessage}" Visibility="{Binding RequestVisibility}" TextWrapping="Wrap" Margin="0,6,0,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Caption}"><Style.Triggers><DataTrigger Binding="{Binding RequestFailed}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerText}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
       </StackPanel>
       <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-       <Button Content="{Binding ConnectLabel}" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="ConnectListedReceiver_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanConnect}" ToolTip="{Binding ConnectReason}" ToolTipService.ShowOnDisabled="True" Margin="0,0,4,0"/>
-       <Button Content="发送文件" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="OpenListedFiles_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanOpenFiles}" ToolTip="{Binding FileReason}" ToolTipService.ShowOnDisabled="True" Margin="0,0,4,0"/>
-       <Button Content="重新绑定" Style="{StaticResource HeaderAction}" Click="OpenDevices_Click" Visibility="{Binding BindingVisibility}" ToolTip="使用短码建立独立设备绑定"/><Button Content="⋯" Style="{StaticResource HeaderAction}" Tag="{Binding Id}" Click="OpenDeviceMenu_Click" AutomationProperties.Name="设备操作" ToolTip="设备操作" Visibility="{Binding ManagementVisibility}">
+       <Button Content="{Binding ConnectLabel}" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="ConnectListedReceiver_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanConnect}" Margin="0,0,4,0"/>
+       <Button Content="发送文件" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="OpenListedFiles_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanOpenFiles}" Margin="0,0,4,0"/>
+       <Button Content="重新绑定" Style="{StaticResource HeaderAction}" Click="OpenDevices_Click" Visibility="{Binding BindingVisibility}"/><Button Content="⋯" Style="{StaticResource HeaderAction}" Tag="{Binding Id}" Click="OpenDeviceMenu_Click" AutomationProperties.Name="设备操作" Visibility="{Binding ManagementVisibility}">
         <Button.ContextMenu><ContextMenu Style="{StaticResource DesktopMenu}" DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
          <MenuItem Header="设备详情" Style="{StaticResource DesktopMenuItem}" Tag="{Binding Id}" Click="OpenBoundDeviceDetails_Click"/>
          <MenuItem Header="备注名称" Style="{StaticResource DesktopMenuItem}" Tag="{Binding Id}" Click="OpenDeviceAlias_Click" Visibility="{Binding ActionVisibility}"/>
@@ -333,7 +386,7 @@
    </DataTemplate>
   </ResourceDictionary>
  </Window.Resources>
- <Grid x:Name="WindowSurface" Background="{DynamicResource Surface}" SizeChanged="ChromeSize_Changed">
+ <Grid x:Name="WindowSurface" Background="{DynamicResource Canvas}" SizeChanged="ChromeSize_Changed">
   <Grid.RowDefinitions>
    <RowDefinition Height="48" />
    <RowDefinition Height="*" />
@@ -353,22 +406,22 @@
     <TextBlock Text="我控制" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
    </StackPanel>
    <StackPanel x:Name="CaptionButtons" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Stretch" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-    <Button Style="{StaticResource CaptionButton}" Click="MinimizeWindow_Click" ToolTip="最小化" AutomationProperties.Name="最小化窗口">
+    <Button Style="{StaticResource CaptionButton}" Click="MinimizeWindow_Click" AutomationProperties.Name="最小化窗口">
      <TextBlock Text="" FontFamily="Segoe MDL2 Assets" FontSize="10" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
     </Button>
-    <Button x:Name="MaximizeWindowButton" Style="{StaticResource CaptionButton}" Click="MaximizeWindow_Click" ToolTip="最大化窗口" AutomationProperties.Name="最大化窗口">
+    <Button x:Name="MaximizeWindowButton" Style="{StaticResource CaptionButton}" Click="MaximizeWindow_Click" AutomationProperties.Name="最大化窗口">
      <TextBlock x:Name="MaximizeGlyph" Text="" FontFamily="Segoe MDL2 Assets" FontSize="10" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
     </Button>
-    <Button x:Name="CloseWindowButton" Style="{StaticResource CloseCaptionButton}" Click="CloseWindow_Click" ToolTip="关闭到托盘" AutomationProperties.Name="关闭到托盘">
+    <Button x:Name="CloseWindowButton" Style="{StaticResource CloseCaptionButton}" Click="CloseWindow_Click" AutomationProperties.Name="关闭到托盘">
      <TextBlock Text="" FontFamily="Segoe MDL2 Assets" FontSize="10" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
     </Button>
    </StackPanel>
    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,12,0" shell:WindowChrome.IsHitTestVisibleInChrome="True" IsEnabled="{Binding IsEnabled, ElementName=Pages}">
-    <Button x:Name="AcceptanceButton" Style="{StaticResource HeaderAction}" Background="{DynamicResource InsetSurface}" Click="OpenAcceptance_Click" ToolTip="接受连接状态与暂停" AutomationProperties.Name="接受连接状态"><StackPanel Orientation="Horizontal"><Ellipse x:Name="AcceptanceDot" Width="7" Height="7" Fill="{DynamicResource Muted}" Margin="0,0,6,0"/><TextBlock x:Name="AcceptanceLabel" Text="读取中" VerticalAlignment="Center" FontSize="12"/><Path Data="M0,0 L4,4 L8,0" Stroke="{DynamicResource Muted}" StrokeThickness="1.5" Width="8" Height="5" Margin="8,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
-    <Button x:Name="AccountButton" Style="{StaticResource HeaderIconAction}" Click="OpenAccountPopover_Click" ToolTip="网络连接" AutomationProperties.Name="网络连接">
+    <Button x:Name="AcceptanceButton" Style="{StaticResource HeaderAction}" Background="{DynamicResource InsetSurface}" Click="OpenAcceptance_Click" AutomationProperties.Name="接受连接状态"><StackPanel Orientation="Horizontal"><Ellipse x:Name="AcceptanceDot" Width="7" Height="7" Fill="{DynamicResource Muted}" Margin="0,0,6,0"/><TextBlock x:Name="AcceptanceLabel" Text="读取中" VerticalAlignment="Center" FontSize="12"/><Path Data="M0,0 L4,4 L8,0" Stroke="{DynamicResource Muted}" StrokeThickness="1.5" Width="8" Height="5" Margin="8,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
+    <Button x:Name="AccountButton" Style="{StaticResource HeaderIconAction}" Click="OpenAccountPopover_Click" AutomationProperties.Name="网络连接">
      <Grid Width="20" Height="20"><Path Style="{StaticResource HeaderIconPath}" Data="M19,10 A9,9 0 1 1 1,10 A9,9 0 1 1 19,10 M1,10 H19 M10,1 C5,5 5,15 10,19 M10,1 C15,5 15,15 10,19"/></Grid>
     </Button>
-    <Button x:Name="HeaderMenuButton" Style="{StaticResource HeaderIconAction}" Click="OpenHeaderMenu_Click" ToolTip="帮助与维护" AutomationProperties.Name="帮助与维护">
+    <Button x:Name="HeaderMenuButton" Style="{StaticResource HeaderIconAction}" Click="OpenHeaderMenu_Click" AutomationProperties.Name="帮助与维护">
      <Grid Width="20" Height="20"><Path Style="{StaticResource HeaderIconPath}" Data="M3,5 H17 M3,10 H17 M3,15 H17"/></Grid>
      <Button.ContextMenu>
       <ContextMenu Style="{StaticResource DesktopMenu}">
@@ -383,7 +436,7 @@
   <local:PageContentHost x:Name="Pages" AutomationProperties.Name="页面内容" Grid.Row="1" Background="Transparent" BorderThickness="0" TabStripPlacement="Left" Margin="24,20,24,16" SelectionChanged="Pages_SelectionChanged" Grid.Column="1">
    <TabControl.Template>
     <ControlTemplate TargetType="TabControl">
-     <Border x:Name="PageViewport" Background="{DynamicResource Surface}">
+     <Border x:Name="PageViewport" Background="{DynamicResource Canvas}">
       <Border.RenderTransform>
        <TranslateTransform />
       </Border.RenderTransform>
@@ -395,11 +448,18 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
      <StackPanel x:Name="HomeContent" MaxWidth="960" HorizontalAlignment="Stretch" VerticalAlignment="Top">
       <TextBlock Text="全部设备" Style="{StaticResource PageTitle}"/>
-      <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-       <Border x:Name="HomeLocalBadge" Background="{DynamicResource InsetSurface}" CornerRadius="3" Padding="6,2" Margin="0,0,8,0" VerticalAlignment="Center"><TextBlock Text="本机" FontSize="12" Foreground="{DynamicResource TextPrimary}"/></Border>
-       <TextBlock x:Name="HomeSummaryText" Grid.Column="1" Text="正在读取本机状态…" Style="{StaticResource Caption}" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
-       <Button x:Name="DeviceDetailsButton" Grid.Column="2" Style="{StaticResource HeaderAction}" Click="OpenDeviceDetails_Click" ToolTip="本机地址与设备标识" AutomationProperties.Name="本机详情"><TextBlock Text="" FontFamily="Segoe MDL2 Assets"/></Button>
-      </Grid>
+      <Border x:Name="HomeDeviceCard" Style="{StaticResource DeviceCardFrame}" Margin="0,0,0,20"><Grid>
+       <Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <TextBlock Text="&#xE7F4;" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+       <StackPanel Grid.Column="1" Margin="0,0,12,0">
+        <StackPanel Orientation="Horizontal">
+         <TextBlock x:Name="HomeDeviceNameText" MaxWidth="280" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" VerticalAlignment="Center"/>
+         <Border x:Name="HomeLocalBadge" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="本机" FontSize="11" Foreground="{DynamicResource Muted}"/></Border>
+        </StackPanel>
+        <TextBlock x:Name="HomeSummaryText" Text="正在读取本机状态…" Style="{StaticResource Caption}" Margin="0,7,0,0" AutomationProperties.LiveSetting="Polite"/>
+       </StackPanel>
+       <Button x:Name="DeviceDetailsButton" Grid.Column="2" Style="{StaticResource HeaderAction}" Click="OpenDeviceDetails_Click" AutomationProperties.Name="本机详情"><TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets"/></Button>
+      </Grid></Border>
       <Button x:Name="ReadinessReasonButton" Content="查看原因" Click="OpenReadinessReason_Click" Style="{StaticResource HeaderAction}" Visibility="Collapsed"/>
       <TextBlock x:Name="HomePrivacyText" Text="" Margin="0,0,0,18" Foreground="{DynamicResource WarningText}" Visibility="Collapsed"/>
       <Grid Margin="0,0,0,10"><TextBlock Text="我的设备" Style="{StaticResource Heading}" VerticalAlignment="Center"/><StackPanel HorizontalAlignment="Right" Orientation="Horizontal"><Button x:Name="RefreshDeviceCardsButton" Content="刷新" Click="RefreshDeviceCards_Click" AutomationProperties.Name="刷新设备" Margin="0,0,8,0"/><Button Content="+ 绑定设备" Style="{StaticResource Primary}" Click="OpenDevices_Click" AutomationProperties.Name="绑定设备"/></StackPanel></Grid>
@@ -410,16 +470,257 @@
      </StackPanel>
     </ScrollViewer>
    </TabItem>
+   <TabItem x:Name="AssistancePage" Header="远程协助" Visibility="Collapsed">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12"><StackPanel MaxWidth="960">
+     <Grid Margin="0,0,0,24"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBlock Text="远程协助" Style="{StaticResource PageTitle}" Margin="0" VerticalAlignment="Center"/>
+      <TextBlock x:Name="AssistanceNetworkState" Grid.Column="1" Text="正在读取连接网络" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="12,0" MaxWidth="240" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/>
+      <Button x:Name="AssistanceNetworkButton" Grid.Column="2" Content="连接设置" Click="AssistanceNetwork_Click" AutomationProperties.Name="设置远程协助的连接网络"/>
+     </Grid>
+     <Border x:Name="AssistanceLocalPanel" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1" Padding="0,0,0,24" Margin="0,0,0,24">
+      <StackPanel>
+       <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock Text="本设备" Style="{StaticResource Heading}" Margin="0" VerticalAlignment="Center"/>
+        <CheckBox x:Name="AssistanceEnabledToggle" Grid.Column="1" Content="允许协助" Click="AssistanceEnabled_Click" AutomationProperties.Name="允许协助本设备"/>
+       </Grid>
+       <Border Height="1" Background="{DynamicResource BorderSubtle}" Margin="0,12,0,12"/>
+       <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="24"/><ColumnDefinition/></Grid.ColumnDefinitions>
+        <StackPanel>
+         <TextBlock Text="本机地址" Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+         <TextBlock x:Name="AssistanceAddressText" FontSize="20" FontWeight="SemiBold" Text="正在读取" TextWrapping="Wrap"/>
+         <TextBlock x:Name="AssistanceDeviceName" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+        </StackPanel>
+        <StackPanel Grid.Column="2">
+         <TextBlock Text="临时协助码" Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+         <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="36"/></Grid.ColumnDefinitions>
+          <TextBlock x:Name="AssistanceCodeText" FontSize="26" FontFamily="Consolas" FontWeight="SemiBold" Text="正在准备" VerticalAlignment="Center" AutomationProperties.Name="临时协助码"/>
+          <Button x:Name="AssistanceCodeVisibilityButton" Grid.Column="1" Style="{StaticResource HeaderAction}" Padding="4" Click="AssistanceCodeVisibility_Click" AutomationProperties.Name="显示协助码" IsEnabled="False"><Path x:Name="AssistanceCodeVisibilityIcon" Data="{StaticResource AssistanceEyeIcon}" Width="18" Height="16" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Button>
+         </Grid>
+         <TextBlock x:Name="AssistanceExpiryText" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+        </StackPanel>
+       </Grid>
+       <Grid Margin="0,16,0,0">
+        <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+        <WrapPanel>
+         <Button x:Name="AssistanceCopyButton" Click="AssistanceCopy_Click" IsEnabled="False" Margin="0,0,12,0" AutomationProperties.Name="复制连接信息"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center"/><TextBlock Text="复制连接信息"/></StackPanel></Button>
+         <Button x:Name="AssistanceRefreshButton" Click="AssistanceRefresh_Click" Margin="0,0,12,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center"/><TextBlock Text="刷新协助码"/></StackPanel></Button>
+         <Button x:Name="AssistanceEndButton" Content="结束协助" Style="{StaticResource DangerAction}" Click="AssistanceEnd_Click" IsEnabled="False" Visibility="Collapsed"/>
+        </WrapPanel>
+        <TextBlock x:Name="AssistanceHostState" Grid.Row="1" Text="临时协助已关闭" Style="{StaticResource Caption}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+       </Grid>
+       <Border x:Name="AssistancePendingPanel" Visibility="Collapsed" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,1,0,0" Padding="0,16,0,0" Margin="0,16,0,0"><StackPanel>
+      <TextBlock x:Name="AssistancePeerText" FontWeight="SemiBold" Margin="0,0,0,8"/>
+      <TextBlock x:Name="AssistanceComparisonText" FontFamily="Consolas" FontSize="22" Margin="0,0,0,12"/>
+      <TextBlock Text="本次权限" FontWeight="SemiBold" Margin="0,0,0,8"/>
+      <WrapPanel Margin="0,0,0,12">
+       <RadioButton x:Name="AssistanceViewPermission" Content="仅观看" Foreground="{DynamicResource TextPrimary}" GroupName="AssistancePermission" MinHeight="40" VerticalContentAlignment="Center" Margin="0,0,24,0" Checked="AssistancePermission_Changed" Unchecked="AssistancePermission_Changed"/>
+       <RadioButton x:Name="AssistanceControlPermission" Content="允许控制" Foreground="{DynamicResource TextPrimary}" GroupName="AssistancePermission" MinHeight="40" VerticalContentAlignment="Center" Checked="AssistancePermission_Changed" Unchecked="AssistancePermission_Changed"/>
+      </WrapPanel>
+      <CheckBox x:Name="AssistanceTrustDeviceCheck" Content="信任此设备，下次免协助码" Margin="0,0,0,16" AutomationProperties.Name="信任此设备，下次使用已授予的权限连接"/>
+      <WrapPanel><Button x:Name="AssistanceAllowButton" Content="同意协助" Style="{StaticResource Primary}" Click="AssistanceApprove_Click" IsEnabled="False" Margin="0,0,12,0"/><Button Content="拒绝" Style="{StaticResource DangerAction}" Click="AssistanceEnd_Click"/></WrapPanel>
+       </StackPanel></Border>
+      </StackPanel>
+     </Border>
+     <Border x:Name="AssistanceRemotePanel" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1" Padding="0,0,0,24" Margin="0,0,0,24">
+      <StackPanel>
+       <TextBlock Text="连接其他设备" Style="{StaticResource Heading}" Margin="0"/>
+       <Border Height="1" Background="{DynamicResource BorderSubtle}" Margin="0,12,0,12"/>
+       <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition Width="168"/></Grid.ColumnDefinitions>
+        <StackPanel><TextBlock Text="对方连接信息" Margin="0,0,0,8"/><Grid>
+         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="40"/></Grid.ColumnDefinitions>
+         <TextBox x:Name="AssistanceConnectionBox" MaxLength="8192" TextChanged="AssistanceConnection_Changed" AutomationProperties.Name="被控电脑连接信息"/>
+         <TextBlock Text="粘贴对方复制的连接信息" IsHitTestVisible="False" Foreground="{DynamicResource TextSecondary}" Margin="11,0" VerticalAlignment="Center">
+          <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=AssistanceConnectionBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+         </TextBlock>
+         <Button x:Name="AssistancePasteButton" Grid.Column="1" Style="{StaticResource HeaderAction}" Click="AssistancePaste_Click" AutomationProperties.Name="粘贴连接信息" Margin="4,0,0,0" Padding="4"><TextBlock Text="&#xE77F;" FontFamily="Segoe MDL2 Assets"/></Button>
+        </Grid></StackPanel>
+        <StackPanel Grid.Column="2"><TextBlock Text="临时协助码" Margin="0,0,0,8"/><TextBox x:Name="AssistanceJoinCodeBox" MaxLength="9" CharacterCasing="Upper" FontFamily="Consolas" TextChanged="AssistanceJoinCode_Changed" AutomationProperties.Name="八位临时协助码"/></StackPanel>
+       </Grid>
+       <TextBlock x:Name="AssistanceConnectionHint" Text="请粘贴完整连接信息" Foreground="{DynamicResource TextSecondary}" Margin="0,8,0,0" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite"/>
+       <WrapPanel Margin="0,16,0,0"><Button x:Name="AssistanceJoinButton" Content="连接" Style="{StaticResource Primary}" Click="AssistanceJoin_Click" IsEnabled="False" MinWidth="112" Margin="0,0,12,0"/><Button x:Name="AssistancePeerCancelButton" Content="取消" Click="AssistancePeerCancel_Click" IsEnabled="False" MinWidth="88"/></WrapPanel>
+       <TextBlock x:Name="AssistanceClientState" Style="{StaticResource Caption}" Margin="0,12,0,0" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite"/>
+      </StackPanel>
+     </Border>
+     <StackPanel x:Name="AssistanceTrustedPanel">
+      <TextBlock Text="信任设备" Style="{StaticResource Heading}"/>
+      <TextBlock x:Name="AssistanceTrustEmptyText" Text="暂无信任设备" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+      <StackPanel x:Name="AssistancePeerListGroup" Visibility="Collapsed">
+       <TextBlock Text="我连接的电脑" Style="{StaticResource Caption}" Margin="0,8,0,8"/>
+       <ItemsControl x:Name="AssistancePeerList"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,0,0,8" MinHeight="48">
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}"/></StackPanel>
+        <Button Grid.Column="1" Content="连接" Tag="{Binding Id}" Click="AssistanceTrustedJoin_Click" Margin="0,0,12,0" AutomationProperties.Name="连接信任电脑"/>
+        <Button Grid.Column="2" Tag="{Binding Id}" Click="AssistanceForgetPeer_Click" Style="{StaticResource HeaderAction}" AutomationProperties.Name="移除信任电脑记录"><TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets"/></Button>
+       </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+      </StackPanel>
+      <StackPanel x:Name="AssistanceHostTrustGroup" Visibility="Collapsed">
+       <TextBlock Text="可连接本机的设备" Style="{StaticResource Caption}" Margin="0,8,0,8"/>
+       <ItemsControl x:Name="AssistanceHostTrustList"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,0,0,8" MinHeight="48">
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}"/></StackPanel>
+        <Button Grid.Column="1" Tag="{Binding Id}" Click="AssistanceRevokeTrust_Click" Style="{StaticResource HeaderAction}" AutomationProperties.Name="撤销设备的信任权限"><TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets"/></Button>
+       </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+      </StackPanel>
+     </StackPanel>
+    </StackPanel></ScrollViewer>
+   </TabItem>
    <TabItem x:Name="DevicesPage" Header="绑定"><Grid/></TabItem>
-   <TabItem Header="账号" Tag="" x:Name="AccountPage">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
+
+   <TabItem x:Name="TabletTab" Header="副屏" Tag="">
+    <Grid />
+   </TabItem>
+   <TabItem x:Name="FilesPage" Header="文件" Tag="">
+    <Grid x:Name="FilesContent" MaxWidth="1120" HorizontalAlignment="Stretch" TextElement.FontWeight="Normal">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <StackPanel>
-      <TextBlock Text="账号与连接" Style="{StaticResource PageTitle}" />
+      <TextBlock Text="文件" Style="{StaticResource PageTitle}" Margin="0,0,0,18"/>
+      <Border BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1" Padding="0,0,0,14">
+       <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="260"/><ColumnDefinition Width="*" MinWidth="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Grid VerticalAlignment="Center" HorizontalAlignment="Left">
+         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+         <StackPanel VerticalAlignment="Center" Margin="0,0,4,0" MaxWidth="190">
+         <TextBlock Text="接收目录" Style="{StaticResource Caption}"/>
+         <TextBlock x:Name="FileDirectoryText" Text="未选择" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+         </StackPanel>
+         <Button x:Name="FileOpenDirectoryButton" Grid.Column="1" Style="{StaticResource HeaderAction}" Click="ChooseReceiveDirectory_Click" AutomationProperties.Name="选择接收目录"><TextBlock Text="&#xED25;" FontFamily="Segoe MDL2 Assets" FontSize="16"/></Button>
+        </Grid>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+        <ComboBox x:Name="FileDeviceBox" Width="280" SelectedValuePath="ClientId" SelectionChanged="FileDevice_SelectionChanged" AutomationProperties.Name="文件传输设备" IsSynchronizedWithCurrentItem="False">
+         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate>
+        </ComboBox>
+        <Button Content="设备权限" Click="OpenFileAccessSettings_Click" Margin="6,0"/>
+        <Button x:Name="SendFileButton" Content="发送文件" Style="{StaticResource Primary}" Click="SendFile_Click" Padding="12,8"/>
+        </StackPanel>
+       </Grid>
+      </Border>
+      <TextBlock x:Name="FileStateText" Visibility="Collapsed"/>
+      <TextBlock x:Name="FileInlineStateText" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+     </StackPanel>
+     <Grid Grid.Row="1" Margin="0,14,0,0">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <DockPanel Margin="0,0,0,10">
+       <StackPanel x:Name="FileTaskActions" DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button x:Name="CancelFileButton" Content="取消所选" Style="{StaticResource HeaderAction}" Click="CancelFile_Click" IsEnabled="False" Margin="0,0,8,0"/>
+        <Button Content="清理已结束" Style="{StaticResource HeaderAction}" Click="ClearFileHistory_Click"/>
+       </StackPanel>
+       <TextBlock Text="传输任务" Style="{StaticResource Heading}" VerticalAlignment="Center" Margin="0"/>
+      </DockPanel>
+      <Grid Grid.Row="1">
+       <ListBox x:Name="FileTaskList" Style="{StaticResource FileList}" SelectedValuePath="Id" SelectionChanged="FileTask_SelectionChanged" Background="Transparent" BorderThickness="0" Padding="0" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="传输任务">
+        <ListBox.ItemTemplate><DataTemplate>
+         <Border BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1" Padding="2,10">
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="80"/><ColumnDefinition Width="88"/><ColumnDefinition Width="138"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+           <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,0,12,0"/>
+           <TextBlock Grid.Column="1" Text="{Binding Size}" Style="{StaticResource Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,0,6,0"/>
+           <TextBlock Grid.Column="2" Text="{Binding Direction}" Style="{StaticResource Caption}"/>
+           <TextBlock Grid.Column="3" Text="{Binding StateText}" Style="{StaticResource Caption}" TextAlignment="Right"/>
+           <ProgressBar Grid.Row="1" Grid.ColumnSpan="3" Value="{Binding Percent}" Maximum="100" Height="4" Margin="0,12,16,0" Foreground="{DynamicResource Accent}" Background="{DynamicResource InsetSurface}" AutomationProperties.Name="传输进度"/>
+           <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding Percent, StringFormat={}{0}%}" Style="{StaticResource Caption}" TextAlignment="Right" Margin="0,6,0,0"/>
+          </Grid>
+         </Border>
+        </DataTemplate></ListBox.ItemTemplate>
+       </ListBox>
+       <StackPanel x:Name="FileTasksEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Text="&#xED25;" FontFamily="Segoe MDL2 Assets" FontSize="40" Foreground="{DynamicResource Muted}" Opacity="0.4" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+        <TextBlock x:Name="FileTasksEmptyText" Text="暂无传输任务" Style="{StaticResource Caption}" HorizontalAlignment="Center"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,14,0,0">
+         <Button x:Name="FileInlineAllowButton" Content="信任此设备" Click="GrantSelectedFileDevice_Click" Visibility="Collapsed"/>
+         <Button x:Name="FileInlineEnableButton" Content="设备权限" Click="OpenFileAccessSettings_Click" Visibility="Collapsed"/>
+        </StackPanel>
+       </StackPanel>
+      </Grid>
+     </Grid>
+    </Grid>
+   </TabItem>
+   <TabItem x:Name="SettingsPage" Header="设置" Tag="">
+    <Grid x:Name="SettingsContent" MaxWidth="960" HorizontalAlignment="Stretch">
+     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+     </Grid.RowDefinitions>
+     <TextBlock Text="设置" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,20" />
+     <TabControl x:Name="SettingsCategories" Grid.Row="1" KeyboardNavigation.TabNavigation="Continue" KeyboardNavigation.DirectionalNavigation="Contained" Style="{StaticResource SettingsCategoryControl}" AutomationProperties.Name="电脑设置分类">
+      <TabItem Header="常规" Style="{StaticResource SettingsCategoryItem}">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
+        <StackPanel>
+         <local:SettingRow Header="应用主题" Tag="">
+          <ComboBox x:Name="ThemeChoice" Grid.Column="1" AutomationProperties.Name="应用主题" SelectionChanged="Appearance_Changed" Width="224">
+           <ComboBoxItem Content="跟随系统" />
+           <ComboBoxItem Content="浅色" />
+           <ComboBoxItem Content="深色" />
+          </ComboBox>
+         </local:SettingRow>
+         <local:SettingRow Header="减少页面动画" Tag="&#xE7C4;">
+          <CheckBox x:Name="ReduceMotionCheck" Click="Appearance_Changed" MinHeight="40" AutomationProperties.Name="减少页面动画" />
+         </local:SettingRow>
+         <local:SettingRow Header="防止电脑自动睡眠" Tag="">
+          <ComboBox x:Name="PreventSleepChoice" SelectedIndex="1" SelectionChanged="PreventSleep_Changed" AutomationProperties.Name="防止电脑自动睡眠" Width="224">
+           <ComboBoxItem Content="跟随 Windows 电源设置" />
+           <ComboBoxItem Content="仅远控或副屏连接期间" />
+           <ComboBoxItem Content="插电时持续保持远程在线" />
+          </ComboBox>
+         </local:SettingRow>
+         <local:SettingRow Header="登录后显示托盘入口" Tag="">
+          <CheckBox x:Name="AutoStartCheck" FontSize="14" Click="AutoStart_Click" AutomationProperties.Name="登录后显示托盘入口" />
+         </local:SettingRow>
+         <Button Style="{StaticResource DangerAction}" Content="停止所有远程服务" Margin="0,20,0,0" Click="StopAll_Click" />
+        </StackPanel>
+       </ScrollViewer>
+      </TabItem>
+      <TabItem Header="安全与权限" Style="{StaticResource SettingsCategoryItem}">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
+        <StackPanel>
+         <Border Style="{StaticResource Card}">
+          <StackPanel>
+           <TextBlock Text="安全与隐私" Style="{StaticResource Heading}" />
+           <local:SettingRow Header="远控隐私保护" Tag="">
+            <CheckBox x:Name="PrivacyModeCheck" Click="PrivacyMode_Click" AutomationProperties.Name="远控隐私保护" />
+           </local:SettingRow>
+           <Button x:Name="PrivacyRecoverButton" Content="立即恢复屏幕" Click="PrivacyRecoverButton_Click" Margin="0,8,0,0" Padding="12,8" AutomationProperties.Name="立即恢复本机屏幕" />
+
+           <Border Height="1" Background="{DynamicResource Divider}" Margin="0,20,0,16" />
+           <Expander x:Name="LoginSettingsSection" Header="锁屏与登录">
+            <ContentControl x:Name="HostPolicySettings" Loaded="HostPolicySettings_Loaded" HorizontalContentAlignment="Stretch" Margin="0,12,0,0" Focusable="False" IsTabStop="False" FocusVisualStyle="{x:Null}" />
+           </Expander>
+          </StackPanel>
+         </Border>
+
+        </StackPanel>
+       </ScrollViewer>
+      </TabItem>
+      <TabItem Header="输入" Style="{StaticResource SettingsCategoryItem}">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
+        <StackPanel>
+         <Border Style="{StaticResource Card}">
+          <StackPanel>
+           <TextBlock Text="快捷键" Style="{StaticResource Heading}" />
+           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + Alt + F12" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="0" Grid.Column="1" Text="立即恢复隐私屏（本机）" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="1" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Alt + Tab" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="1" Grid.Column="1" Text="切换上一个窗口" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="2" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Win + Tab" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="2" Grid.Column="1" Text="查看 Windows 任务视图" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="3" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Win + D" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="3" Grid.Column="1" Text="显示桌面" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="4" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + C / V / X" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="4" Grid.Column="1" Text="复制、粘贴、剪切" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="5" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + Z" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="5" Grid.Column="1" Text="撤销" VerticalAlignment="Center" Margin="0,0,0,10"/>
+            <Border Grid.Row="6" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Esc" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="6" Grid.Column="1" Text="取消当前操作" VerticalAlignment="Center" Margin="0,0,0,10"/>
+           </Grid>
+          </StackPanel>
+         </Border>
+        </StackPanel>
+       </ScrollViewer>
+      </TabItem>
+      <TabItem x:Name="NetworkSettingsCategory" Header="网络" Style="{StaticResource SettingsCategoryItem}">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
+        <StackPanel>
       <Border Style="{StaticResource Card}">
        <StackPanel>
         <TextBlock x:Name="ConnectionMethodHeading" Text="连接方式" Style="{StaticResource Heading}" />
         <TextBlock x:Name="ProviderSavedText" Text="正在读取连接设置…" Style="{StaticResource Caption}" Margin="0,0,0,8" />
-        <ComboBox x:Name="ProviderBox" SelectionChanged="ProviderSelectionChanged" AutomationProperties.Name="连接方式" Width="280" HorizontalAlignment="Left" Margin="0,8,0,12" ToolTip="电脑与平板需选择相同方式">
+        <ComboBox x:Name="ProviderBox" SelectionChanged="ProviderSelectionChanged" AutomationProperties.Name="连接方式" Width="280" HorizontalAlignment="Left" Margin="0,8,0,12">
           <ComboBoxItem Content="Tailscale" Tag="tailscale" />
           <ComboBoxItem Content="自建服务区" Tag="self-hosted" />
           <ComboBoxItem Content="局域网/USB" Tag="lan" />
@@ -428,14 +729,14 @@
         <StackPanel x:Name="ProviderServerPanel" Visibility="Collapsed">
          <TextBlock Text="服务区 HTTPS 地址" Margin="0,0,0,8" />
          <TextBox x:Name="ProviderServerBox" MaxLength="2048" TextChanged="ProviderInputChanged" AutomationProperties.Name="服务区 HTTPS 地址" Width="440" HorizontalAlignment="Left" />
-         <TextBlock Text="兼容 Headscale，例如 https://vpn.example.com。电脑与平板须使用同一服务区。" Style="{StaticResource Caption}" Margin="0,8,0,16" />
+         <TextBlock Text="例如 https://vpn.example.com" Style="{StaticResource Caption}" Margin="0,8,0,16" />
         </StackPanel>
         <StackPanel x:Name="ProviderManualPanel" Visibility="Collapsed">
          <TextBlock Text="本机对外可达 IPv4 地址" Margin="0,0,0,8" />
          <TextBox x:Name="ProviderManualBox" MaxLength="512" TextChanged="ProviderInputChanged" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="70" AutomationProperties.Name="本机手动发布地址" Width="440" HorizontalAlignment="Left" />
-         <TextBlock Text="最多 8 个，逗号或换行分隔。将发布给已绑定接收端；接收端也需填写对应地址。此通道不自动启用 VPN。" Style="{StaticResource Caption}" Margin="0,8,0,16" />
+         <TextBlock Text="多个地址用逗号或换行分隔。" Style="{StaticResource Caption}" Margin="0,8,0,16" />
         </StackPanel>
-        <TextBlock x:Name="ProviderMessage" Style="{StaticResource Caption}" Text="选择后自动应用；地址输入需保存。更换服务区前请先退出连接账号。" />
+        <TextBlock x:Name="ProviderMessage" Style="{StaticResource Caption}" Text="选择后自动应用。" />
         <Button x:Name="ApplyProviderButton" IsEnabled="False" Content="保存地址" Click="SaveProvider_Click" Margin="0,16,0,0" />
        </StackPanel>
       </Border>
@@ -444,12 +745,14 @@
         <TextBlock x:Name="ConnectionStatusHeading" Text="连接状态" Style="{StaticResource Heading}" />
         <TextBlock x:Name="NetworkStateText" Text="正在检查连接状态" FontSize="14" FontWeight="Normal" Margin="0,4,0,8" />
         <TextBlock x:Name="NetworkDetailText" Style="{StaticResource Caption}" />
-        <Expander Header="更多连接操作" Margin="0,16,0,0"><WrapPanel x:Name="RemoteNetworkActions">
-         <Button Content="启用内置连接" Style="{StaticResource Primary}" Click="NetworkStart_Click" Margin="0,0,8,8" />
-         <Button Content="登录账号" Click="NetworkLogin_Click" Margin="0,0,8,8" />
-         <Button Content="恢复原网络" Click="NetworkRestore_Click" Margin="0,0,8,8" />
-        <Button Content="退出连接账号" Click="NetworkLogout_Click" Margin="0,0,8,8"/>
-        </WrapPanel></Expander>
+        <StackPanel x:Name="RemoteNetworkActions" Margin="0,16,0,0">
+         <Button x:Name="NetworkLoginButton" Content="登录账号" Style="{StaticResource Primary}" Click="NetworkLogin_Click" AutomationProperties.Name="登录连接账号"/>
+         <TextBlock x:Name="NetworkLoginProgressText" Style="{StaticResource Caption}" Visibility="Collapsed" Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite"/>
+         <Expander x:Name="NetworkSetupExpander" Header="更多连接操作" Margin="0,16,0,0"><WrapPanel>
+          <Button Content="恢复原网络" Click="NetworkRestore_Click" Margin="0,0,8,8" />
+          <Button Content="退出连接账号" Click="NetworkLogout_Click" Margin="0,0,8,8"/>
+         </WrapPanel></Expander>
+        </StackPanel>
         <TextBox x:Name="LoginUrlBox" IsReadOnly="True" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="账号授权地址" />
         <Button x:Name="CopyLoginButton" Content="复制授权链接" Click="CopyLogin_Click" Visibility="Collapsed" Margin="0,8,0,0" />
         <TextBlock x:Name="LoginBrowserHint" Style="{StaticResource Caption}" FontSize="12" Text="通过浏览器完成授权。" Visibility="Collapsed" Margin="0,16,0,0" />
@@ -480,159 +783,10 @@
         <TextBlock x:Name="PeerEmptyText" Text="暂无设备" Style="{StaticResource Caption}" />
        </StackPanel>
       </Border>
-     </StackPanel>
-    </ScrollViewer>
-   </TabItem>
-   <TabItem x:Name="TabletTab" Header="副屏" Tag="">
-    <Grid />
-   </TabItem>
-   <TabItem x:Name="FilesPage" Header="文件" Tag="">
-    <Grid x:Name="FilesContent" MaxWidth="1120" HorizontalAlignment="Stretch" TextElement.FontWeight="Normal">
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <StackPanel>
-      <TextBlock Text="文件" Style="{StaticResource PageTitle}" Margin="0,0,0,18"/>
-      <Border BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1" Padding="0,0,0,14">
-       <Grid>
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="260"/><ColumnDefinition Width="*" MinWidth="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <Grid VerticalAlignment="Center" HorizontalAlignment="Left">
-         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-         <StackPanel VerticalAlignment="Center" Margin="0,0,4,0" MaxWidth="190">
-         <TextBlock Text="接收目录" Style="{StaticResource Caption}"/>
-         <TextBlock x:Name="FileDirectoryText" Text="未选择" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-         </StackPanel>
-         <Button x:Name="FileOpenDirectoryButton" Grid.Column="1" Style="{StaticResource HeaderAction}" Click="OpenReceiveDirectory_Click" ToolTip="打开接收目录" AutomationProperties.Name="打开接收目录" ToolTipService.ShowOnDisabled="True"><TextBlock Text="&#xED25;" FontFamily="Segoe MDL2 Assets" FontSize="16"/></Button>
-        </Grid>
-        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-        <ComboBox x:Name="FileDeviceBox" Width="280" SelectedValuePath="ClientId" SelectionChanged="FileDevice_SelectionChanged" AutomationProperties.Name="文件传输设备">
-         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}"/></DataTemplate></ComboBox.ItemTemplate>
-        </ComboBox>
-        <Button Content="设备权限" Click="OpenFileAccessSettings_Click" Margin="6,0"/>
-        <Button x:Name="SendFileButton" Content="发送文件" Style="{StaticResource Primary}" Click="SendFile_Click" Padding="12,8" ToolTipService.ShowOnDisabled="True"/>
-        </StackPanel>
-       </Grid>
-      </Border>
-      <TextBlock x:Name="FileStateText" Visibility="Collapsed"/>
-      <TextBlock x:Name="FileInlineStateText" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
-     </StackPanel>
-     <Grid Grid.Row="1" Margin="0,14,0,0">
-      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-      <DockPanel Margin="0,0,0,10">
-       <StackPanel x:Name="FileTaskActions" DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button x:Name="CancelFileButton" Content="取消所选" Style="{StaticResource HeaderAction}" Click="CancelFile_Click" IsEnabled="False" ToolTip="请选择进行中的任务" ToolTipService.ShowOnDisabled="True" Margin="0,0,8,0"/>
-        <Button Content="清理已结束" Style="{StaticResource HeaderAction}" Click="ClearFileHistory_Click"/>
-       </StackPanel>
-       <TextBlock Text="传输任务" Style="{StaticResource Heading}" VerticalAlignment="Center" Margin="0"/>
-      </DockPanel>
-      <Grid Grid.Row="1">
-       <ListBox x:Name="FileTaskList" Style="{StaticResource FileList}" SelectedValuePath="Id" SelectionChanged="FileTask_SelectionChanged" Background="Transparent" BorderThickness="0" Padding="0" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="传输任务">
-        <ListBox.ItemTemplate><DataTemplate>
-         <Border BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1" Padding="2,10">
-          <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="80"/><ColumnDefinition Width="88"/><ColumnDefinition Width="138"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-           <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Margin="0,0,12,0"/>
-           <TextBlock Grid.Column="1" Text="{Binding Size}" Style="{StaticResource Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Size}" Margin="0,0,6,0"/>
-           <TextBlock Grid.Column="2" Text="{Binding Direction}" Style="{StaticResource Caption}"/>
-           <TextBlock Grid.Column="3" Text="{Binding StateText}" Style="{StaticResource Caption}" TextAlignment="Right"/>
-           <ProgressBar Grid.Row="1" Grid.ColumnSpan="3" Value="{Binding Percent}" Maximum="100" Height="4" Margin="0,12,16,0" Foreground="{DynamicResource Accent}" Background="{DynamicResource InsetSurface}" AutomationProperties.Name="传输进度"/>
-           <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding Percent, StringFormat={}{0}%}" Style="{StaticResource Caption}" TextAlignment="Right" Margin="0,6,0,0"/>
-          </Grid>
-         </Border>
-        </DataTemplate></ListBox.ItemTemplate>
-       </ListBox>
-       <StackPanel x:Name="FileTasksEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <TextBlock Text="&#xED25;" FontFamily="Segoe MDL2 Assets" FontSize="40" Foreground="{DynamicResource Muted}" Opacity="0.4" HorizontalAlignment="Center" Margin="0,0,0,16"/>
-        <TextBlock x:Name="FileTasksEmptyText" Text="暂无传输任务" Style="{StaticResource Caption}" HorizontalAlignment="Center"/>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,14,0,0">
-         <Button x:Name="FileInlineAllowButton" Content="核对文件授权" Click="GrantSelectedFileDevice_Click" Visibility="Collapsed"/>
-         <Button x:Name="FileInlineEnableButton" Content="设备权限" Click="OpenFileAccessSettings_Click" Visibility="Collapsed"/>
-        </StackPanel>
-       </StackPanel>
-      </Grid>
-     </Grid>
-    </Grid>
-   </TabItem>
-   <TabItem x:Name="SettingsPage" Header="设置" Tag="">
-    <Grid x:Name="SettingsContent" MaxWidth="960" HorizontalAlignment="Stretch">
-     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-     </Grid.RowDefinitions>
-     <TextBlock Text="设置" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,20" />
-     <TabControl x:Name="SettingsCategories" Grid.Row="1" KeyboardNavigation.TabNavigation="Continue" KeyboardNavigation.DirectionalNavigation="Contained" Style="{StaticResource SettingsCategoryControl}" AutomationProperties.Name="电脑设置分类">
-      <TabItem Header="常规" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
-        <StackPanel>
-         <local:SettingRow Header="应用主题" ToolTip="跟随系统，或选择浅色与深色外观" Tag="">
-          <ComboBox x:Name="ThemeChoice" Grid.Column="1" AutomationProperties.Name="应用主题" SelectionChanged="Appearance_Changed" Width="224">
-           <ComboBoxItem Content="跟随系统" />
-           <ComboBoxItem Content="浅色" />
-           <ComboBoxItem Content="深色" />
-          </ComboBox>
-         </local:SettingRow>
-         <local:SettingRow Header="减少页面动画" ToolTip="系统关闭动画时也会停用过渡" Tag="&#xE7C4;">
-          <CheckBox x:Name="ReduceMotionCheck" Click="Appearance_Changed" MinHeight="40" AutomationProperties.Name="减少页面动画" />
-         </local:SettingRow>
-         <local:SettingRow Header="防止电脑自动睡眠" ToolTip="允许屏幕熄灭；合盖和手动睡眠遵循 Windows 设置" Tag="">
-          <ComboBox x:Name="PreventSleepChoice" SelectedIndex="1" SelectionChanged="PreventSleep_Changed" AutomationProperties.Name="防止电脑自动睡眠" Width="224">
-           <ComboBoxItem Content="跟随 Windows 电源设置" />
-           <ComboBoxItem Content="仅远控或副屏连接期间" />
-           <ComboBoxItem Content="插电时持续保持远程在线" />
-          </ComboBox>
-         </local:SettingRow>
-         <local:SettingRow Header="登录后显示托盘入口" ToolTip="后台服务随系统启动，关闭窗口后仍可连接" Tag="">
-          <CheckBox x:Name="AutoStartCheck" FontSize="14" Click="AutoStart_Click" AutomationProperties.Name="登录后显示托盘入口" />
-         </local:SettingRow>
-         <Button Style="{StaticResource DangerAction}" Content="停止所有远程服务" Margin="0,20,0,0" Click="StopAll_Click" />
-        </StackPanel>
-       </ScrollViewer>
-      </TabItem>
-      <TabItem Header="安全与权限" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
-        <StackPanel>
-         <Border Style="{StaticResource Card}">
-          <StackPanel>
-           <TextBlock Text="安全与隐私" Style="{StaticResource Heading}" />
-           <local:SettingRow Header="远控隐私保护" ToolTip="主屏连接时遮住本机画面；Ctrl+Alt+F12 可恢复" Tag="">
-            <CheckBox x:Name="PrivacyModeCheck" Click="PrivacyMode_Click" AutomationProperties.Name="远控隐私保护" />
-           </local:SettingRow>
-           <Button x:Name="PrivacyRecoverButton" Content="立即恢复屏幕" Click="PrivacyRecoverButton_Click" Margin="0,8,0,0" Padding="12,8" AutomationProperties.Name="立即恢复本机屏幕" ToolTipService.ShowOnDisabled="True" />
-
-           <Border Height="1" Background="{DynamicResource Divider}" Margin="0,20,0,16" />
-           <Expander x:Name="LoginSettingsSection" Header="锁屏与登录">
-            <ContentControl x:Name="HostPolicySettings" Loaded="HostPolicySettings_Loaded" HorizontalContentAlignment="Stretch" Margin="0,12,0,0" />
-           </Expander>
-          </StackPanel>
-         </Border>
-
-        </StackPanel>
-       </ScrollViewer>
-      </TabItem>
-      <TabItem Header="输入" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
-        <StackPanel>
-         <Border Style="{StaticResource Card}">
-          <StackPanel>
-           <TextBlock Text="快捷键" Style="{StaticResource Heading}" ToolTip="平板的系统快捷键需在平板授权。" />
-           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Border Grid.Row="0" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + Alt + F12" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="0" Grid.Column="1" Text="立即恢复隐私屏（本机）" VerticalAlignment="Center" Margin="0,0,0,10"/>
-            <Border Grid.Row="1" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Alt + Tab" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="1" Grid.Column="1" Text="切换上一个窗口" VerticalAlignment="Center" Margin="0,0,0,10"/>
-            <Border Grid.Row="2" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Win + Tab" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="2" Grid.Column="1" Text="查看 Windows 任务视图" VerticalAlignment="Center" Margin="0,0,0,10"/>
-            <Border Grid.Row="3" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Win + D" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="3" Grid.Column="1" Text="显示桌面" VerticalAlignment="Center" Margin="0,0,0,10"/>
-            <Border Grid.Row="4" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + C / V / X" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="4" Grid.Column="1" Text="复制、粘贴、剪切" VerticalAlignment="Center" Margin="0,0,0,10"/>
-            <Border Grid.Row="5" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Ctrl + Z" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="5" Grid.Column="1" Text="撤销" VerticalAlignment="Center" Margin="0,0,0,10"/>
-            <Border Grid.Row="6" Background="{DynamicResource InsetSurface}" BorderBrush="{DynamicResource BorderDefault}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,20,10"><TextBlock Text="Esc" FontSize="12" FontFamily="{DynamicResource DesktopFont}"/></Border><TextBlock Grid.Row="6" Grid.Column="1" Text="取消当前操作" VerticalAlignment="Center" Margin="0,0,0,10"/>
-           </Grid>
-          </StackPanel>
-         </Border>
-        </StackPanel>
-       </ScrollViewer>
-      </TabItem>
-      <TabItem Header="网络" Style="{StaticResource SettingsCategoryItem}">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
-        <StackPanel>
          <Border Style="{StaticResource Card}" Loaded="NetworkAccess_Loaded">
           <StackPanel>
            <TextBlock Text="网络访问" Style="{StaticResource Heading}" />
-           <local:SettingRow Header="允许公共网络局域网连接" ToolTip="仅在确认网络可信时开启，设备仍需绑定" Tag="">
+           <local:SettingRow Header="允许公共网络局域网连接" Tag="">
             <CheckBox x:Name="PublicLanAccessCheck" IsEnabled="False" Click="NetworkAccess_Changed" MinHeight="40" AutomationProperties.Name="允许公共网络局域网连接" />
            </local:SettingRow>
            <TextBlock x:Name="NetworkAccessStateText" Text="读取中…" Style="{StaticResource Caption}" FontSize="12" AutomationProperties.LiveSetting="Polite" />
@@ -652,17 +806,18 @@
           <ColumnDefinition />
          </Grid.ColumnDefinitions>
          <StackPanel>
-          <TextBlock Text="电脑发起时的方向" Margin="0,0,0,8" ToolTip="仅用于电脑发起副屏请求；平板主动连接时采用平板端方向" />
+          <TextBlock Text="电脑发起时的方向" Margin="0,0,0,8" />
           <ComboBox x:Name="OrientationBox" SelectedIndex="0" SelectionChanged="TabletPreference_Changed" AutomationProperties.Name="电脑发起副屏时的方向">
            <ComboBoxItem Content="横屏 · 0°" Tag="0" />
            <ComboBoxItem Content="竖屏 · 90°" Tag="90" />
            <ComboBoxItem Content="反向横屏 · 180°" Tag="180" />
            <ComboBoxItem Content="反向竖屏 · 270°" Tag="270" />
+           <ComboBoxItem Content="自动 · 跟随平板旋转" Tag="auto" />
           </ComboBox>
          </StackPanel>
          <StackPanel Grid.Column="2">
           <TextBlock Text="连接方式" Margin="0,0,0,8" />
-          <ComboBox x:Name="RequestLinkBox" SelectedIndex="0" SelectionChanged="TabletPreference_Changed" AutomationProperties.Name="电脑发起副屏的连接方式" ToolTip="USB 直连需在平板开启 USB 网络共享">
+          <ComboBox x:Name="RequestLinkBox" SelectedIndex="0" SelectionChanged="TabletPreference_Changed" AutomationProperties.Name="电脑发起副屏的连接方式">
            <ComboBoxItem Content="自动选择" Tag="auto" />
            <ComboBoxItem Content="无线网络" Tag="lan" />
            <ComboBoxItem Content="USB 直连" Tag="usb" />
@@ -679,15 +834,15 @@
            <TextBlock Text="版本与更新" Style="{StaticResource Heading}" />
            <TextBlock x:Name="UpdateVersionText" TextWrapping="Wrap" Margin="0,0,0,8" />
            <TextBlock x:Name="UpdateNotesText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed" />
-           <local:SettingRow Header="自动检查更新" ToolTip="每12小时检查一次；连接期间不安装" Tag="">
+           <local:SettingRow Header="自动检查更新" Tag="">
             <CheckBox x:Name="AutoCheckUpdateCheck" Click="UpdatePreferences_Changed" AutomationProperties.Name="自动检查更新" />
            </local:SettingRow>
-           <local:SettingRow Header="空闲时自动下载" ToolTip="仅在非计费网络下载，安装仍需确认" Tag="">
+           <local:SettingRow Header="空闲时自动下载" Tag="">
             <CheckBox x:Name="AutoDownloadUpdateCheck" Click="UpdatePreferences_Changed" AutomationProperties.Name="空闲时自动下载" />
            </local:SettingRow>
            <ProgressBar x:Name="UpdateProgress" Height="6" Minimum="0" Maximum="100" Margin="0,8,0,8" Visibility="Collapsed" AutomationProperties.Name="更新下载进度" />
            <WrapPanel Margin="0,16,0,0">
-            <Button x:Name="CheckUpdateButton" Content="检查更新" Style="{StaticResource Primary}" Click="CheckUpdate_Click" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
+            <Button x:Name="CheckUpdateButton" Content="检查更新" Style="{StaticResource Primary}" Click="CheckUpdate_Click" Margin="0,0,8,8" />
             <Button x:Name="DownloadUpdateButton" Content="下载更新" Click="DownloadUpdate_Click" Visibility="Collapsed" Margin="0,0,8,8" />
             <Button x:Name="InstallUpdateButton" Content="安装更新" Click="InstallUpdate_Click" Visibility="Collapsed" Margin="0,0,8,8" />
             <Button x:Name="CancelUpdateButton" Content="取消" Click="CancelUpdate_Click" Visibility="Collapsed" Margin="0,0,8,8" />
@@ -759,6 +914,7 @@
     </Grid.RowDefinitions>
     <StackPanel Margin="0,18,0,0">
      <RadioButton x:Name="HomeNavigation" Content="全部设备" Tag="" Style="{StaticResource NavigationItem}" IsChecked="{Binding IsSelected, ElementName=HomePage, Mode=TwoWay}" />
+     <RadioButton x:Name="AssistanceNavigation" Content="远程协助" Tag="assistance-eye" Visibility="Collapsed" Style="{StaticResource NavigationItem}" IsChecked="{Binding IsSelected, ElementName=AssistancePage, Mode=TwoWay}" />
      <RadioButton Content="文件" Tag="" Style="{StaticResource NavigationItem}" IsChecked="{Binding IsSelected, ElementName=FilesPage, Mode=TwoWay}" />
     </StackPanel>
     <RadioButton x:Name="SettingsNavigation" Grid.Row="2" Content="设置" Tag="" Style="{StaticResource NavigationItem}" Margin="10,10,10,14" IsChecked="{Binding IsSelected, ElementName=SettingsPage, Mode=TwoWay}" />
@@ -789,7 +945,7 @@
      <ColumnDefinition Width="32" />
     </Grid.ColumnDefinitions>
     <TextBlock x:Name="FeedbackText" Foreground="{DynamicResource FeedbackTextBrush}" VerticalAlignment="Center" Margin="0,0,12,0" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
-    <Button Grid.Column="1" Style="{StaticResource HeaderAction}" Padding="4" MinWidth="28" Height="28" Click="DismissFeedback_Click" ToolTip="关闭提示" AutomationProperties.Name="关闭提示">
+    <Button Grid.Column="1" Style="{StaticResource HeaderAction}" Padding="4" MinWidth="28" Height="28" Click="DismissFeedback_Click" AutomationProperties.Name="关闭提示">
      <TextBlock Text="" FontFamily="Segoe MDL2 Assets" FontSize="10" />
     </Button>
    </Grid>
@@ -824,55 +980,63 @@
   <Grid x:Name="BindingDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="60" PreviewKeyDown="BindingDialog_KeyDown" KeyboardNavigation.TabNavigation="Cycle">
    <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="10" Padding="24" MaxWidth="620" Margin="24" VerticalAlignment="Center"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
     <DockPanel Margin="0,0,0,12"><Button DockPanel.Dock="Right" Content="关闭" Style="{StaticResource HeaderAction}" Click="CloseBinding_Click"/><TextBlock Text="绑定设备" FontSize="20" FontWeight="SemiBold"/></DockPanel>
-    <ScrollViewer Grid.Row="1" MaxHeight="480" VerticalScrollBarVisibility="Auto"><StackPanel>      <Border Style="{StaticResource Card}">
-       <StackPanel>
-        <TextBlock Text="手机和平板绑定" Style="{StaticResource Heading}" />
-        <TextBlock Text="同一网络，或异地安全通道已连通时可用。请在手机或平板输入短码，再核对两端校验码。" Style="{StaticResource Caption}" />
-        <TextBlock x:Name="BindingCodeText" Text="生成短码以添加设备" FontSize="14" FontWeight="Normal" Margin="0,16,0,8" AutomationProperties.Name="局域网绑定短码" />
-        <TextBlock x:Name="BindingCountdownText" Text="" Style="{StaticResource Caption}" Margin="0,0,0,8" />
-        <TextBlock x:Name="BindingRequestText" Text="短码三分钟有效，只能使用一次。" Style="{StaticResource Caption}" AutomationProperties.LiveSetting="Polite" />
-        <StackPanel x:Name="BindingComparisonPanel" Visibility="Collapsed" Margin="0,12,0,0">
-         <TextBlock Text="两端校验码" Style="{StaticResource Caption}" />
-         <TextBlock x:Name="BindingComparisonText" FontSize="24" FontWeight="SemiBold" Margin="0,6,0,0" AutomationProperties.Name="两端绑定校验码" />
-        </StackPanel>
-        <WrapPanel Margin="0,12,0,0">
-         <Button Content="重新生成短码" Style="{StaticResource Primary}" Click="StartLocalBinding_Click" Margin="0,0,8,8" />
-         <Button x:Name="CancelBindingButton" Content="取消短码" Click="CancelLocalBinding_Click" Margin="0,0,8,8" Visibility="Collapsed" />
+    <ScrollViewer Grid.Row="1" MaxHeight="480" VerticalScrollBarVisibility="Auto"><StackPanel>
+     <TextBlock x:Name="BindingRequestText" Text="在平板上填写电脑 IPv4 和六位短码。" Style="{StaticResource Caption}" Margin="0,0,0,16" AutomationProperties.LiveSetting="Polite"/>
+     <StackPanel x:Name="BindingEntryPanel">
+      <TextBlock Text="电脑 IPv4" Style="{StaticResource Caption}"/>
+      <Grid Margin="0,6,0,16"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <TextBlock x:Name="BindingAddressText" Text="正在读取…" FontSize="18" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.Name="绑定用电脑 IPv4"/>
+       <Button x:Name="CopyBindingAddressButton" Grid.Column="1" Click="CopyBindingAddress_Click" Style="{StaticResource HeaderAction}" Margin="12,0,0,0" AutomationProperties.Name="复制绑定用 IPv4 地址"><TextBlock Text="&#xE8C8;" FontFamily="Segoe MDL2 Assets"/></Button>
+      </Grid>
+      <TextBlock Text="六位短码" Style="{StaticResource Caption}"/>
+      <TextBlock x:Name="BindingCodeText" Text="正在生成…" FontSize="26" FontFamily="Consolas" FontWeight="SemiBold" Margin="0,6,0,8" AutomationProperties.Name="绑定短码"/>
+      <TextBlock x:Name="BindingCountdownText" Text="" Style="{StaticResource Caption}"/>
+     </StackPanel>
+     <StackPanel x:Name="BindingComparisonPanel" Visibility="Collapsed" Margin="0,0,0,16">
+      <TextBlock Text="两端校验码" Style="{StaticResource Caption}"/>
+      <TextBlock x:Name="BindingComparisonText" FontSize="28" FontFamily="Consolas" FontWeight="SemiBold" Margin="0,6,0,8" AutomationProperties.Name="两端绑定校验码"/>
+      <TextBlock Text="与平板显示一致后，允许绑定。" Style="{StaticResource Caption}"/>
+     </StackPanel>
+     <WrapPanel>
+      <Button x:Name="BindingApproveButton" Content="允许绑定" Style="{StaticResource Primary}" Click="ApproveLocalBinding_Click" Visibility="Collapsed" Margin="0,0,8,8"/>
+      <Button x:Name="BindingRejectButton" Content="拒绝" Click="RejectLocalBinding_Click" Visibility="Collapsed" Margin="0,0,8,8"/>
+     </WrapPanel>
+     <WrapPanel Margin="0,8,0,0">
+      <Button x:Name="BindingGenerateButton" Content="重新生成短码" Style="{StaticResource HeaderAction}" Click="StartLocalBinding_Click" Margin="0,0,8,0"/>
+      <Button x:Name="CancelBindingButton" Content="取消短码" Style="{StaticResource HeaderAction}" Click="CancelLocalBinding_Click" Margin="0,0,8,0" Visibility="Collapsed"/>
+     </WrapPanel>
+     <TextBlock x:Name="ControlApiStateText" Style="{StaticResource Caption}" Margin="0,8,0,0" Visibility="Collapsed"/>
 
-        </WrapPanel>
-        <WrapPanel>
-         <Button x:Name="BindingApproveButton" Content="校验码一致，允许绑定" Click="ApproveLocalBinding_Click" Visibility="Collapsed" Margin="0,0,8,8" />
-         <Button x:Name="BindingRejectButton" Content="拒绝" Click="RejectLocalBinding_Click" Visibility="Collapsed" Margin="0,0,8,8" />
-        </WrapPanel>
-        <TextBlock x:Name="ControlApiStateText" Style="{StaticResource Caption}" Margin="0,8,0,0" />
-        <TextBlock x:Name="DiscoveryDiagnosticsText" Style="{StaticResource Caption}" Margin="0,8,0,0" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
-       </StackPanel>
-      </Border>
-
-     <Expander x:Name="BindingAdvanced" Header="高级" Margin="0,14,0,0"><StackPanel><Button Content="复制完整绑定码" Click="CopyDeviceBinding_Click" Margin="0,8,0,12"/>      <Expander x:Name="LegacyPairingDetails" Header="接收端手动配对" Margin="0,0,0,20">
+     <Expander x:Name="BindingAdvanced" Header="其他绑定方式" Margin="0,14,0,0"><StackPanel><Button Content="复制完整绑定码" Click="CopyDeviceBinding_Click" Margin="0,8,0,12"/>      <Expander x:Name="LegacyPairingDetails" Header="接收端手动配对" Margin="0,0,0,20">
        <StackPanel>
         <TextBlock Text="接收端配对" Style="{StaticResource Heading}" />
         <TextBlock Style="{StaticResource Caption}" Text="填写接收端显示的四位配对码。" Margin="0,0,0,24" />
-        <local:SettingRow Header="连接模式" ToolTip="" Tag="">
+        <local:SettingRow Header="连接模式" Tag="">
          <ComboBox x:Name="PairMode" SelectedIndex="0" AutomationProperties.Name="连接模式" Width="224">
           <ComboBoxItem Content="远程主屏" Tag="remote" />
           <ComboBoxItem Content="平板副屏" Tag="tablet" />
          </ComboBox>
         </local:SettingRow>
-        <local:SettingRow Header="设备名称" ToolTip="" Tag="">
+        <local:SettingRow Header="设备名称" Tag="">
          <TextBox x:Name="PairName" Text="我的平板" MaxLength="40" AutomationProperties.Name="设备名称" Width="224" />
         </local:SettingRow>
-        <local:SettingRow Header="四位配对码" ToolTip="" Tag="">
+        <local:SettingRow Header="四位配对码" Tag="">
          <TextBox x:Name="PairPin" MaxLength="4" FontSize="22" FontFamily="Consolas" AutomationProperties.Name="四位配对码" Width="224" />
         </local:SettingRow>
         <Button Content="确认配对" Style="{StaticResource Primary}" Margin="0,24,0,0" Click="Pair_Click" />
        </StackPanel>
       </Expander>
-<Button Content="查找诊断" Click="DiscoveryDiagnostics_Click"/></StackPanel></Expander>
+</StackPanel></Expander>
     </StackPanel></ScrollViewer>
    </Grid></Border>
   </Grid>
-  <Grid x:Name="DevicePermissionsDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="64" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="DevicePermissions_KeyDown"><Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="10" Padding="24" Width="680" Margin="16"><DockPanel><Button DockPanel.Dock="Bottom" Content="完成" Click="CloseDevicePermissions_Click" Margin="0,14,0,0"/><TextBlock DockPanel.Dock="Top" Text="设备权限" Style="{StaticResource Heading}"/><ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False"><StackPanel>         <Border x:Name="FileAccessSettingsCard" Style="{StaticResource Card}">
+  <Grid x:Name="DevicePermissionsDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="64" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="DevicePermissions_KeyDown">
+   <Border x:Name="DevicePermissionsFrame" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="8" Padding="24" MaxWidth="760" Margin="24">
+    <Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <TextBlock Text="设备权限" Style="{StaticResource Heading}" Margin="0,0,0,16"/>
+     <ScrollViewer x:Name="DevicePermissionsScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False" Padding="0,0,16,12">
+      <StackPanel><Border x:Name="FileAccessSettingsCard" Style="{StaticResource Card}">
           <StackPanel>
            <TextBlock Text="文件权限" Style="{StaticResource Heading}" />
 
@@ -885,7 +1049,7 @@
               <Button Content="选择接收目录" Click="EnableFiles_Click" Margin="0,0,8,8" />
               <Button Content="关闭文件传输" Click="DisableFiles_Click" Margin="0,0,8,8" />
              </WrapPanel>
-             <local:SettingRow Header="允许浏览与下载" ToolTip="仅访问你明确授权的目录，删除权限单独控制" Tag="">
+             <local:SettingRow Header="允许浏览与下载" Tag="">
               <CheckBox x:Name="BrowseFilesCheck" Click="BrowseFiles_Click" MinHeight="40" AutomationProperties.Name="允许浏览与下载" />
              </local:SettingRow>
 
@@ -914,14 +1078,12 @@
               </TextBlock.Style>
              </TextBlock>
              <WrapPanel Margin="0,12,0,0">
-              <Button Content="添加浏览目录" Click="AddBrowseRoot_Click" Margin="0,0,8,8" />
-              <Button Content="桌面与下载" Click="AddCommonBrowseRoots_Click" Margin="0,0,8,8" />
-              <Button Content="选择磁盘根目录" Click="AddBrowseRoot_Click" Margin="0,0,8,8" />
-              <Button Content="撤销所选目录" Click="RemoveBrowseRoot_Click" Margin="0,0,8,8" />
+              <Button x:Name="AddBrowseRootButton" Content="添加目录" Click="OpenBrowseRootMenu_Click" Margin="0,0,8,8" />
+              <Button Content="移除所选目录" Click="RemoveBrowseRoot_Click" Margin="0,0,8,8" />
              </WrapPanel>
              <TextBlock Text="设备授权" FontWeight="SemiBold" Margin="0,8,0,8" />
 
-             <ComboBox x:Name="SettingsFileDeviceBox" ItemsSource="{Binding ItemsSource, ElementName=FileDeviceBox}" SelectedValuePath="ClientId" SelectedValue="{Binding SelectedValue, ElementName=FileDeviceBox, Mode=TwoWay}" Margin="0,8,0,8" AutomationProperties.Name="管理文件设备权限" Width="440" HorizontalAlignment="Left">
+             <ComboBox x:Name="SettingsFileDeviceBox" SelectedValuePath="ClientId" SelectionChanged="FileDevice_SelectionChanged" Margin="0,8,0,8" AutomationProperties.Name="管理文件设备权限" Width="440" HorizontalAlignment="Left" IsSynchronizedWithCurrentItem="False">
               <ComboBox.ItemTemplate>
                <DataTemplate>
                 <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
@@ -929,19 +1091,18 @@
               </ComboBox.ItemTemplate>
              </ComboBox>
              <WrapPanel Margin="0,8,0,0">
-              <Button x:Name="FileGrantButton" Content="允许所选设备" Tag="allow" Click="GrantFiles_Click" Margin="0,0,8,8" />
-              <Button x:Name="FileRevokeButton" Content="撤销允许" Tag="deny" Click="GrantFiles_Click" Margin="0,0,8,8" />
+              <Button x:Name="FileGrantButton" Content="信任此设备" Tag="allow" Click="GrantFiles_Click" Margin="0,0,8,8" />
+              <Button x:Name="FileRevokeButton" Content="撤销文件信任" Tag="deny" Click="GrantFiles_Click" Margin="0,0,8,8" />
               <Button x:Name="FileRemoveButton" Content="移除文件设备" Click="RemoveFileDevice_Click" Margin="0,0,8,8" />
-              <Button Content="刷新" Click="RefreshFiles_Click" Margin="0,0,8,8" />
              </WrapPanel>
-             <local:SettingRow Header="允许上传文件" ToolTip="只允许所选设备写入接收目录" Tag="">
+             <TextBlock x:Name="FileTrustStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+             <local:SettingRow Header="允许上传文件" Tag="">
               <CheckBox x:Name="FileUploadAllowed" MinHeight="40" Click="FilePermission_Changed" AutomationProperties.Name="允许上传文件" />
              </local:SettingRow>
-             <local:SettingRow Header="允许移到回收站" ToolTip="仅作用于所选设备，默认关闭" Tag="">
+             <local:SettingRow Header="允许移到回收站" Tag="">
               <CheckBox x:Name="FileDeleteAllowed" MinHeight="40" Click="FilePermission_Changed" AutomationProperties.Name="允许移到回收站" />
              </local:SettingRow>
-             <TextBlock x:Name="FilePermissionStatus" Style="{StaticResource Caption}" Text="请先选择设备" />
-             <Button Content="保存设备文件权限" Click="SaveFilePermissions_Click" Margin="0,12,0,0" />
+             <TextBlock x:Name="FilePermissionStatus" Style="{StaticResource Caption}" Text="请先选择设备" AutomationProperties.LiveSetting="Polite" />
             </StackPanel>
            </Expander>
           </StackPanel>
@@ -959,35 +1120,36 @@
            </ComboBox>
            <StackPanel x:Name="ControlScopePanel" IsEnabled="False">
             <StackPanel>
-             <local:SettingRow Header="远程主屏" ToolTip="允许此设备控制主屏" Tag="">
-              <CheckBox x:Name="ControlRemoteCheck" AutomationProperties.Name="远程主屏" />
+             <local:SettingRow Header="远程主屏" Tag="">
+              <CheckBox x:Name="ControlRemoteCheck" Click="SaveControlScope_Click" AutomationProperties.Name="远程主屏" />
              </local:SettingRow>
-             <local:SettingRow Header="副屏" ToolTip="允许此设备作为电脑副屏" Tag="">
-              <CheckBox x:Name="ControlTabletCheck" AutomationProperties.Name="副屏" />
+             <local:SettingRow Header="副屏" Tag="">
+              <CheckBox x:Name="ControlTabletCheck" Click="SaveControlScope_Click" AutomationProperties.Name="副屏" />
              </local:SettingRow>
-             <local:SettingRow Header="文件" ToolTip="浏览和下载电脑选定的目录；上传与删除分别控制" Tag="">
-              <CheckBox x:Name="ControlFilesCheck" AutomationProperties.Name="文件" />
+             <local:SettingRow Header="文件" Tag="">
+              <CheckBox x:Name="ControlFilesCheck" Click="SaveControlScope_Click" AutomationProperties.Name="文件" />
              </local:SettingRow>
-             <local:SettingRow Header="会话剪贴板" ToolTip="仅在已授权的会话中交换内容" Tag="">
-              <CheckBox x:Name="ControlClipboardCheck" AutomationProperties.Name="会话剪贴板" />
+             <local:SettingRow Header="会话剪贴板" Tag="">
+              <CheckBox x:Name="ControlClipboardCheck" Click="SaveControlScope_Click" AutomationProperties.Name="会话剪贴板" />
              </local:SettingRow>
             </StackPanel>
             <WrapPanel>
-             <Button Content="保存权限" Click="SaveControlScope_Click" Margin="0,0,8,8" />
-             <Button Content="撤销此设备" Click="RevokeControlDevice_Click" Margin="0,0,8,8" />
+             <Button Content="撤销此设备" Style="{StaticResource DangerAction}" Click="RevokeControlDevice_Click" Margin="0,8,8,8" />
+             <Button Content="重新绑定" Click="RotateControlDevice_Click" Margin="0,8,0,8" />
             </WrapPanel>
            </StackPanel>
-           <WrapPanel>
-            <Button Content="刷新设备" Click="RefreshControlDevices_Click" Margin="0,0,8,8" />
-            <Button Content="重新绑定以轮换凭据" Click="RotateControlDevice_Click" Margin="0,0,8,8" />
-           </WrapPanel>
-           <local:SettingRow Header="兼容旧版共享绑定" ToolTip="旧版连接无法按设备区分；完成迁移后再关闭" Tag="">
-            <CheckBox x:Name="AllowLegacyBindingCheck" MinHeight="40" AutomationProperties.Name="兼容旧版共享绑定" />
+           <local:SettingRow Header="兼容旧版共享绑定" Tag="">
+            <CheckBox x:Name="AllowLegacyBindingCheck" MinHeight="40" Click="SaveLegacyBinding_Click" AutomationProperties.Name="兼容旧版共享绑定" />
            </local:SettingRow>
-           <Button Content="保存兼容策略" Click="SaveLegacyBinding_Click" Margin="0,8,0,0" />
 
           </StackPanel>
-         </Border></StackPanel></ScrollViewer></DockPanel></Border></Grid>
+         </Border></StackPanel></ScrollViewer>
+     <Border x:Name="DevicePermissionsFooter" Grid.Row="2" BorderBrush="{DynamicResource Divider}" BorderThickness="0,1,0,0" Padding="0,16,0,0">
+      <Button x:Name="DevicePermissionsDoneButton" Content="完成" Click="CloseDevicePermissions_Click" HorizontalAlignment="Right" MinWidth="88"/>
+     </Border>
+    </Grid>
+   </Border>
+  </Grid>
   <Grid x:Name="TransportDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="66" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="TransportDialog_KeyDown">
    <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="10" Padding="24" MaxWidth="520" Margin="24" VerticalAlignment="Center"><StackPanel>
     <TextBlock x:Name="TransportDialogTitle" Style="{StaticResource Heading}"/>
@@ -1002,7 +1164,7 @@
   <Popup x:Name="AcceptancePopover" PlacementTarget="{Binding ElementName=AcceptanceButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" Opened="TransientPopover_Opened" PreviewKeyDown="TransientPopover_KeyDown">
    <Border local:FocusInput.Track="True" Style="{StaticResource PopoverFrame}" Width="208" Padding="4" KeyboardNavigation.TabNavigation="Cycle"><StackPanel>
     <Button x:Name="DisconnectActiveButton" Content="断开本次连接" Click="DisconnectActive_Click" Style="{StaticResource PopoverMenuAction}" Visibility="Collapsed"/>
-    <Button x:Name="PauseConnectionsButton" Content="暂停接受连接" Click="PauseConnections_Click" Style="{StaticResource PopoverMenuAction}" ToolTip="暂停后重启仍保持，可在此恢复"/>
+    <Button x:Name="PauseConnectionsButton" Content="暂停接受连接" Click="PauseConnections_Click" Style="{StaticResource PopoverMenuAction}"/>
    </StackPanel></Border>
   </Popup>
   <Popup x:Name="AccountPopover" PlacementTarget="{Binding ElementName=AccountButton}" Placement="Bottom" HorizontalOffset="-264" StaysOpen="False" AllowsTransparency="True" Opened="TransientPopover_Opened" PreviewKeyDown="TransientPopover_KeyDown">
@@ -1010,8 +1172,7 @@
     <TextBlock Text="网络连接" Style="{StaticResource Heading}"/>
     <TextBlock x:Name="AccountConnectionText" Text="正在读取" TextWrapping="Wrap"/>
     <TextBlock x:Name="AccountConnectionDetailText" Style="{StaticResource Caption}" Visibility="Collapsed" Margin="0,8,0,0"/>
-    <Button x:Name="AccountPrimaryButton" Content="启用异地连接" Style="{StaticResource Primary}" Click="AccountPrimary_Click" Margin="0,16,0,0"/>
-    <Button Content="连接设置 ›" Style="{StaticResource PopoverMenuAction}" Click="OpenAccount_Click" Margin="0,6,0,0"/>
+    <Button x:Name="AccountPrimaryButton" Content="连接设置" Click="OpenAccount_Click" Margin="0,16,0,0"/>
    </StackPanel></Border>
   </Popup>
   <Grid x:Name="HelpDialog" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#66000000" Visibility="Collapsed" Panel.ZIndex="66" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="HelpDialog_KeyDown">

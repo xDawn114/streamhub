@@ -79,6 +79,21 @@ try{
         }
         $checks+=[ordered]@{platform=$platform;signatureVerified=$true;packageHashMatches=$true;feedOnlineVerified=[bool]$Online;packageHosted=$hosted;onlineBytesVerified=([bool]$Online -and $hosted);queryOnly=($platform -eq 'windows' -and [bool]$plan.windowsQueryOnly)}
     }
+    if ($plan.sourceCompanion -and @($plan.sources).Count -ne 2) { throw 'Source archive and download page are required.' }
+    foreach ($source in @($plan.sources)) {
+        if ($null -eq $source) { continue }
+        $uri = $null
+        if (-not [Uri]::TryCreate($source.url, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https' -or
+            $uri.UserInfo -or $uri.Fragment -or $uri.Query -or $uri.AbsolutePath.TrimStart('/') -cne $source.path -or
+            $uri.GetLeftPart([UriPartial]::Authority) -cne ([Uri]$plan.feeds[0].url).GetLeftPart([UriPartial]::Authority)) {
+            throw 'Source download URL differs from the release site.'
+        }
+        $file = Local-File $source.path
+        if ((Get-Item -LiteralPath $file).Length -ne $source.size -or (Get-FileHash -LiteralPath $file).Hash -ne $source.sha256) {
+            throw 'Published source companion or its download page changed.'
+        }
+        if ($Online) { Remote-Hash $source.url $source.size $source.sha256 $false }
+    }
 }finally{$http.Dispose()}
 $result=[ordered]@{checkedAt=[DateTimeOffset]::UtcNow.ToString('o');passed=$true;online=[bool]$Online;checks=$checks;
     installsExecuted=0;note='仅核对静态交付内容；不代表客户端真实升级、系统信任签名或回滚已验收。'}

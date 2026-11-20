@@ -1,17 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="hub_background">#12171F</color>
-    <color name="hub_surface">#1A212C</color>
-    <color name="hub_field">#232B38</color>
-    <color name="hub_border">#2E3A4A</color>
-    <color name="hub_text">#E8EDF4</color>
-    <color name="hub_muted">#A3B0C2</color>
-    <color name="hub_primary">#2F59D6</color>
-    <color name="hub_accent">#A3BFFA</color>
-    <color name="hub_selected">#22345A</color>
+    <color name="hub_background">#151517</color>
+    <color name="hub_surface">#232324</color>
+    <color name="hub_field">#2C2C2E</color>
+    <color name="hub_border">#3D3D41</color>
+    <color name="hub_text">#F9FAFB</color>
+    <color name="hub_muted">#ADB2B8</color>
+    <color name="hub_primary">#2F70E0</color>
+    <color name="hub_accent">#7AAAFF</color>
+    <color name="hub_selected">#223451</color>
     <color name="hub_success">#6EE7A8</color>
     <color name="hub_warning">#FBBF24</color>
     <color name="hub_danger">#FF8A8A</color>
     <color name="hub_on_accent">#FFFFFF</color>
-    <color name="hub_ripple">#339CC0FF</color>
+    <color name="hub_control_border">#9297A1</color>
+    <color name="hub_hover">#363B44</color>
+    <color name="hub_pressed">#414957</color>
+    <color name="hub_primary_hover">#2D6CDD</color>
+    <color name="hub_primary_pressed">#285FC6</color>
+    <color name="hub_focus">#7AAAFF</color>
+    <color name="hub_disabled">#2C2C2E</color>
+    <color name="hub_ripple">#267AAAFF</color>
 </resources>

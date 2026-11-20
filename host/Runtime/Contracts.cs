@@ -26,7 +26,11 @@ public sealed record RuntimeRequest(string Command, string? Profile = null, stri
     bool? AutomaticLoginEnabled = null, long? PolicyRevision = null, bool? AllowPublicLan = null,
     int? DeviceScope = null, bool? LegacyBindingAllowed = null,
     string? ControllerName = null, string? ControllerCredentialId = null, string? ControllerChannel = null,
-    string? EncoderProbe = null, bool? EndBackend = null);
+    string? EncoderProbe = null, bool? EndBackend = null,
+    string? AssistanceCode = null, string? AssistanceProof = null, string? AssistanceMode = null,
+    string? AssistanceSource = null, bool? AssistanceEnabled = null, bool TrustDevice = false,
+    bool? TrustAllowView = null, bool? TrustAllowControl = null,
+    string? AssistanceCredential = null, string? AssistanceChallengeId = null, string? AssistanceAuthProof = null);
 
 public sealed record MediaIdentityRequest(string Mode, string ClientCertificate);
 public sealed record MediaIdentityResult([property: JsonRequired] bool Paired, [property: JsonRequired] string? ServerCertificate);
@@ -65,9 +69,9 @@ public sealed record ClipboardJob(string Id, string Mode, string LeaseId, string
 public sealed record TabletDisplayRequest(int Width, int Height, int RefreshRate, int Orientation = 0);
 public sealed record TabletDisplayMode(int Width, int Height, int RefreshRate, int Orientation, bool Degraded = false);
 public sealed record TabletReceiver(string ClientId, string Name, int Width, int Height, int RefreshRate,
-    int[] Orientations, DateTimeOffset LastSeen);
+    int[] Orientations, DateTimeOffset LastSeen, bool AutomaticOrientation = false);
 public sealed record TabletConnectionRequest(string Id, string ClientId, string State, int Orientation,
-    string Link, DateTimeOffset ExpiresAt, string Message);
+    string Link, DateTimeOffset ExpiresAt, string Message, bool AutoOrientation = false);
 public sealed record ReceiverSnapshot(TabletReceiver[] Receivers, TabletConnectionRequest? Request);
 
 public sealed record RuntimeResponse(bool Success, string Message, RuntimeStatus? Status = null, string? PayloadJson = null,
@@ -86,6 +90,22 @@ public sealed record RuntimeStatus(string DeviceId, string DeviceName, EngineSta
     bool PrivacyScreenEnabled = false, bool PrivacyScreenActive = false,
     string PrivacyScreenMessage = "远控隐私保护已关闭", string PreventSleepMode = "streaming",
     bool SleepPreventionActive = false, string SleepPreventionMessage = "", HostPolicySnapshot? HostPolicy = null,
-    ControllerSession? Controller = null, bool ConnectionsPaused = false);
+    ControllerSession? Controller = null, bool ConnectionsPaused = false, AssistanceSnapshot? Assistance = null);
 
 public sealed record ControllerSession(string CredentialId, string Name, string Channel, bool IndividuallyAuthenticated);
+
+public sealed record AssistanceSnapshot(string State, string? Code = null, DateTimeOffset? ExpiresAt = null,
+    string? SessionId = null, string? Name = null, string? Comparison = null, string? Mode = null,
+    string Message = "尚未开启临时协助", bool Enabled = true, bool CanTrust = false,
+    string? ClientId = null, bool Trusted = false, AssistanceTrustedDevice[]? TrustedDevices = null,
+    bool PersistencePending = false, string? PersistenceError = null);
+public sealed record AssistanceReply(string SessionId, string State, string Comparison, string? Mode = null,
+    string? ServerCertificate = null, string? MediaHostId = null, int Port = 48989,
+    bool Trusted = false, string? TrustedMode = null, string? HostName = null);
+public sealed record AssistanceJournal(int Version, string? SessionId, string? Certificate = null,
+    string? Name = null, string? Mode = null, string? ClientId = null, bool Trusted = false);
+public sealed record AssistanceTrustedDevice(string Id, string Name, string Mode, DateTimeOffset CreatedAt,
+    bool AllowView, bool AllowControl);
+public sealed record AssistanceTrustSnapshot(bool Enabled, AssistanceTrustedDevice[] TrustedDevices,
+    bool PersistencePending = false, string? PersistenceError = null);
+public sealed record AssistanceTrustChallenge(string ChallengeId, DateTimeOffset ExpiresAt);

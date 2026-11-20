@@ -110,7 +110,11 @@ public final class HubStore {
     public String clientId() {
         synchronized (HubStore.class) {
             String value = get("clientId", "");
-            if (value.isEmpty()) { value = java.util.UUID.randomUUID().toString(); preferences.edit().putString("clientId", value).commit(); }
+            if (value.isEmpty()) {
+                value = java.util.UUID.randomUUID().toString();
+                if (!preferences.edit().putString("clientId", value).commit())
+                    throw new IllegalStateException("无法保存设备身份，请重试。");
+            }
             return value;
         }
     }

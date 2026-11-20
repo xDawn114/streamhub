@@ -152,7 +152,8 @@ public sealed class PayloadArchive
         }
     }
 
-    public static (int Aliases, long OmittedBytes) Create(string stage, string archivePath, bool deduplicate = true)
+    public static (int Aliases, long OmittedBytes) Create(string stage, string archivePath, bool deduplicate = true,
+        CompressionLevel compression = CompressionLevel.SmallestSize)
     {
         var root = Path.GetFullPath(stage);
         Dictionary<string, FileRecord> records;
@@ -193,10 +194,10 @@ public sealed class PayloadArchive
         using var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write);
         using var zip = new ZipArchive(output, ZipArchiveMode.Create);
         foreach (var name in records.Keys.Where(n => !targets.Contains(n)).Append(ManifestName).Order(StringComparer.Ordinal))
-            zip.CreateEntryFromFile(Path.Combine(root, name.Replace('/', Path.DirectorySeparatorChar)), name, CompressionLevel.Optimal);
+            zip.CreateEntryFromFile(Path.Combine(root, name.Replace('/', Path.DirectorySeparatorChar)), name, compression);
         if (aliases.Count > 0)
         {
-            using var mapping = zip.CreateEntry(MapName, CompressionLevel.Optimal).Open();
+            using var mapping = zip.CreateEntry(MapName, compression).Open();
             JsonSerializer.Serialize(mapping, new Map(1, aliases.ToArray()), Json);
         }
         return (aliases.Count, omitted);

@@ -25,6 +25,10 @@ if(Test-Path -LiteralPath $output){throw '交付输出已存在，请使用新�
 $catalog=& (Join-Path $PSScriptRoot 'Test-ReleaseCatalog.ps1') -ReleaseRoot (Split-Path $candidate -Parent) -Candidate (Split-Path $candidate -Leaf) | ConvertFrom-Json
 $readiness=& (Join-Path $PSScriptRoot 'Test-UpdateReadiness.ps1') -SourceRoot $source | ConvertFrom-Json
 $version=& (Join-Path $PSScriptRoot '读取产品版本.ps1') -SourceRoot $source
+$sourceCompanion = if (Test-Path -LiteralPath (Join-Path $candidate 'windows/source-distribution.json')) {
+    & (Join-Path $PSScriptRoot 'Test-SourceCompanion.ps1') -Directory (Join-Path $candidate 'windows') -RequireDownloadPage:($Mode -eq 'Stage')
+}
+if ($sourceCompanion -and $sourceCompanion.version -cne $version.Name) { throw 'Source companion version differs from the candidate.' }
 if($catalog.version -ne $version.Name -or $catalog.versionCode -ne $version.Code -or $catalog.channel -ne $version.Channel){throw '候选与当前版本源不一致。'}
 if($MinimumInstalledCode -lt 1 -or $MinimumInstalledCode -gt $version.Code){throw '最低安装版本必须在1与目标构建码之间。'}
 $windows=Get-Content -LiteralPath (Join-Path $source 'common/Updates/update-trust.json') -Raw|ConvertFrom-Json
@@ -109,9 +113,31 @@ foreach($platform in @('windows','android')){
     $feeds+=[ordered]@{path=$feedPath;url=$feed;sha256=(Get-FileHash -LiteralPath $feedFile).Hash}
 }
 $plan.readyToUpload=$true;$plan.packages=$packages;$plan.feeds=$feeds
+if ($sourceCompanion) {
+    $pageUri = [Uri]$sourceCompanion.downloadPage
+    if ($pageUri.GetLeftPart([UriPartial]::Authority) -cne ([Uri]$windows.feed).GetLeftPart([UriPartial]::Authority)) {
+        throw 'Source download page must be hosted with the update site.'
+    }
+    $pagePath = Site-Path $sourceCompanion.downloadPage
+    $pageTarget = Join-Path $site $pagePath
+    New-Item -ItemType Directory -Path (Split-Path $pageTarget -Parent) -Force | Out-Null
+    $pageHtml = Get-Content -LiteralPath (Join-Path $candidate 'windows/download.html') -Raw
+    $pageHtml.Replace([Uri]::EscapeDataString('我控制-电脑端安装.exe'), $packages[0].url) |
+        Set-Content -LiteralPath $pageTarget -Encoding utf8NoBOM
+    $sourceTarget = Join-Path (Split-Path $pageTarget -Parent) $sourceCompanion.archive
+    Copy-Item -LiteralPath (Join-Path $candidate ('windows/' + $sourceCompanion.archive)) -Destination $sourceTarget
+    $plan.sourceCompanion = @{ page = $pagePath; path = [IO.Path]::GetRelativePath($site, $sourceTarget).Replace('\','/');
+        sha256 = $sourceCompanion.sha256; size = $sourceCompanion.size }
+    $plan.sources = @(foreach ($file in @($pageTarget, $sourceTarget)) {
+        $relative = [IO.Path]::GetRelativePath($site, $file).Replace('\','/')
+        @{ path = $relative; url = ([Uri]$windows.feed).GetLeftPart([UriPartial]::Authority) + '/' + $relative;
+            sha256 = (Get-FileHash -LiteralPath $file).Hash; size = (Get-Item -LiteralPath $file).Length }
+    })
+}
 $plan.androidOnlyHosting=[bool]$AndroidOnlyHosting
 $plan.missing=@($missing|Where-Object { -not ($WindowsQueryOnly -and $_ -like 'Windows 受信*') })
 $plan.uploadOrder=@('先上传hosted=true的不可变安装包，直接GET核对大小与哈希','再原子替换两个签名清单；清单不能长缓存','以已内置同一信任根的引导版完成真实升级；Windows查询模式不下载、不安装')
+if ($sourceCompanion) { $plan.uploadOrder = @('先上传完整对应源码、源码下载页及同页安装包，核对链接、大小和SHA256') + $plan.uploadOrder }
 $plan|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $work 'publication.json') -Encoding utf8NoBOM
 Move-Item -LiteralPath $work -Destination (Join-Path $output 'ready')
 Write-Output ('本机待审交付目录：'+(Join-Path $output 'ready')+'；未上传、未安装。')

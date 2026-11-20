@@ -12,7 +12,7 @@ public sealed class ControlApiClient(RuntimeClient runtime)
 
     public string GetInvitation() => IsRunning && _invitation is not null ? _invitation :
         throw new InvalidOperationException(LastError ?? (IsRunning
-            ? "旧版共享绑定已关闭，请使用附近电脑或地址＋短码绑定。" : "设备绑定接口尚未启动。"));
+            ? "请使用电脑 IPv4 和短码绑定。" : "设备绑定接口尚未启动。"));
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {

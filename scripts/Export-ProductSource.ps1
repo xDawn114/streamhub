@@ -136,7 +136,7 @@ $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]:
 try {
     foreach ($entry in $entries.Values) {
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $productRoot $entry.path), $entry.path,
-            [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+            [IO.Compression.CompressionLevel]::SmallestSize) | Out-Null
     }
 } finally { $zip.Dispose() }
 $zip = [IO.Compression.ZipFile]::OpenRead($archive)

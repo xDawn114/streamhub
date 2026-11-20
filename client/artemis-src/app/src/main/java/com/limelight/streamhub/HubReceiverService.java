@@ -79,6 +79,7 @@ public final class HubReceiverService extends Service {
             store.mergeAddresses(info.optJSONArray("addresses"), host);
             JSONObject capabilities = info.optJSONObject("capabilities");
             store.put("hostDeviceMetadata", capabilities != null && capabilities.optBoolean("deviceMetadata") ? "true" : "false");
+            store.put("hostPcRequestAutoOrientation", capabilities != null && capabilities.optBoolean("pcRequestAutoOrientation") ? "true" : "false");
             return candidate;
         } catch (Exception error) { candidate.cancel(); throw error; }
     }
@@ -137,6 +138,8 @@ public final class HubReceiverService extends Service {
             // Older hosts reject unknown JSON fields. Only newer hosts advertise this field.
             if (store.get("hostDeviceMetadata", "false").equals("true"))
                 body.put("deviceType", getResources().getConfiguration().smallestScreenWidthDp >= 600 ? "tablet" : "phone");
+            if (store.get("hostPcRequestAutoOrientation", "false").equals("true"))
+                body.put("automaticOrientation", true);
             JSONObject request = client.request("receiver/poll", body).optJSONObject("request");
             if (stopped || !transportRevision.equals(store.get("transportRevision", ""))) return;
             if (request != null && !"waiting".equals(request.optString("state"))) request = null;

@@ -19,6 +19,7 @@ internal static class Program
   bool paused=false,available=true,responding=false,receiverAvailable=true,streaming=false,ending=false;var now=DateTimeOffset.UtcNow;
   var network=new NetworkEngineStatus(false,false,null,"未启用");
   var networkDetails=new NetworkStatus{Error="内置异地连接尚未启动，或后台服务暂时不可用。"};
+  var transport=new TransportSettings("lan");bool takeoverAllowed=true;
   var binding=new LocalBindingSnapshot(null,null,null);
   TabletReceiver[] extraReceivers=[]; TabletConnectionRequest? tabletRequest=null;
   var bound=new ControlDeviceList(false,[new("active-device-123456","fixture-client","PA2573",ControlScope.Remote|ControlScope.Tablet,false,now,"宿舍平板","tablet",now),new("revoked-device-654321","fixture-old-client","PA2573",ControlScope.All,true,now.AddDays(-1)),new("phone-device-112233","fixture-phone","PA2573",ControlScope.Remote,false,now,null,"phone")]);
@@ -27,6 +28,8 @@ internal static class Program
   var preferences=Path.Combine(root,"preferences.json");File.WriteAllText(preferences,"{\"Theme\":\"light\",\"ReduceMotion\":true}");
   var runtime=new RuntimeClient((r,_)=>{
    calls.Add(r);if(r.Command=="receiver-list"&&!receiverAvailable)return Task.FromResult(new RuntimeResponse(false,"接收端不可用"));
+   if((r.Command is "network-start" or "network-takeover")&&!takeoverAllowed)return Task.FromResult(new RuntimeResponse(false,"启动失败"));
+   if(r.Command is "network-start" or "network-takeover")network=new(true,true,null,"已启用");
    if(r.Command=="status"&&!available)return Task.FromResult(new RuntimeResponse(false,"后台不可用"));
    if(r.Command=="binding-start")binding=new("123456",now.AddMinutes(3),null);
    if(r.Command=="binding-cancel")binding=new(null,null,null);
@@ -35,8 +38,8 @@ internal static class Program
    if(r.Command=="tablet-request")tabletRequest=new("fixture-request",r.ClientId!,"waiting",0,"lan",now.AddMinutes(1),"请在设备上确认副屏邀请");
    if(r.Command=="tablet-request-cancel"&&tabletRequest is {} cancelling&&cancelling.Id==r.RequestId)tabletRequest=cancelling with{State="cancelled",Message="邀请已取消"};
    string? payload=r.Command switch{
-    "network-config"=>"{\"provider\":\"lan\",\"serverUrl\":\"\",\"manualAddresses\":\"\"}",
-    "network-status"=>JsonSerializer.Serialize(networkDetails,RuntimeProtocol.JsonOptions),
+    "network-config"=>JsonSerializer.Serialize(transport,RuntimeProtocol.JsonOptions),
+    "network-status" or "network-login"=>JsonSerializer.Serialize(networkDetails,RuntimeProtocol.JsonOptions),
     "files-status"=>JsonSerializer.Serialize(files,RuntimeProtocol.JsonOptions),
     "control-device-list" or "control-device-rename"=>JsonSerializer.Serialize(bound,RuntimeProtocol.JsonOptions),
     "binding-start" or "binding-cancel" or "binding-status"=>JsonSerializer.Serialize(binding,RuntimeProtocol.JsonOptions),
@@ -75,7 +78,7 @@ internal static class Program
    var wrongFonts=texts.Where(t=>t.FontFamily.Source!=expected&&t.FontFamily.Source is not ("Segoe MDL2 Assets" or "Consolas")).Select(t=>$"{t.Text} [{t.FontFamily.Source}]").ToArray();
    Check(texts.Length>0&&wrongFonts.Length==0,$"{label}: shared font/glyph/code (visible={texts.Length}; {string.Join("; ",wrongFonts)})");
    Check(headings.All(t=>Color(t.Foreground)==Color((Brush)w.FindResource("TextPrimary"))),$"{label}: headings retain the primary text color");
-   Check(texts.All(t=>palette.Contains(Color(t.Foreground))),$"{label}: text colors belong to the current theme palette");
+   Check(texts.All(t=>palette.Contains(Color(t.Foreground))),$"{label}: text colors belong to the current theme palette: {string.Join("; ",texts.Where(t=>!palette.Contains(Color(t.Foreground))).Select(t=>$"{t.Text}={Color(t.Foreground)}"))}");
    typography.Add(new{label,textCount=texts.Length,headings=headings.Select(t=>new{text=t.Text,color=Color(t.Foreground)}).ToArray(),fonts=texts.Select(t=>t.FontFamily.Source).Distinct().ToArray(),colors=texts.Select(t=>Color(t.Foreground)).Distinct().ToArray()});
   }
   object P(object r,string n)=>r.GetType().GetProperty(n)!.GetValue(r)!;
@@ -225,14 +228,22 @@ internal static class Program
     Invoke("PauseConnections_Click");Pump();Check(!paused,"same topbar entry resumes acceptance");
     Invoke("OpenDevices_Click");Pump();
     Check(N<Grid>("BindingDialog").Visibility==Visibility.Visible&&N<TextBlock>("BindingCodeText").Text=="123456"&&N<TextBlock>("BindingCountdownText").Text.Contains("有效期剩余"),"binding modal preserves six-digit code and countdown");
+    typeof(MainWindow).GetField("_addresses",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(w,new[]{"192.168.1.8","100.89.1.2","172.20.10.3"});
+    Async("RefreshLocalBindingAsync");
+    Check(N<TextBlock>("BindingAddressText").Text=="192.168.1.8"+Environment.NewLine+"172.20.10.3","binding shows addresses accepted by the tablet manual form, excluding tunnel addresses");
+    Save((FrameworkElement)w.Content,Path.Combine(root,"binding-address.png"));
     binding=binding with{Request=new("fixture-binding","fixture-client","PA2573","246 802","pending",now.AddMinutes(1))};Refresh();
     Check(N<StackPanel>("BindingComparisonPanel").Visibility==Visibility.Visible&&N<TextBlock>("BindingComparisonText").Text=="246 802","comparison remains visible before approval");
+    Check(N<StackPanel>("BindingEntryPanel").Visibility==Visibility.Collapsed&&N<Button>("BindingGenerateButton").Visibility==Visibility.Collapsed&&N<Button>("BindingApproveButton").Style==w.FindResource("Primary"),"pending approval hides the spent code and regeneration and highlights allow binding");
     Save((FrameworkElement)w.Content,Path.Combine(root,"binding-dialog.png"));Invoke("CloseBinding_Click");Pump();
     Check(binding.Code==null&&N<Grid>("BindingDialog").Visibility==Visibility.Collapsed&&calls.Any(c=>c.Command=="binding-cancel"),"closing dialog invalidates invitation without changing grants");
     Invoke("OpenDeviceAlias_Click",new Button{Tag="active-device-123456"});N<TextBox>("DeviceAliasBox").Text="随身平板";Invoke("SaveDeviceAlias_Click");Pump();
     Check(bound.Devices[0].Alias=="随身平板"&&N<Grid>("AliasDialog").Visibility==Visibility.Collapsed,"alias saves by credential id, never model name");
     Invoke("OpenAccountPopover_Click");Pump();
-    Check(N<TextBlock>("AccountConnectionText").Text.Contains("内置异地连接：未启用")&&N<Button>("AccountPrimaryButton").Content.ToString()=="启用异地连接","account separates live status from configured transport");
+    Check(N<TextBlock>("AccountConnectionText").Text.Contains("内置异地连接：未启用")&&N<Button>("AccountPrimaryButton").Content.ToString()=="连接设置","network popup shows status and one settings entry");
+    N<Button>("AccountPrimaryButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();
+    Check(pages.SelectedItem==N<TabItem>("SettingsPage")&&N<TabControl>("SettingsCategories").SelectedItem==N<TabItem>("NetworkSettingsCategory")&&!calls.Any(c=>c.Command=="network-takeover"),"network entry opens settings without enabling a connection");
+    pages.SelectedItem=N<TabItem>("HomePage");Invoke("OpenAccountPopover_Click");Pump();
     Check(N<TextBlock>("AccountConnectionDetailText").Visibility==Visibility.Collapsed,"normal disabled network has no repeated explanatory paragraph");
     Save((FrameworkElement)N<Popup>("AccountPopover").Child,Path.Combine(root,"account-popover.png"));N<Popup>("AccountPopover").IsOpen=false;
     network=new(false,true,null,"测试：异地进程未启动");Refresh();Invoke("OpenAccountPopover_Click");Pump();
@@ -242,6 +253,14 @@ internal static class Program
     Check(N<TextBlock>("AccountConnectionDetailText").IsVisible&&N<TextBlock>("AccountConnectionDetailText").Text==networkDetails.Error,"running network retains a genuine detailed error");N<Popup>("AccountPopover").IsOpen=false;
     network=new(false,false,null,"未启用");Refresh();Invoke("OpenAccountPopover_Click");Pump();
     Check(N<TextBlock>("AccountConnectionDetailText").Visibility==Visibility.Collapsed,"stopped network hides generic or cached backend error");N<Popup>("AccountPopover").IsOpen=false;
+    transport=new("tailscale");networkDetails=new NetworkStatus{Available=true,State="NeedsLogin"};int loginBefore=calls.Count(c=>c.Command=="network-login");
+    Async("EnableNetworkAsync");
+    Check(calls.Count(c=>c.Command=="network-login")==loginBefore+1&&pages.SelectedItem==N<TabItem>("SettingsPage")&&N<Button>("NetworkLoginButton").IsVisible,"enabling remote networking automatically starts account authorization from the visible login entry");
+    networkDetails=new NetworkStatus{Available=true,State="Running",LoggedIn=true};Async("EnableNetworkAsync");
+    Check(calls.Count(c=>c.Command=="network-login")==loginBefore+2&&N<Button>("NetworkLoginButton").Content.ToString()=="已登录","already logged-in users retain their confirmed login state");
+    takeoverAllowed=false;network=new(false,false,null,"未启用");networkDetails=new NetworkStatus{Available=true,State="NeedsLogin"};Async("EnableNetworkAsync");
+    Check(calls.Count(c=>c.Command=="network-login")==loginBefore+2,"failed startup never starts account authorization");
+    takeoverAllowed=true;transport=new("lan");network=new(false,false,null,"未启用");Refresh();
     foreach(int theme in new[]{1,2}){
      N<ComboBox>("ThemeChoice").SelectedIndex=theme;
      foreach(string page in new[]{"HomePage","FilesPage"}){
@@ -260,9 +279,9 @@ internal static class Program
      N<TabControl>("SettingsCategories").SelectedItem=N<TabItem>("TabletSettingsCategory");Pump();
      Check(((ScrollViewer)N<TabItem>("TabletSettingsCategory").Content).ScrollableWidth<1&&N<ComboBox>("OrientationBox").IsVisible,"tablet preferences reachable from settings");
      Save((FrameworkElement)w.Content,Path.Combine(root,$"tablet-settings-{theme}.png"));
-     foreach(string page in new[]{"AccountPage","DiagnosticsPage"}){
-      pages.SelectedItem=N<TabItem>(page);Pump();w.UpdateLayout();AuditTypography((FrameworkElement)w.Content,$"{theme}/{page}");
-      if(page=="AccountPage") {
+     foreach(string page in new[]{"NetworkSettingsCategory","DiagnosticsPage"}){
+      if(page=="NetworkSettingsCategory")Invoke("OpenAccount_Click");else pages.SelectedItem=N<TabItem>(page);Pump();w.UpdateLayout();AuditTypography((FrameworkElement)w.Content,$"{theme}/{page}");
+      if(page=="NetworkSettingsCategory") {
        var content=(FrameworkElement)N<TabItem>(page).Content;
        Check(new[]{"连接方式","连接状态","账号内设备"}.All(title=>Descendants(content).OfType<TextBlock>().Count(t=>t.Text==title&&t.IsVisible)==1),$"{theme}/account: section titles are unique and distinct");
        Check(N<TextBlock>("NetworkStateText").FontSize<N<TextBlock>("ConnectionStatusHeading").FontSize&&N<TextBlock>("ProviderSavedText").Visibility==Visibility.Collapsed,$"{theme}/account: state and saved selection do not become duplicate headings");

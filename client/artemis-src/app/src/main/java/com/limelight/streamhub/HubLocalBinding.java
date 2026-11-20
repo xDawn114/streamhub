@@ -75,7 +75,7 @@ public final class HubLocalBinding {
                 .callTimeout(5, TimeUnit.SECONDS).build();
     }
     public HubLocalBinding(HubLanDiscovery.Device device) throws Exception {
-        if(!HubLanDiscovery.localIpv4(device.address) || !device.pin.matches("[A-Fa-f0-9]{64}"))throw new IOException("附近电脑信息无效，请重新查找。");
+        if(!HubLanDiscovery.localIpv4(device.address) || !device.pin.matches("[A-Fa-f0-9]{64}"))throw new IOException("电脑信息无效，请重新填写地址。");
         this.device=device;
         byte[] random=new byte[32];new SecureRandom().nextBytes(random);nonce=HubControlClient.hex(random);
         client = transport(device.address, new PinTrust(device.pin));

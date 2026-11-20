@@ -33,12 +33,17 @@ final class HubSwitch extends Switch {
         boolean rtl = getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
         float left = rtl ? getPaddingLeft() : getWidth() - getPaddingRight() - dp(52);
         float top = getPaddingTop() + (getHeight() - getPaddingTop() - getPaddingBottom() - dp(28)) / 2f;
-        boolean dark=streaming||HubTheme.isDark(getContext());
-        int on=dark?0xFF4B7BEC:HubTheme.primary(getContext());
-        int off=dark?0xFF6F7D91:HubTheme.muted(getContext());
-        paint.setColor(isEnabled() ? isChecked()?on:off : streaming?HubStreamUi.BORDER:HubTheme.border(getContext()));
+        int on=streaming?0xFF4B7BEC:HubTheme.primary(getContext());
+        int off=streaming?0xFF6F7D91:HubTheme.controlBorder(getContext());
+        paint.setColor(isEnabled() ? isChecked()?on:off : streaming?HubStreamUi.BORDER:HubTheme.disabled(getContext()));
         canvas.drawRoundRect(left, top, left + dp(52), top + dp(28), dp(14), dp(14), paint);
-        paint.setColor(Color.WHITE);
+        if (!isEnabled() || isFocused()) {
+            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(dp(2));
+            paint.setColor(streaming?Color.WHITE:isFocused()?HubTheme.focus(getContext()):HubTheme.controlBorder(getContext()));
+            canvas.drawRoundRect(left+dp(1), top+dp(1), left+dp(51), top+dp(27), dp(13), dp(13), paint);
+            paint.setStyle(Paint.Style.FILL);
+        }
+        paint.setColor(isEnabled() ? Color.WHITE : streaming?Color.LTGRAY:HubTheme.muted(getContext()));
         float center = left + dp(isChecked() != rtl ? 38 : 14);
         canvas.drawCircle(center, top + dp(14), dp(10), paint);
     }

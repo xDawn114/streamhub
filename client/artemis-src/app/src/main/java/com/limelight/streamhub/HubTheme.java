@@ -59,4 +59,11 @@ public final class HubTheme {
     public static int danger(Context context) { return color(context, R.color.hub_danger, R.color.hub_danger_light, R.color.hub_danger_dark); }
     public static int onAccent(Context context) { return color(context, R.color.hub_on_accent, R.color.hub_on_accent_light, R.color.hub_on_accent_dark); }
     public static int ripple(Context context) { return color(context, R.color.hub_ripple, R.color.hub_ripple_light, R.color.hub_ripple_dark); }
+    public static int controlBorder(Context context) { return color(context, R.color.hub_control_border, R.color.hub_control_border_light, R.color.hub_control_border_dark); }
+    public static int hover(Context context) { return color(context, R.color.hub_hover, R.color.hub_hover_light, R.color.hub_hover_dark); }
+    public static int pressed(Context context) { return color(context, R.color.hub_pressed, R.color.hub_pressed_light, R.color.hub_pressed_dark); }
+    public static int primaryHover(Context context) { return color(context, R.color.hub_primary_hover, R.color.hub_primary_hover_light, R.color.hub_primary_hover_dark); }
+    public static int primaryPressed(Context context) { return color(context, R.color.hub_primary_pressed, R.color.hub_primary_pressed_light, R.color.hub_primary_pressed_dark); }
+    public static int focus(Context context) { return color(context, R.color.hub_focus, R.color.hub_focus_light, R.color.hub_focus_dark); }
+    public static int disabled(Context context) { return color(context, R.color.hub_disabled, R.color.hub_disabled_light, R.color.hub_disabled_dark); }
 }

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><AssemblyName>AssistanceChecks</AssemblyName></PropertyGroup>
+ <ItemGroup>
+  <Compile Remove="../../common/ProductVersion.cs"/>
+  <ProjectReference Include="../../service/StreamHub.Service.csproj"/>
+  <Compile Include="../../host/Runtime/AssistanceClient.cs" Link="AssistanceClient.cs"/>
+  <Compile Include="../../host/Runtime/AssistancePeerStore.cs" Link="AssistancePeerStore.cs"/>
+  <Compile Include="../../host/Runtime/ReceiverProcessJob.cs" Link="ReceiverProcessJob.cs"/>
+ </ItemGroup>
+</Project>

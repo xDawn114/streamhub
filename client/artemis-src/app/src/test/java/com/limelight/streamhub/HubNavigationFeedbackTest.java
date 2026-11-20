@@ -74,6 +74,8 @@ public class HubNavigationFeedbackTest {
         try (var controller = Robolectric.buildActivity(HubActivity.class).create()) {
             HubActivity activity = controller.get(); page(activity, 1);
             assertNotNull(text(root(activity), "添加电脑")); assertNull(text(root(activity), "账号与连接"));
+            assertNotNull(text(root(activity), "电脑 IPv4")); assertNotNull(text(root(activity), "六位短码"));
+            assertNull(text(root(activity), "查找附近电脑"));
             snapshot(root(activity), "tablet-add-computer.png", 800, 1200);
             activity.onBackPressed(); assertEquals(0, page(activity)); assertFalse(activity.isFinishing());
             page(activity, 1); ImageButton target = back(root(activity)); assertNotNull(target);
@@ -121,6 +123,35 @@ public class HubNavigationFeedbackTest {
             HubActivity activity = controller.get(); invoke(activity, "openAccount", new Class<?>[]{});
             invoke(activity, "renderNetwork", new Class<?>[]{com.limelight.streamhub.networking.EmbeddedNetwork.Status.class, String.class}, null, "网络暂不可用");
             assertNotNull(text(root(activity), "网络暂不可用")); assertNotNull(text(root(activity), "登录连接账号"));
+        }
+    }
+    @Test public void bindingReturnsHomeOnlyAfterSuccessAndRetainsInputOnFailure() throws Exception {
+        for (boolean success : new boolean[]{false, true}) {
+            try (var controller = Robolectric.buildActivity(HubActivity.class).create()) {
+                HubActivity activity = controller.get(); page(activity, 1);
+                java.lang.reflect.Field codeField = HubActivity.class.getDeclaredField("bindingCodeInput"); codeField.setAccessible(true);
+                android.widget.EditText code = (android.widget.EditText)codeField.get(activity); code.setText("012345");
+                Class<?> workType = Class.forName("com.limelight.streamhub.HubActivity$Work");
+                Object work = java.lang.reflect.Proxy.newProxyInstance(workType.getClassLoader(), new Class<?>[]{workType}, (proxy, method, args) -> {
+                    if (!success) throw new java.io.IOException("测试连接失败");
+                    return "绑定已保存。";
+                });
+                java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
+                Runnable finish = () -> {
+                    try { invoke(activity, "returnHomeAfterBinding", new Class<?>[]{}); }
+                    catch (Exception error) { throw new AssertionError(error); }
+                    completed.set(true);
+                };
+                invoke(activity, "run", new Class<?>[]{workType, Runnable.class}, work, finish);
+                java.lang.reflect.Field busy = HubActivity.class.getDeclaredField("busy"); busy.setAccessible(true);
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (busy.getBoolean(activity) && System.nanoTime() < deadline) {
+                    Thread.sleep(10); shadowOf(Looper.getMainLooper()).idle();
+                }
+                assertFalse("binding operation completed", busy.getBoolean(activity));
+                assertEquals(success, completed.get()); assertEquals(success ? 0 : 1, page(activity));
+                assertEquals(success ? "" : "012345", code.getText().toString());
+            }
         }
     }
     private int background(Context context) {

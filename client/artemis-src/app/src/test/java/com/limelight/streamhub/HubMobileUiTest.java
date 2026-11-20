@@ -157,22 +157,21 @@ public class HubMobileUiTest {
     @Test public void shortCodeFormScrollsAndDoesNotClipTheSixDigitsOnPhone() throws Exception {
         window(320,640,1.5f);
         try(org.robolectric.android.controller.ActivityController<HubActivity> c=Robolectric.buildActivity(HubActivity.class).create()) {
-            java.lang.reflect.Method show=HubActivity.class.getDeclaredMethod("showNearbyAddress");show.setAccessible(true);show.invoke(c.get());
-            AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();
-            View root=dialog.getWindow().getDecorView();layout(root,280,420);
-            EditText code=findCode(root);assertNotNull(code);code.setText("012345");layout(root,280,420);
+            java.lang.reflect.Method show=HubActivity.class.getDeclaredMethod("showPage",int.class);show.setAccessible(true);show.invoke(c.get(),1);
+            View root=content(c.get());layout(root,320,640);
+            EditText code=findCode(root);assertNotNull(code);code.setText("012345");layout(root,320,640);
             assertEquals("012345",code.getText().toString());assertTrue(code.getHeight()>=64);
-            View parent=(View)code.getParent();assertTrue(parent.getParent() instanceof ScrollView);
-            assertTrue(dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+            View parent=(View)code.getParent();
+            assertNotNull(text(root,"绑定"));assertNull(text(root,"查找附近电脑"));
             assertTrue(code.getLayout().getLineWidth(0)<=code.getWidth()-code.getCompoundPaddingLeft()-code.getCompoundPaddingRight());
             code.requestFocus();code.requestRectangleOnScreen(new Rect(0,0,code.getWidth(),code.getHeight()),true);
             snapshot(root,"phone-shortcode-font150.png");
             // The create-only host is not a real displayed window. Check the form's viewport,
             // rather than asking WindowManager for visibility on a nonexistent physical screen.
-            ScrollView scroll=(ScrollView)parent.getParent();Rect shown=new Rect(0,0,code.getWidth(),code.getHeight());
+            while(!(parent instanceof ScrollView))parent=(View)parent.getParent();
+            ScrollView scroll=(ScrollView)parent;Rect shown=new Rect(0,0,code.getWidth(),code.getHeight());
             scroll.offsetDescendantRectToMyCoords(code,shown);shown.offset(-scroll.getScrollX(),-scroll.getScrollY());
             assertTrue(shown.toString(),shown.top>=0 && shown.bottom<=scroll.getHeight());
-            dialog.dismiss();
         }
     }
     private EditText findCode(View root) {

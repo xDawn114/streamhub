@@ -49,12 +49,19 @@ public partial class MainWindow
         bool live = _status?.Remote.Streaming == true || _status?.Tablet.Streaming == true;
         bool ending = _status?.Remote.BackendReleasePending == true;
         string state = _readiness.Observe(_status);
-        ReadinessReasonButton.Visibility = _readiness.TimedOut ? Visibility.Visible : Visibility.Collapsed;
-        AcceptanceLabel.Text = _readiness.TimedOut ? "远控未就绪" : state;
+        bool assistance = _status?.Assistance?.State == "active";
+        if (assistance) { live = true; state = _status!.Assistance!.Mode == "view" ? "临时协助 · 仅观看" : "临时协助 · 允许控制"; }
+        bool assistanceReserved = _status?.Assistance?.State is "pending" or "starting" or "active" or "cleanup-pending";
+        if (assistanceReserved && !assistance) state = _status!.Assistance!.State switch {
+            "offered" => "临时协助 · 等待请求", "pending" => "临时协助 · 待确认",
+            "starting" => "临时协助 · 准备画面", _ => "临时协助 · 正在清理" };
+        ReadinessReasonButton.Visibility = _readiness.TimedOut && !assistanceReserved ? Visibility.Visible : Visibility.Collapsed;
+        AcceptanceLabel.Text = _readiness.TimedOut && !assistanceReserved ? "远控未就绪" : state;
         AcceptanceDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty,
             live || ending ? "WarningText" : _status?.Remote.Healthy == true && !_status.ConnectionsPaused ? "SuccessText" : "Muted");
-        HomeSummaryText.Text = (_status?.DeviceName ?? Environment.MachineName) + " · " + state + " · " +
-            (live ? (_status!.Controller?.Name ?? "已连接设备") + " 正在连接" : "当前无设备连接");
+        HomeDeviceNameText.Text = _status?.DeviceName ?? Environment.MachineName;
+        HomeSummaryText.Text = state + " · " +
+            (live ? (assistance ? _status!.Assistance!.Name : _status!.Controller?.Name ?? "已连接设备") + " 正在连接" : "当前无设备连接");
         if (_status is null) HomeSummaryText.Text = "后台服务未连接，暂时无法确认被控状态";
         HomePrivacyText.Visibility = _status?.PrivacyScreenActive == true ? Visibility.Visible : Visibility.Collapsed;
         HomePrivacyText.Text = "隐私屏正在生效 · Ctrl+Alt+F12 可恢复本机画面";
@@ -77,10 +84,7 @@ public partial class MainWindow
             : "";
         AccountConnectionDetailText.Visibility = string.IsNullOrWhiteSpace(AccountConnectionDetailText.Text)
             ? Visibility.Collapsed : Visibility.Visible;
-        AccountPrimaryButton.Content = networkReady ? "查看连接详情" : _status?.Network.Running == true ? "登录连接账号"
-            : networkFailed ? "重试异地连接" : "启用异地连接";
-        AccountPrimaryButton.IsEnabled = _status is not null && !_busy;
-        AccountButton.ToolTip = "网络连接 · 异地：" + networkState;
+        AccountPrimaryButton.IsEnabled = !_busy;
     }
 
     private sealed record ReceiverAction(bool CanConnect, string Reason);
@@ -88,6 +92,8 @@ public partial class MainWindow
     {
         if (_status is null) return new(false, "后台服务未连接，请稍后刷新");
         if (_status.ConnectionsPaused) return new(false, "电脑已暂停接受连接，请先在顶栏恢复");
+        if (_status.Assistance?.State is "pending" or "starting" or "active" or "cleanup-pending")
+            return new(false, "请先结束临时协助，再连接信任设备");
         if (!allowed) return new(false, "未授权副屏，请在此设备的“权限”中调整");
         if (_tabletRequest is { } request && TabletRequestRegistry.Active(request.State))
             return new(false, "已有副屏邀请或连接，请先取消或断开");
@@ -172,13 +178,6 @@ public partial class MainWindow
     }
     private async void DisconnectActive_Click(object sender, RoutedEventArgs e)
     { CloseTransientPopovers(); await RunAction(() => CommandAsync(new("session-disconnect"))); }
-    private void AccountPrimary_Click(object sender, RoutedEventArgs e)
-    {
-        CloseTransientPopovers();
-        if (_status?.Network.Running != true) NetworkStart_Click(sender, e);
-        else if (_network?.LoggedIn != true) { Pages.SelectedItem = AccountPage; NetworkLogin_Click(sender, e); }
-        else OpenAccount_Click(sender, e);
-    }
     private void OpenTabletSettings_Click(object sender, RoutedEventArgs e)
     { CloseTransientPopovers(); Pages.SelectedItem = SettingsPage; SettingsCategories.SelectedItem = TabletSettingsCategory; }
     private bool _refreshingDeviceCards;
@@ -223,9 +222,12 @@ public partial class MainWindow
                 !_controlDeviceList.Devices.Any(d => d.ClientId == clientId);
         var action = GetReceiverAction(clientId, allowed, duringAction: true);
         if (!action.CanConnect) { ShowFeedback(action.Reason, error: true); return; }
-        var rotation = int.Parse((string)((ComboBoxItem)OrientationBox.SelectedItem).Tag);
+        var orientation = (string)((ComboBoxItem)OrientationBox.SelectedItem).Tag;
+        bool automatic = orientation == "auto";
+        var rotation = automatic ? 0 : int.Parse(orientation);
         var link = (string)((ComboBoxItem)RequestLinkBox.SelectedItem).Tag;
-        var response = await _runtime.SendAsync(new("tablet-request", Profile: link, Orientation: rotation, ClientId: clientId), _closing.Token);
+        var response = await _runtime.SendAsync(new("tablet-request", Profile: link, Orientation: rotation,
+            AutoOrientation: automatic, ClientId: clientId), _closing.Token);
         ShowFeedback(response.Message, error: !response.Success);
         if (response.Success && response.PayloadJson is not null)
             RenderReceivers(JsonSerializer.Deserialize<ReceiverSnapshot>(response.PayloadJson, RuntimeProtocol.JsonOptions));
@@ -271,7 +273,7 @@ public partial class MainWindow
         var expiry = _bindingSnapshot?.Request is { State: "pending" or "approved" } pending
             ? pending.ExpiresAt : _bindingSnapshot?.ExpiresAt;
         int remaining = expiry is null ? 0 : Math.Max(0, (int)Math.Ceiling((expiry.Value - DateTimeOffset.UtcNow).TotalSeconds));
-        BindingCountdownText.Text = remaining > 0 ? $"有效期剩余 {remaining / 60:00}:{remaining % 60:00} · 一次性六位短码" : "短码未生成或已过期，请重新生成";
+        BindingCountdownText.Text = remaining > 0 ? $"有效期剩余 {remaining / 60:00}:{remaining % 60:00}" : "短码已过期，请重新生成";
     }
     private async void CloseBinding_Click(object sender, RoutedEventArgs e) => await CloseBindingAsync();
     private async Task CloseBindingAsync()
@@ -330,10 +332,9 @@ public partial class MainWindow
             : selected is null ? "请选择传输设备" : selected.Allowed ? "" : selected.UsesDevicePermissions ? "此设备的文件权限未开启" : "所选设备待允许，请核对文件授权";
         FileInlineStateText.Text = reason;
         FileInlineStateText.Visibility = reason.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        SendFileButton.ToolTip = reason.Length > 0 ? reason : "选择电脑文件并发送";
         FileInlineEnableButton.Visibility = !enabled ? Visibility.Visible : Visibility.Collapsed;
         FileInlineAllowButton.Visibility = enabled && selected is { Allowed: false } ? Visibility.Visible : Visibility.Collapsed;
-        FileInlineAllowButton.Content = selected?.UsesDevicePermissions == true ? "设备文件权限" : "核对文件授权";
+        FileInlineAllowButton.Content = "信任此设备";
         bool tasks = _fileSnapshot?.Items.Length > 0;
         FileTasksEmptyText.Text = "暂无传输任务";
         FileTasksEmptyText.Visibility = tasks ? Visibility.Collapsed : Visibility.Visible;

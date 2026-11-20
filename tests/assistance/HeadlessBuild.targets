@@ -1,0 +1,8 @@
+<Project>
+  <!-- Explicit opt-in for isolated backend checks in a source checkout without generated UI assets. -->
+  <Target Name="OmitUnavailableBrandIconForHeadlessChecks" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <EmbeddedResource Remove="@(EmbeddedResource)" Condition="'%(EmbeddedResource.LogicalName)' == 'StreamHub.BrandIcon.ico' And !Exists('%(EmbeddedResource.FullPath)')" />
+    </ItemGroup>
+  </Target>
+</Project>

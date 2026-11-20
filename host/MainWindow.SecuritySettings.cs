@@ -29,8 +29,9 @@ public partial class MainWindow
         {
             var choice = new Wpf.CheckBox { MinHeight = 40 };
             System.Windows.Automation.AutomationProperties.SetName(choice, text);
+            System.Windows.Automation.AutomationProperties.SetHelpText(choice, description);
             choice.Click += async (_, _) => { if (!_renderingHostPolicy && !_savingHostPolicy) await SaveHostPolicySettingsAsync(); };
-            panel.Children.Add(new SettingRow { Header = text, ToolTip = description, Tag = icon, Content = choice }); return choice;
+            panel.Children.Add(new SettingRow { Header = text, Tag = icon, Content = choice }); return choice;
         }
 
         _hostPolicyLock = Choice("退出远控后锁屏", "主动退出时锁定；旋转和内部重连不触发", "\uE72E");
@@ -40,12 +41,12 @@ public partial class MainWindow
         panel.Children.Add(new Wpf.TextBlock { Text = "Windows 密码", Margin = new Thickness(0, 12, 0, 4) });
         const string passwordHelp = "输入当前授权用户的 Windows 密码，不支持 PIN。留空保留原密码，密码在本机加密保存。";
         _hostPolicyPassword = new Wpf.PasswordBox { MaxLength = 256, MinHeight = 40, Width = 320, HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
-            Margin = new Thickness(0, 4, 0, 12), ToolTip = passwordHelp };
+            Margin = new Thickness(0, 4, 0, 12) };
         System.Windows.Automation.AutomationProperties.SetName(_hostPolicyPassword, "在电脑本机设置 Windows 密码");
         System.Windows.Automation.AutomationProperties.SetHelpText(_hostPolicyPassword, passwordHelp);
         var password = new Wpf.Grid { Width = 320, HorizontalAlignment = System.Windows.HorizontalAlignment.Left };
         password.Children.Add(_hostPolicyPassword);
-        _visibleHostPassword = new Wpf.TextBox { MaxLength = 256, MinHeight = 40, Margin = _hostPolicyPassword.Margin, Visibility = Visibility.Collapsed, ToolTip = passwordHelp };
+        _visibleHostPassword = new Wpf.TextBox { MaxLength = 256, MinHeight = 40, Margin = _hostPolicyPassword.Margin, Visibility = Visibility.Collapsed };
         System.Windows.Automation.AutomationProperties.SetName(_visibleHostPassword, "新 Windows 密码，当前显示明文");
         System.Windows.Automation.AutomationProperties.SetHelpText(_visibleHostPassword, passwordHelp);
         password.Children.Add(_visibleHostPassword); panel.Children.Add(password);

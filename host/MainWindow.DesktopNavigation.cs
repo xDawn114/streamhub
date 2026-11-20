@@ -29,7 +29,18 @@ public partial class MainWindow
         bool open = !DeviceDetailsPopover.IsOpen;
         CloseTransientPopovers(); DeviceDetailsPopover.IsOpen = open;
     }
-    private void OpenAccount_Click(object sender, RoutedEventArgs args) { CloseTransientPopovers(); Pages.SelectedItem = AccountPage; }
+    private void OpenAccount_Click(object sender, RoutedEventArgs args)
+    {
+        CloseTransientPopovers(); Pages.SelectedItem = SettingsPage;
+        SettingsCategories.SelectedItem = NetworkSettingsCategory;
+    }
+    internal void OpenAssistance() { CloseTransientPopovers(); Pages.SelectedItem = HomePage; }
+    private void AssistanceNetwork_Click(object sender, RoutedEventArgs args)
+    {
+        OpenAccount_Click(sender, args);
+        NetworkSetupExpander.IsExpanded = true;
+        NetworkStateText.BringIntoView();
+    }
     private async void OpenDevices_Click(object sender, RoutedEventArgs args) => await OpenBindingAsync();
     private void OpenDiagnostics_Click(object sender, RoutedEventArgs args) { CloseTransientPopovers(); Pages.SelectedItem = DiagnosticsPage; }
     private void OpenUpdates_Click(object sender, RoutedEventArgs args)

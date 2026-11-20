@@ -12,7 +12,7 @@ internal static class Program
     [STAThread] static void Main(string[] args)
     {
         var root = Path.GetFullPath(args.Single());
-        if (!root.StartsWith(@"D:\Deepseek\build\stage72-tests\desktop\", StringComparison.OrdinalIgnoreCase)) throw new IOException("Isolated output required.");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(root,@"^D:\\Deepseek\\build\\stage\d+-tests\\desktop\\",System.Text.RegularExpressions.RegexOptions.IgnoreCase)) throw new IOException("Isolated output required.");
         Directory.CreateDirectory(root);
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var calls = new List<string>();

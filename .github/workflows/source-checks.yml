@@ -62,6 +62,11 @@ jobs:
         shell: pwsh
         run: |
           & ./tests/signing/Run.ps1 -FixtureRoot (Join-Path $env:RUNNER_TEMP 'icontrol-signing-fixtures')
+      - name: Check temporary assistance lifecycle with isolated state
+        shell: pwsh
+        run: |
+          dotnet run --project tests/assistance/AssistanceChecks.csproj -c Release -- (Join-Path $env:RUNNER_TEMP 'icontrol-assistance-fixtures')
+          if ($LASTEXITCODE -ne 0) { throw 'Temporary assistance checks failed' }
       - name: Archive unsigned app and service build evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

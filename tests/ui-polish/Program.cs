@@ -66,7 +66,7 @@ internal static class Program
     Check(N<Button>("SendFileButton").IsEnabled&&N<Button>("FileEmptySendButton").IsVisible,"grant immediately enables toolbar and empty action");
     files=files with{Devices=[files.Devices[0] with{UsesDevicePermissions=true}]};RefreshFiles();
     Invoke("GrantFiles_Click",new Button{Tag="allow"});Pump();
-    Check((string)N<ComboBox>("ControlDeviceBox").SelectedValue=="first-123456"&&!calls.Any(r=>r.Command=="files-grant"),"bound file action opens central device permissions without another grant");Invoke("CloseDevicePermissions_Click");
+    Check(calls.Any(r=>r.Command=="control-device-scope"&&r.RequestId=="first-123456"&&r.DeviceScope==(int)ControlScope.All)&&!calls.Any(r=>r.Command=="files-grant"),"bound file action uses the existing central permission without another grant");
     filesAvailable=false;RefreshFiles();Check(!N<Button>("SendFileButton").IsEnabled&&N<Button>("SendFileButton").ToolTip.ToString()==N<TextBlock>("FileInlineStateText").Text,"failed file status invalidates a previous grant snapshot");filesAvailable=true;RefreshFiles();
     files=files with{Items=[new("receiving","client-one","upload","正在接收的很长文件名 中文 emoji.txt",1024,"",512),new("complete","client-one","download","完成.zip",0,"",State:"completed"),new("cancelled","client-one","upload","取消.bin",long.MaxValue,"",long.MaxValue,State:"cancelled")]};RefreshFiles();
     var list=N<ListBox>("FileTaskList");Check(list.Items.Count==3&&!N<StackPanel>("FileTasksEmptyState").IsVisible,"three task states replace empty overlay");

@@ -22,6 +22,27 @@ public class HubFileBrowserTest {
         return client;
     }
 
+    @Test public void trustedFilePageReopensAndReadsWithoutRepeatedRegistrationPerOperation() throws Exception {
+        for (int reopen = 0; reopen < 2; reopen++) {
+            HubFileClient client = client("saved-root");
+            when(client.register()).thenReturn(new JSONObject().put("allowed", true).put("enabled", true)
+                    .put("usesDevicePermissions", true));
+            HubFileBrowser browser = new HubFileBrowser(() -> client);
+            for (int read = 0; read < 3; read++) {
+                assertEquals("saved-root", browser.read(false, (active, access) -> {
+                    assertTrue(access.getBoolean("allowed"));
+                    assertTrue(access.getBoolean("usesDevicePermissions"));
+                    return browser.roots(active).getString(0);
+                }));
+            }
+            verify(client).connect();
+            verify(client).register();
+            verify(client).json("roots", null);
+            browser.close();
+            verify(client).cancel();
+        }
+    }
+
     @Test public void taskPollReconnectsOnceAndNextBrowseReadsRootsFromTheNewConnection() throws Exception {
         HubFileClient first = client("first"), second = client("second");
         when(first.json("tasks", null)).thenThrow(new SocketTimeoutException("stale connection"));

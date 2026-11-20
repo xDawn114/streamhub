@@ -44,7 +44,7 @@ $zip = [IO.Compression.ZipFile]::Open($temporary, [IO.Compression.ZipArchiveMode
 try {
     foreach ($entry in $entries) {
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $entry.source, $entry.path,
-            [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+            [IO.Compression.CompressionLevel]::SmallestSize) | Out-Null
     }
 } finally { $zip.Dispose() }
 # Verify the bytes in the completed archive, not just the list used to create it.

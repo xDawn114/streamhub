@@ -1,9 +1,11 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Diagnostics;
 using StreamHub.Packaging;
 
-var root = Path.GetFullPath(args.Single());
+if (args.Length is < 1 or > 2) throw new ArgumentException("artifact-root [7z.exe]");
+var root = Path.GetFullPath(args[0]);
 Directory.CreateDirectory(root);
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
@@ -12,7 +14,7 @@ void Reject(Action action, string label)
     try { action(); throw new Exception("Expected rejection: " + label); }
     catch (Exception error) when (error is IOException or InvalidDataException or JsonException or InvalidOperationException or KeyNotFoundException) { Check(true, label); }
 }
-void Inspect(string path) { using var zip = ZipFile.OpenRead(path); PayloadArchive.Open(zip).VerifyFiles(); }
+void Inspect(string path) { using var input = File.OpenRead(path); using var container = PayloadContainer.Open(input); PayloadArchive.Open(container.Archive).VerifyFiles(); }
 string Fixture(string name, Action<ZipArchive> mutate)
 {
     var path = Path.Combine(root, name + ".zip"); File.Copy(Path.Combine(root, "dedup.zip"), path);
@@ -42,6 +44,36 @@ var packed = PayloadArchive.Create(stage, dedup); PayloadArchive.Create(stage, l
 Check(packed.Aliases == 1 && packed.OmittedBytes == bytes.Length, "only immutable mirrored engine omitted; config and state remain physical");
 Inspect(dedup); Inspect(legacy); Check(true, "legacy and deduplicated archives both verify");
 Check(new FileInfo(dedup).Length < new FileInfo(legacy).Length - bytes.Length / 2, "compressed archive actually gets smaller");
+if (args.Length == 2)
+{
+    string Envelope(string name, string inner)
+    {
+        var folder = Path.Combine(root, name); Directory.CreateDirectory(folder);
+        File.Copy(inner, Path.Combine(folder, PayloadContainer.EntryName));
+        var output = Path.Combine(root, name + ".7z");
+        var start = new ProcessStartInfo(args[1]) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = folder };
+        foreach (var argument in new[] { "a", "-t7z", "-m0=LZMA2", "-bso0", "-bsp0", output, PayloadContainer.EntryName }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!; process.WaitForExit();
+        if (process.ExitCode != 0) throw new IOException("Fixture compression failed.");
+        return output;
+    }
+    var solid = Envelope("solid", dedup);
+    using (var input = File.OpenRead(solid))
+    using (var container = PayloadContainer.Open(input))
+    {
+        var payload = PayloadArchive.Open(container.Archive); payload.VerifyFiles();
+        var expanded = Path.Combine(root, "solid-expanded"); payload.Extract(expanded);
+        foreach (var file in manifest)
+            Check(File.ReadAllBytes(Path.Combine(expanded, file.path)).SequenceEqual(File.ReadAllBytes(Path.Combine(stage, file.path))), "LZMA2 bytes match: " + file.path);
+        Check(payload.AliasCount == packed.Aliases, "LZMA2 retains engine alias validation");
+    }
+    var damaged = Envelope("solid-tamper", Fixture("solid-tamper-inner", z => TextEntry(z, "unexpected.exe", "x")));
+    Reject(() => Inspect(damaged), "LZMA2 does not bypass inner manifest validation");
+    var truncated = Path.Combine(root, "truncated.7z");
+    var compressed = File.ReadAllBytes(solid); File.WriteAllBytes(truncated, compressed[..^20]);
+    try { Inspect(truncated); throw new Exception("Truncated archive accepted."); }
+    catch (Exception error) when (error is IOException or InvalidOperationException or ArgumentException or SharpCompress.Common.ArchiveException) { Check(true, "truncated LZMA2 rejected"); }
+}
 using (var zip = ZipFile.OpenRead(dedup))
 {
     var payload = PayloadArchive.Open(zip); var expanded = Path.Combine(root, "expanded"); payload.Extract(expanded);

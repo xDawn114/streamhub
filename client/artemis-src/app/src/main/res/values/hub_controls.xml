@@ -2,14 +2,14 @@
 <resources>
     <style name="HubControlDialog" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:windowBackground">@drawable/hub_dialog_surface</item>
-        <item name="android:colorBackground">#1B2432</item>
-        <item name="android:colorBackgroundFloating">#1B2432</item>
-        <item name="android:textColorPrimary">#EEF3FA</item>
-        <item name="android:textColorSecondary">#B5C2D4</item>
-        <item name="android:textColorHint">#B5C2D4</item>
-        <item name="android:colorAccent">#9AC1FF</item>
-        <item name="android:colorControlActivated">#9AC1FF</item>
-        <item name="android:colorButtonNormal">#263244</item>
+        <item name="android:colorBackground">@color/hub_surface_dark</item>
+        <item name="android:colorBackgroundFloating">@color/hub_surface_dark</item>
+        <item name="android:textColorPrimary">@color/hub_text_dark</item>
+        <item name="android:textColorSecondary">@color/hub_muted_dark</item>
+        <item name="android:textColorHint">@color/hub_muted_dark</item>
+        <item name="android:colorAccent">@color/hub_accent_dark</item>
+        <item name="android:colorControlActivated">@color/hub_accent_dark</item>
+        <item name="android:colorButtonNormal">@color/hub_field_dark</item>
         <item name="android:buttonBarPositiveButtonStyle">@style/HubControlDialogButton</item>
         <item name="android:buttonBarNegativeButtonStyle">@style/HubControlDialogButton</item>
         <item name="android:buttonBarNeutralButtonStyle">@style/HubControlDialogButton</item>
@@ -18,7 +18,7 @@
         <item name="android:windowMinWidthMinor">90%</item>
     </style>
     <style name="HubControlDialogButton" parent="android:style/Widget.Material.Button.Borderless">
-        <item name="android:textColor">#9AC1FF</item>
+        <item name="android:textColor">@color/hub_accent_dark</item>
         <item name="android:minHeight">48dp</item>
     </style>
     <style name="HubControlDialogLight" parent="android:style/Theme.Material.Light.Dialog.Alert">

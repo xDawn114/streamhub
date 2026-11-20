@@ -46,7 +46,6 @@ public partial class MainWindow
         bool maximized = WindowState == WindowState.Maximized;
         MaximizeGlyph.Text = maximized ? "\uE923" : "\uE922";
         string label = maximized ? "还原窗口" : "最大化窗口";
-        MaximizeWindowButton.ToolTip = label;
         System.Windows.Automation.AutomationProperties.SetName(MaximizeWindowButton, label);
     }
 }

@@ -8,12 +8,15 @@ namespace StreamHub.Host;
 public partial class MainWindow
 {
     private ControlDeviceList? _controlDeviceList;
-    private bool _renderingControlDevices;
+    private bool _renderingControlDevices, _savingControlScope;
+    private int _controlScopeVersion;
     private async void ControlDevices_Loaded(object sender, RoutedEventArgs args) => await ReadControlDevicesAsync();
     private void RefreshControlDevices_Click(object sender, RoutedEventArgs args) => _ = RunAction(ReadControlDevicesAsync);
     private async Task ReadControlDevicesAsync()
     {
+        int version = _controlScopeVersion;
         var result = await _runtime.SendAsync(new("control-device-list"), _closing.Token);
+        if (_savingControlScope || version != _controlScopeVersion) return;
         if (!result.Success || result.PayloadJson is null)
         {
             _controlDeviceList = null;
@@ -52,18 +55,38 @@ public partial class MainWindow
         ControlClipboardCheck.IsChecked = (device?.Scope & ControlScope.Clipboard) != 0 && device is not null;
         ControlScopePanel.IsEnabled = device is { Revoked: false };
     }
-    private void SaveControlScope_Click(object sender, RoutedEventArgs args) => _ = RunAction(async () =>
+    private void SaveControlScope_Click(object sender, RoutedEventArgs args)
     {
-        var device = SelectedControlDevice(); if (device is null || device.Revoked) return;
+        var device = SelectedControlDevice();
+        if (_busy || _savingControlScope || device is null || device.Revoked) { RenderControlDevice(); return; }
         ControlScope scope = (ControlRemoteCheck.IsChecked == true ? ControlScope.Remote : 0) |
             (ControlTabletCheck.IsChecked == true ? ControlScope.Tablet : 0) |
             (ControlFilesCheck.IsChecked == true ? ControlScope.Files : 0) |
             (ControlClipboardCheck.IsChecked == true ? ControlScope.Clipboard : 0);
-        if (System.Windows.MessageBox.Show(this, "修改“" + device.Name + "”的权限？取消主屏或副屏权限会结束相关连接；撤销媒体配对时也可能短暂中断同模式连接。文件删除权限不会随此开启。",
-            "保存设备权限", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        await CommandAsync(new("control-device-scope", RequestId:device.Id, DeviceScope:(int)scope));
-        await ReadControlDevicesAsync();
-    });
+        if (scope == device.Scope) return;
+        _ = RunAction(async () =>
+        {
+            if ((device.Scope & ~scope) != 0 && System.Windows.MessageBox.Show(this,
+                "关闭权限会结束相关连接，继续？", "设备权限", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                MessageBoxResult.No) != MessageBoxResult.Yes) { RenderControlDevice(); return; }
+            _savingControlScope = true; _controlScopeVersion++;
+            ControlScopePanel.IsEnabled = ControlDeviceBox.IsEnabled = false;
+            try
+            {
+                var result = await _runtime.SendAsync(new("control-device-scope", RequestId:device.Id, DeviceScope:(int)scope), _closing.Token);
+                if (result.Success && _controlDeviceList is not null)
+                    _controlDeviceList = _controlDeviceList with { Devices = _controlDeviceList.Devices.Select(d => d.Id == device.Id ? d with { Scope = scope } : d).ToArray() };
+                ShowFeedback(result.Success ? "权限已保存" : "权限保存失败：" + result.Message, error: !result.Success);
+            }
+            finally
+            {
+                _savingControlScope = false;
+                RenderControlDevice(); ControlDeviceBox.IsEnabled = true;
+            }
+            await ReadControlDevicesAsync();
+            await RefreshFilesAsync();
+        });
+    }
     private void RevokeControlDevice_Click(object sender, RoutedEventArgs args) => _ = RunAction(async () =>
     {
         var device = SelectedControlDevice(); if (device is null || device.Revoked) return;
@@ -71,16 +94,24 @@ public partial class MainWindow
             "撤销设备", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await CommandAsync(new("control-device-revoke", RequestId:device.Id)); await ReadControlDevicesAsync();
     });
-    private void SaveLegacyBinding_Click(object sender, RoutedEventArgs args) => _ = RunAction(async () =>
+    private void SaveLegacyBinding_Click(object sender, RoutedEventArgs args)
     {
+        if (_busy) { AllowLegacyBindingCheck.IsChecked = _controlDeviceList?.LegacyAllowed == true; return; }
         bool allow = AllowLegacyBindingCheck.IsChecked == true;
+        _ = RunAction(async () =>
+        {
+        try
+        {
         if (System.Windows.MessageBox.Show(this, allow
                 ? "重新允许使用旧版共享绑定码的设备？这些连接无法按设备识别和单独撤销。"
                 : "关闭旧版共享绑定？尚未用短码重新绑定的手机和平板将无法通过控制接口连接。旧媒体配对需在设备页单独清理，关闭兼容不代表清除了所有历史媒体配对。",
                 "旧版兼容策略", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
         { await ReadControlDevicesAsync(); return; }
         await CommandAsync(new("control-legacy-policy", LegacyBindingAllowed:allow)); await ReadControlDevicesAsync();
-    });
+        }
+        finally { AllowLegacyBindingCheck.IsChecked = _controlDeviceList?.LegacyAllowed == true; }
+        });
+    }
     private void RotateControlDevice_Click(object sender, RoutedEventArgs args) => _ = RunAction(async () =>
     {
         await OpenBindingAsync();

@@ -51,7 +51,6 @@ public partial class MainWindow
             }
         }
         catch { UpdateStateText.Text = "暂时无法检查更新，请稍后重试。"; }
-        if (_updates is null) CheckUpdateButton.ToolTip = "请使用安装包更新此版本。";
         UpdateVersionText.Text = CurrentUpdateVersion;
         _updateTimer.Tick += async (_, _) => await MaybeCheckUpdateAsync();
         Loaded += async (_, _) =>

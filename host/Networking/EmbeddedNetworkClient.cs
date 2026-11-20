@@ -71,10 +71,20 @@ public sealed class EmbeddedNetworkClient : IDisposable
     /// <summary>Returns the browser authorization URL; no password or reusable auth key is handled here.</summary>
     public async Task<NetworkStatus> BeginLoginAsync(CancellationToken cancellationToken = default, TransportSettings? settings = null)
     {
+        try { return await BeginLoginCoreAsync(cancellationToken, settings).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is HttpRequestException or IOException or TimeoutException or TaskCanceledException)
+        {
+            throw new InvalidOperationException(FriendlyError(error), error);
+        }
+    }
+
+    private async Task<NetworkStatus> BeginLoginCoreAsync(CancellationToken cancellationToken, TransportSettings? settings)
+    {
         settings = (settings ?? new()).Validate();
         await RequireCurrentAsync(settings, cancellationToken).ConfigureAwait(false);
         var initial = await GetStatusAsync(cancellationToken, settings).ConfigureAwait(false);
-        if (!initial.Available) throw new InvalidOperationException("内置异地连接服务未就绪，请先启用异地连接。");
+        if (!initial.Available) throw new InvalidOperationException(initial.Error);
         if (initial.LoggedIn && initial.State == "Running") return initial;
         // Start preserves the stored profile. Masked edits preserve all unrelated preferences and keys.
         using (await SendAsync(HttpMethod.Post, "start", "{}", cancellationToken).ConfigureAwait(false)) { }

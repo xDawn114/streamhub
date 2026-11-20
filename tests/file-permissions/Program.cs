@@ -19,7 +19,8 @@ void Denied(Action action, int status, string label) {
     try { action(); throw new Exception("Unexpectedly allowed: " + label); }
     catch (TransferError error) { Check(error.Status == status, label); }
 }
-var registry = new ControlDeviceRegistry();
+byte[]? savedRegistry = null;
+var registry = new ControlDeviceRegistry(save: bytes => savedRegistry = bytes);
 var grant = registry.Issue(client, "tablet");
 var limited = registry.Issue(noFiles, "phone", ControlScope.Remote);
 var spool = Path.Combine(root, "spool");
@@ -28,6 +29,29 @@ vault.Configure(true, shared, true);
 var registered = vault.Register(client, "tablet", key);
 Check(registered.Allowed && registered.UsesDevicePermissions, "bound file scope allows access without a second grant");
 Check(vault.Browse(client, key, "").Entries.Single().Name == "sample.txt", "browse is available without a streaming lease");
+Check(vault.Register(client, "tablet", key).Allowed, "reopening the file client reuses its existing identity without another grant");
+vault.SetDevicePermissions(client, false, true);
+var restoredRegistry = new ControlDeviceRegistry(savedRegistry);
+var restoredVault = new FileTransferVault(spool, throttle: false) { DeviceFilePermission = restoredRegistry.FilePermission };
+var restoredDevice = restoredVault.Register(client, "tablet", key);
+Check(restoredDevice.Allowed && !restoredDevice.UploadAllowed && restoredDevice.DeleteAllowed,
+    "central trust and separate upload/delete permissions survive a vault and registry restart");
+Check(restoredVault.Browse(client, key, "").Entries.Single().Name == "sample.txt", "restarted trusted client browses the existing roots directly");
+using (var lockedSettings = new FileStream(Path.Combine(spool, "devices.json.tmp"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+{
+    try { vault.SetDevicePermissions(client, true, false); throw new Exception("Failed save accepted"); }
+    catch (IOException) { Check(!vault.Snapshot().Devices.Single(x => x.ClientId == client).UploadAllowed,
+        "a failed permission save leaves the previous in-memory permissions intact"); }
+    try { vault.Register("unsaved-device", "unsaved", otherKey); throw new Exception("Failed registration accepted"); }
+    catch (IOException) { Check(!vault.Snapshot().Devices.Any(x => x.ClientId == "unsaved-device"),
+        "a failed registration is not retained as an in-memory identity"); }
+}
+restoredVault = new FileTransferVault(spool, throttle: false) { DeviceFilePermission = restoredRegistry.FilePermission };
+Check(!restoredVault.Snapshot().Devices.Single(x => x.ClientId == client).UploadAllowed &&
+    restoredVault.Snapshot().Devices.Single(x => x.ClientId == client).DeleteAllowed, "failed writes also preserve permissions on disk");
+vault.RemoveDevice(client);
+Denied(() => vault.Browse(client, key, ""), 403, "a removed file identity cannot use its old credential");
+Check(vault.Register(client, "tablet", key).Allowed, "re-registration still derives trust from the central device permission");
 Check(!vault.Register(noFiles, "phone", otherKey).Allowed, "remote-only scope does not grant file access");
 Denied(() => vault.Grant(noFiles, true), 409, "legacy grant cannot bypass a bound device's central scope");
 Denied(() => vault.Browse(noFiles, otherKey, ""), 403, "missing central file scope blocks browsing");
@@ -81,5 +105,19 @@ Denied(() => restarted.Browse(client, key, ""), 403, "lost or pruned binding rec
 Denied(() => restarted.Browse(legacy, otherKey, ""), 403, "a migrated legacy grant cannot reappear after restart");
 Denied(() => restarted.Grant(legacy, true), 409, "central permission mode remains durable across restart");
 Check(File.ReadAllBytes(Path.Combine(shared, "sample.txt")).SequenceEqual(source), "all checks leave the exact source bytes intact");
+var inactiveSpool=Path.Combine(root,"inactive-spool");
+var inactiveVault=new FileTransferVault(inactiveSpool, throttle:false);
+inactiveVault.Configure(false,shared);
+Check(!inactiveVault.Snapshot().Settings.Enabled&&inactiveVault.Snapshot().Settings.ReceiveDirectory==shared,"first receive directory can be saved while transfers remain off");
+var inactiveRestored=new FileTransferVault(inactiveSpool, throttle:false);
+Check(!inactiveRestored.Snapshot().Settings.Enabled&&inactiveRestored.Snapshot().Settings.ReceiveDirectory==shared,"disabled receive directory survives a vault restart");
+Check(inactiveRestored.Snapshot().Devices.Length==0&&!inactiveRestored.Snapshot().Settings.BrowseEnabled,"choosing a directory does not grant a device or enable browsing");
+var alternate=Path.Combine(root,"alternate");Directory.CreateDirectory(alternate);
+inactiveRestored.Configure(false,alternate);
+Check(!inactiveRestored.Snapshot().Settings.Enabled&&inactiveRestored.Snapshot().Settings.ReceiveDirectory==alternate,"changing a disabled receive directory saves only its path");
+inactiveRestored.Configure(false,"");
+Check(inactiveRestored.Snapshot().Settings.ReceiveDirectory==alternate,"turning off without a new directory preserves the saved path");
+Denied(()=>inactiveRestored.Configure(false,Path.Combine(root,"missing")),400,"invalid receive directory is rejected even while disabled");
+Check(inactiveRestored.Snapshot().Settings.ReceiveDirectory==alternate,"invalid directory leaves the saved configuration intact");
 File.WriteAllText(Path.Combine(root, "result.json"), JsonSerializer.Serialize(new { passed = true, checks, installedServiceCalls = 0 }));
 Console.WriteLine($"{checks} file permission checks passed.");

@@ -84,7 +84,7 @@ internal sealed partial class HostRuntime
     private void ReconcileSessionNotice()
     {
         var now = DateTimeOffset.UtcNow;
-        bool active = _remote.Process?.Running == true && _remoteSession.IsStreaming(now) ||
+        bool active = AssistanceStatus().State == "active" || _remote.Process?.Running == true && _remoteSession.IsStreaming(now) ||
             _tablet.Process?.Running == true && _tabletStreamingSeen && _tabletLeaseId is not null && !TabletLeaseExpired(now);
         if (_sessionNotice is not null && (!active || !_sessionNotice.Running ||
             !_interactive && _sessionNotice.SessionId != SessionLauncher.ActiveSession))

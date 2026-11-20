@@ -16,6 +16,8 @@ public partial class App : System.Windows.Application
     private Mutex? _instanceMutex;
     private EventWaitHandle? _activationEvent;
     private RegisteredWaitHandle? _activationWait;
+    private EventWaitHandle? _assistanceActivationEvent;
+    private RegisteredWaitHandle? _assistanceActivationWait;
     private bool _ownsInstanceMutex;
 
     internal bool IsExiting { get; private set; }
@@ -56,6 +58,7 @@ public partial class App : System.Windows.Application
             var user = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
             var instanceKey = $@"Local\StreamHub.Host.{user}.{Process.GetCurrentProcess().SessionId}";
             _activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, instanceKey + ".Activate");
+            _assistanceActivationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, instanceKey + ".Assistance");
             _instanceMutex = new Mutex(false, instanceKey + ".Instance");
             try { _ownsInstanceMutex = _instanceMutex.WaitOne(0); }
             catch (AbandonedMutexException) { _ownsInstanceMutex = true; }
@@ -63,11 +66,14 @@ public partial class App : System.Windows.Application
             if (!_ownsInstanceMutex)
             {
                 AllowExistingInstanceToActivate();
-                _activationEvent.Set();
+                (e.Args.Contains("--assistance", StringComparer.OrdinalIgnoreCase) ? _assistanceActivationEvent : _activationEvent).Set();
                 Shutdown();
                 return;
             }
 
+            try { AssistanceClient.CleanupPreviousSessions(); }
+            catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException)
+            { System.Windows.MessageBox.Show("上次临时协助的本机文件尚未清理。新协助开始前会再次检查。", "我控制"); }
             ControlApi = new ControlApiClient(new RuntimeClient());
             try { await ControlApi.StartAsync(); }
             catch (InvalidOperationException) { /* The desktop remains usable; the binding panel displays LastError. */ }
@@ -91,8 +97,8 @@ public partial class App : System.Windows.Application
                 disconnect.Enabled = false;
                 var response = await new RuntimeClient().GetStatusAsync();
                 var status = response.Status;
-                bool connected = response.Success && status is not null && (status.Remote.Streaming || status.Tablet.Streaming);
-                connection.Text = connected ? "正在连接：" + (status!.Controller?.Name ?? "设备身份待核对") :
+                bool connected = response.Success && status is not null && (status.Remote.Streaming || status.Tablet.Streaming || status.Assistance?.State == "active");
+                connection.Text = connected ? "正在连接：" + (status!.Assistance?.State == "active" ? status.Assistance.Name : status.Controller?.Name ?? "设备身份待核对") :
                     response.Success ? "当前没有远程连接" : "暂时无法读取连接状态";
                 disconnect.Enabled = connected;
                 if (_tray is not null) _tray.Text = connected ? "我控制 · 正在被远程控制" : "我控制";
@@ -108,8 +114,14 @@ public partial class App : System.Windows.Application
                 if (!Dispatcher.HasShutdownStarted)
                     Dispatcher.BeginInvoke(new Action(ShowWindow));
             }, null, Timeout.Infinite, executeOnlyOnce: false);
+            _assistanceActivationWait = ThreadPool.RegisterWaitForSingleObject(_assistanceActivationEvent, (_, _) =>
+            {
+                if (!Dispatcher.HasShutdownStarted)
+                    Dispatcher.BeginInvoke(new Action(() => { _window.OpenAssistance(); ShowWindow(); }));
+            }, null, Timeout.Infinite, executeOnlyOnce: false);
 
             // Only an explicit background launch should start without a visible window.
+            if (e.Args.Contains("--assistance", StringComparer.OrdinalIgnoreCase)) _window.OpenAssistance();
             if (!e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase)) ShowWindow();
         }
         catch (Exception ex)
@@ -168,8 +180,10 @@ public partial class App : System.Windows.Application
         IsExiting = true;
         _window?.DisposeWindow();
         _activationWait?.Unregister(null);
+        _assistanceActivationWait?.Unregister(null);
         if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); }
         _activationEvent?.Dispose();
+        _assistanceActivationEvent?.Dispose();
         if (_ownsInstanceMutex) _instanceMutex?.ReleaseMutex();
         _instanceMutex?.Dispose();
         base.OnExit(e);

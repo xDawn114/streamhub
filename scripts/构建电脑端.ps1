@@ -6,18 +6,27 @@ param(
     [string]$NetworkSource = 'C:\Program Files\Tailscale',
     [string]$DisplaySource = 'C:\VirtualDisplayDriver',
     [string]$SourceRoot = (Split-Path $PSScriptRoot -Parent),
+    [ValidateSet('Embedded','Companion')][string]$SourceDelivery = 'Embedded',
+    [ValidateSet('Lzma2','Zip')][string]$PayloadCompression = 'Lzma2',
+    [string]$SevenZipPath = 'C:\Program Files\7-Zip\7z.exe',
+    [string]$SourceDownloadPage = '',
     [switch]$SkipPublish,
     [string]$WindowsSigningCertificateThumbprint = '',
     [ValidateSet('CurrentUser','LocalMachine')][string]$WindowsSigningCertificateStore = 'CurrentUser',
     [string]$SignToolPath = '',
     [string]$WindowsSigningScript = '',
     [string]$SignedOwnedArtifactsRoot = '',
-    [switch]$DeferInstallerSigning
+    [switch]$DeferInstallerSigning,
+    [switch]$KeepBuildWorkspace,
+    [ValidateRange(1,1024)][int]$MinimumFreeSpaceGB = 8
 )
 
 $ErrorActionPreference = 'Stop'
 $sourceRoot = [IO.Path]::GetFullPath($SourceRoot)
 $productVersion = & (Join-Path $PSScriptRoot '读取产品版本.ps1') -SourceRoot $sourceRoot
+if ($PayloadCompression -eq 'Lzma2' -and -not (Test-Path -LiteralPath $SevenZipPath -PathType Leaf)) {
+    throw 'LZMA2 packaging requires 7-Zip on the build machine; provide SevenZipPath.'
+}
 if($WindowsSigningScript -and $WindowsSigningCertificateThumbprint){throw '证书存储与外部签名服务只能选择一种。'}
 if ([bool]$SignedOwnedArtifactsRoot -ne [bool]$DeferInstallerSigning) { throw '外部分段签名必须同时提供已签程序目录和 DeferInstallerSigning。' }
 if ($SignedOwnedArtifactsRoot -and ($WindowsSigningScript -or $WindowsSigningCertificateThumbprint -or $SkipPublish)) { throw '分段签名不能与本机签名或 SkipPublish 混用。' }
@@ -54,11 +63,22 @@ foreach ($inputFile in @(
         throw "原生引擎、对应源码或补丁与已核对记录不一致：$($inputFile.path)"
     }
 }
-$packageWork = Join-Path $BuildRoot ('package-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+. (Join-Path $PSScriptRoot 'BuildWorkspace.ps1')
+$protectedPaths = @($sourceRoot, $ReleaseRoot, $SunshineSource, $NetworkSource, $DisplaySource, $SignedOwnedArtifactsRoot)
+$expiredCleanup = @(Remove-ExpiredInstallerBuildWorkspaces -BuildRoot $BuildRoot -ProtectedPaths $protectedPaths)
+foreach ($item in $expiredCleanup) {
+    if ($item.status -eq 'removed') { Write-Host "已清理过期构建目录：$($item.path)" }
+    else { Write-Warning "保留占用中或无法确认的构建目录：$($item.path)" }
+}
+Assert-InstallerBuildDiskSpace -Paths @($BuildRoot, $ReleaseRoot) -BuildRoot $BuildRoot -MinimumFreeBytes ($MinimumFreeSpaceGB * 1GB)
+$packageWork = New-InstallerBuildWorkspace -BuildRoot $BuildRoot -ProtectedPaths $protectedPaths -Retain:$KeepBuildWorkspace
+$workspaceLease = [IO.File]::Open((Join-Path $packageWork '.active.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
 $stage = Join-Path $packageWork 'payload'
 $downloads = Join-Path $BuildRoot 'downloads'
 $uninstaller = Join-Path $packageWork 'uninstaller'
 $installerOutput = Join-Path $packageWork 'installer'
+$buildSucceeded = $false
+try {
 foreach ($folder in @($ReleaseRoot,$stage,$downloads,$uninstaller,$installerOutput)) {
     New-Item -ItemType Directory -Force -Path $folder | Out-Null
 }
@@ -112,6 +132,8 @@ $streaming = Join-Path $stage 'components\streaming'
 $remoteEngine = Join-Path $streaming 'remote'
 $tabletEngine = Join-Path $streaming 'tablet'
 $network = Join-Path $stage 'components\network'
+$assistanceReceiver = & (Join-Path $PSScriptRoot 'Prepare-AssistanceReceiver.ps1') -OutputRoot (Join-Path $packageWork 'assistance-inputs')
+Copy-Required $assistanceReceiver (Join-Path $stage 'components/assistance-receiver')
 $display = Join-Path $stage 'components\display\VDD'
 $licenses = Join-Path $stage '来源与许可'
 foreach ($folder in @($remoteEngine,$tabletEngine,$network,$display,$licenses)) { New-Item -ItemType Directory -Force -Path $folder | Out-Null }
@@ -163,6 +185,14 @@ Copy-Required (Join-Path $nativeRoot 'README.md') "$licenses\Sunshine-StreamHub-
 $sourceExport = Join-Path $packageWork 'source-export'
 & (Join-Path $PSScriptRoot 'Export-ProductSource.ps1') -SourceRoot $sourceRoot -OutputRoot $sourceExport -Scope Windows | Out-Null
 Copy-Required (Join-Path $sourceExport 'product-source.zip') "$licenses\我控制-电脑端源码.zip"
+Copy-Required (Join-Path $sourceExport 'product-source.zip') "$ReleaseRoot\我控制-电脑端源码.zip"
+Copy-Required (Join-Path $sourceRoot 'common/Packaging/SharpCompress-LICENSE.txt') $licenses
+$sourceDescription = '本目录内“我控制-电脑端源码.zip”是本次 PC 程序及打包器的构建源码。'
+if ($SourceDelivery -eq 'Companion') {
+    & (Join-Path $PSScriptRoot 'Export-SourceCompanion.ps1') -Stage $stage -ReleaseRoot $ReleaseRoot `
+        -Version $productVersion.Name -DownloadPageUrl $SourceDownloadPage | Out-Null
+    $sourceDescription = '完整对应源码独立下载，文件名、下载位置和SHA256见本目录“源码提供说明.txt”。'
+}
 
 @"
 我控制 $($productVersion.Name) 电脑端验收版 · 组件来源
@@ -171,7 +201,7 @@ Sunshine 2026.914.233613，GPL-3.0，提交 63d35f702ee9e362e43263742981836ec071
   https://github.com/LizardByte/Sunshine/tree/63d35f702ee9e362e43263742981836ec0710384
   引擎由上述版本源码及随附 sunshine-63d35f7.patch 自行编译，不是上游原始二进制。
   修改包括缺失输入服务的有界等待、DXGI探测复用与启动阶段计时；许可及输入身份校验保留。
-  对应修改后源码（含Windows子模块）见 Sunshine-streamhub-source.tar.gz；
+  对应修改后源码（含Windows子模块）见 Sunshine-streamhub-source.tar.gz；独立分发时见源码提供说明。
   依赖版本、输入与输出SHA256见 Sunshine-StreamHub-build.json，重建步骤见构建说明。
   主屏与副屏各用一份同哈希引擎及完整资源，分别位于 components/streaming/remote
   与 components/streaming/tablet，避免共享显示恢复状态。
@@ -187,7 +217,7 @@ Virtual Display Driver，驱动版本 11.30.4.434，保留 MikeTheTech / SignPat
   https://github.com/dotnet/windowsdesktop
 
 本产品未集成收费闭源软件代码，也不复制其他软件的登录密钥。
-本目录内“我控制-电脑端源码.zip”是本次 PC 程序及打包器的构建源码。
+$sourceDescription
 在 Windows 安装 .NET 8 SDK 后用 PowerShell 7 运行 scripts/构建电脑端.ps1 可重新构建；
 脚本默认从开发机已安装的固定版本组件取得二进制，最终安装包运行不依赖这些外部目录。
 默认程序目录 C:\Program Files\StreamHub，数据目录 C:\ProgramData\StreamHub；
@@ -219,8 +249,9 @@ $manifest = [ordered]@{
     ); files=$entries
 }
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$stage\组件清单.json" -Encoding utf8
-$archive = Join-Path $packageWork '串流中心-payload.zip'
-& dotnet run --project "$PSScriptRoot\PayloadPacker\PayloadPacker.csproj" -c Release -- $stage $archive
+$archive = Join-Path $packageWork $(if ($PayloadCompression -eq 'Lzma2') { 'payload.7z' } else { 'payload.zip' })
+$packOptions = if ($PayloadCompression -eq 'Lzma2') { @('--lzma2', $SevenZipPath) } else { @() }
+& dotnet run --project "$PSScriptRoot\PayloadPacker\PayloadPacker.csproj" -c Release -- $stage $archive @packOptions
 if ($LASTEXITCODE -ne 0) { throw '安装载荷去重打包失败。' }
 $installerObj = Join-Path $packageWork 'obj-installer\'
 $installerBin = Join-Path $packageWork 'bin-installer\'
@@ -234,8 +265,31 @@ Sign-Owned @("$ReleaseRoot\我控制-电脑端安装.exe")
     [ordered]@{ file=[IO.Path]::GetFileName($_); status=$signature.Status.ToString(); publisher=if($signature.SignerCertificate){$signature.SignerCertificate.Subject}else{$null} }
 } | ConvertTo-Json | Set-Content -LiteralPath "$ReleaseRoot\Windows签名状态.json" -Encoding utf8
 Copy-Required "$stage\组件清单.json" "$ReleaseRoot\组件清单.json"
-Copy-Required "$licenses\我控制-电脑端源码.zip" "$ReleaseRoot\我控制-电脑端源码.zip"
-[ordered]@{ installer="$ReleaseRoot\我控制-电脑端安装.exe"; payload=$stage; archive=$archive; version=$productVersion.Name; versionCode=$productVersion.Code; releaseChannel=$productVersion.Channel; installerSigningPending=[bool]$DeferInstallerSigning; sha256=(Get-FileHash -LiteralPath "$ReleaseRoot\我控制-电脑端安装.exe" -Algorithm SHA256).Hash } |
+[ordered]@{ installer="$ReleaseRoot\我控制-电脑端安装.exe"; payload=$stage; archive=$archive; compression=$PayloadCompression; sourceDelivery=$SourceDelivery; version=$productVersion.Name; versionCode=$productVersion.Code; releaseChannel=$productVersion.Channel; installerSigningPending=[bool]$DeferInstallerSigning; sha256=(Get-FileHash -LiteralPath "$ReleaseRoot\我控制-电脑端安装.exe" -Algorithm SHA256).Hash } |
     ConvertTo-Json | Set-Content -LiteralPath "$ReleaseRoot\构建结果.json" -Encoding utf8
+$buildSucceeded = $true
 Write-Output "已生成：$ReleaseRoot\我控制-电脑端安装.exe"
-Write-Output "安装资源：$stage"
+} finally {
+    $workspaceLease.Dispose()
+    $cleanup = [pscustomobject]@{ status = 'retained'; removedBytes = 0; removedFiles = 0 }
+    if (-not $KeepBuildWorkspace) {
+        try {
+            $cleanup = Remove-InstallerBuildWorkspace -BuildRoot $BuildRoot -Workspace $packageWork -ProtectedPaths $protectedPaths
+            Write-Host ("已清理本次构建临时文件：{0:N1} MiB" -f ($cleanup.removedBytes / 1MB))
+        } catch {
+            $cleanup = [pscustomobject]@{ status = 'failed'; removedBytes = 0; removedFiles = 0; error = $_.Exception.Message }
+            Write-Warning ("构建临时目录未清理：{0}；{1}" -f $packageWork, $_.Exception.Message)
+        }
+    } else {
+        Write-Host "按 KeepBuildWorkspace 保留构建临时目录：$packageWork"
+    }
+    if ($buildSucceeded) {
+        $resultPath = Join-Path $ReleaseRoot '构建结果.json'
+        $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json -AsHashtable
+        $result.workspace = $packageWork
+        $result.workspaceCleanup = $cleanup
+        $result.workspaceRetained = Test-Path -LiteralPath $packageWork
+        if (-not $result.workspaceRetained) { $result.payload = $null; $result.archive = $null }
+        $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $resultPath -Encoding utf8
+    }
+}

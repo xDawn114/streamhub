@@ -12,10 +12,10 @@ namespace StreamHub.Installer;
 
 internal sealed partial class Deployment
 {
-    private const string ProductId = "StreamHub.PC.0b1e5f94";
-    private const string ServiceName = "StreamHubHost";
-    private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\StreamHub";
-    private const string Marker = ".streamhub-install.json";
+    private const string ProductId = InstallationLocation.ProductId;
+    private const string ServiceName = InstallationLocation.ServiceName;
+    private const string UninstallKey = InstallationLocation.UninstallKey;
+    private const string Marker = InstallationLocation.Marker;
     private readonly InstallOptions _options;
     private readonly Action<string> _progress;
     private readonly string _dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StreamHub");
@@ -36,8 +36,10 @@ internal sealed partial class Deployment
             throw new IOException("内置串流引擎需要英文安装路径，请使用 C:\\Program Files\\StreamHub 或其他英文文件夹。软件入口和界面仍为中文。");
         using var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("StreamHub.Payload.zip")
             ?? throw new InvalidOperationException("此文件为卸载程序，不包含安装资源。请运行“我控制-电脑端安装.exe”。");
-        var existing = File.Exists(Path.Combine(_root, Marker));
-        ValidateExisting(existing);
+        var location = InstallationLocation.Read();
+        location.ValidateDestination(_root);
+        var existing = location.CanRepair || InstallationLocation.HasProductMarker(_root);
+        var complete = InstallationLocation.HasProductMarker(_root);
         ValidateServiceOwnership();
         EnsureProtectedData();
         var catalog = new RollbackCatalog(Path.Combine(_dataRoot, "installer"), _root);
@@ -54,18 +56,21 @@ internal sealed partial class Deployment
         var serviceWasRunning = ServiceRunning();
         var committed = false;
         var filesTouched = false;
+        var canRollback = false;
+        var files = new InstallationFiles(_root, stage, backup);
         RollbackRecord? rollbackRecord = null;
         try
         {
             Log("正在更新我控制程序……");
             Stage("stopping");
             StopOwnedProcesses();
-            Directory.CreateDirectory(_root);
-            if (existing) { Stage("backup"); CopyTree(_root, backup); rollbackRecord = catalog.Capture(transaction); }
+            Stage("backup");
+            files.Snapshot();
+            canRollback = files.CanRollback;
+            if (canRollback) rollbackRecord = catalog.Capture(transaction);
             filesTouched = true;
             Stage("replacing");
-            if (existing) DeleteOwnedTree(_root);
-            CopyTree(stage, _root);
+            files.Apply();
             File.WriteAllText(Path.Combine(_root, Marker), JsonSerializer.Serialize(new { productId = ProductId, version = ProductVersion.Name, versionCode = ProductVersion.Code, installedUtc = DateTimeOffset.UtcNow, root = _root }), Encoding.UTF8);
             RegisterService();
             ConfigureFirewall(true, captureUpgrade: existing);
@@ -84,7 +89,8 @@ internal sealed partial class Deployment
             committed = true;
             WaitForEncoderPrewarm();
             Log("安装完成：" + _root);
-            if (existing) Log("上个版本备份：" + backup);
+            if (canRollback) Log("上个版本备份：" + backup);
+            else if (existing) Log("缺失的程序文件已补齐，账号、绑定和设置已保留。");
         }
         catch
         {
@@ -92,15 +98,10 @@ internal sealed partial class Deployment
             try
             {
                 StopOwnedProcesses();
+                if (filesTouched) files.Restore();
                 if (existing)
                 {
-                    if (filesTouched && Directory.Exists(backup))
-                    {
-                        DeleteOwnedTree(_root);
-                        Directory.CreateDirectory(_root);
-                        CopyTree(backup, _root);
-                        RegisterService();
-                    }
+                    if (complete && filesTouched) RegisterService();
                     RestoreUpgradeFirewall();
                     if (serviceWasRunning && !ServiceRunning()) using (var service = new ServiceController(ServiceName)) service.Start();
                 }
@@ -111,7 +112,6 @@ internal sealed partial class Deployment
                     ConfigureStartup(false);
                     Registry.LocalMachine.DeleteSubKeyTree(UninstallKey, false);
                     DeleteShortcuts();
-                    if (filesTouched) DeleteOwnedTree(_root);
                 }
             }
             catch (Exception rollback) { Log("自动恢复需要检查：" + rollback.Message); }
@@ -120,7 +120,7 @@ internal sealed partial class Deployment
         finally
         {
             if (Directory.Exists(stage)) Directory.Delete(stage, true);
-            if (committed && !existing && Directory.Exists(work)) Directory.Delete(work, true);
+            if (committed && !canRollback && Directory.Exists(work)) Directory.Delete(work, true);
         }
         if (committed) catalog.Prune(Log);
     }
@@ -173,11 +173,12 @@ internal sealed partial class Deployment
             if (json.RootElement.GetProperty("productId").GetString() != ProductId) throw new IOException("此文件夹不属于我控制，操作已停止。");
         }
         else if (mustExist || (Directory.Exists(_root) && Directory.EnumerateFileSystemEntries(_root).Any()))
-            throw new IOException("请选择一个空文件夹，或现有我控制的安装文件夹。");
+            throw new IOException("请选择空文件夹或原安装目录。当前选择：" + _root);
     }
 
     internal static string ValidateRoot(string root)
     {
+        if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root)) throw new IOException("请选择完整的安装路径。");
         var full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
         var forbidden = new[] { Path.GetPathRoot(full), Environment.GetFolderPath(Environment.SpecialFolder.Windows), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData) };
         if (forbidden.Any(p => string.Equals(p?.TrimEnd(Path.DirectorySeparatorChar), full, StringComparison.OrdinalIgnoreCase))) throw new IOException("安装位置必须是专用子文件夹，不能选择磁盘或系统文件夹本身。");
@@ -189,8 +190,11 @@ internal sealed partial class Deployment
     private void ValidateServiceOwnership()
     {
         using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + ServiceName);
-        if (key?.GetValue("ImagePath") is string command && !command.Contains(Path.Combine(_root, "service", "串流中心后台.exe"), StringComparison.OrdinalIgnoreCase))
-            throw new IOException("同名后台服务属于另一安装位置，请先检查现有安装位置，或选择原安装位置。现有服务未修改。");
+        if (key is null) return;
+        var serviceRoot = InstallationLocation.ServiceRoot(key.GetValue("ImagePath") as string);
+        if (serviceRoot is null) throw new IOException("无法识别现有后台服务的位置，请先修复原安装。");
+        if (!InstallationLocation.Same(serviceRoot, _root))
+            throw new IOException("后台服务位于：" + serviceRoot + "\r\n请使用原位置更新或修复。");
     }
 
     private void RegisterService()
@@ -382,8 +386,8 @@ internal sealed partial class Deployment
 
     private static void Extract(Stream stream, string destination)
     {
-        using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
-        StreamHub.Packaging.PayloadArchive.Open(zip).Extract(destination);
+        using var container = StreamHub.Packaging.PayloadContainer.Open(stream);
+        StreamHub.Packaging.PayloadArchive.Open(container.Archive).Extract(destination);
     }
 
     private static void VerifyManifest(string stage)

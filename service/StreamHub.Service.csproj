@@ -11,6 +11,7 @@
   <ItemGroup>
     <EmbeddedResource Include="../host/Assets/我控制.ico" LogicalName="StreamHub.BrandIcon.ico" />
     <InternalsVisibleTo Include="HostPolicyChecks" />
+    <InternalsVisibleTo Include="AssistanceChecks" />
     <InternalsVisibleTo Include="DeviceGrantChecks" />
     <InternalsVisibleTo Include="SessionCleanupChecks" />
     <InternalsVisibleTo Include="EncoderPrewarmChecks" />
@@ -31,6 +32,8 @@
     <Compile Include="../host/Runtime/ControlApiServer.cs" Link="Runtime/ControlApiServer.cs" />
     <Compile Include="../host/Runtime/ControlJsonPolicy.cs" Link="Runtime/ControlJsonPolicy.cs" />
     <Compile Include="../host/Runtime/LocalBindingRegistry.cs" Link="Runtime/LocalBindingRegistry.cs" />
+    <Compile Include="../host/Runtime/AssistanceRegistry.cs" Link="Runtime/AssistanceRegistry.cs" />
+    <Compile Include="../host/Runtime/AssistanceTrustRegistry.cs" Link="Runtime/AssistanceTrustRegistry.cs" />
     <Compile Include="../host/Runtime/MaintenanceWindow.cs" Link="Runtime/MaintenanceWindow.cs" />
     <Compile Include="../host/Runtime/LanDiscovery.cs" Link="Runtime/LanDiscovery.cs" />
     <Compile Include="../host/Runtime/FileTransferVault.cs" Link="Runtime/FileTransferVault.cs" />

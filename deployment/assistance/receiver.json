@@ -1,0 +1,19 @@
+{
+  "version": "6.2.0",
+  "url": "https://github.com/moonlight-stream/moonlight-qt/releases/download/v6.2.0/MoonlightPortable-x64-6.2.0.zip",
+  "sha256": "6F91D268B41ED5CA8066D9D7578DC403B8DB190991FF48F00B1700465F8F7EBF",
+  "sourceUrl": "https://github.com/moonlight-stream/moonlight-qt/releases/download/v6.2.0/MoonlightSrc-6.2.0.tar.gz",
+  "sourceSha256": "217AFAC54E4F8734F3D97B32CB8C8B46B677E87F25B77C945343DD06F359E189",
+  "license": "GPL-3.0-or-later",
+  "sourceRepository": "https://github.com/moonlight-stream/moonlight-qt",
+  "tlsBackend": {
+    "version": "6.12.0",
+    "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/qt6_6120/qt6_6120_msvc2022_64/qt.qt6.6120.win64_msvc2022_64/6.12.0-0-202609280346qtbase-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+    "sha256": "219D1B86DEF3BE418E31D704572BC4ACC91B2EC373C65595C9FB12B42BF098DC",
+    "pluginPath": "plugins/tls/qopensslbackend.dll",
+    "pluginSha256": "FEBE901F9ACCF2D0CB4972FF9DD4E75BACC1406E8832D0B1694DF9518050FE2B",
+    "sourceUrl": "https://download.qt.io/archive/qt/6.12/6.12.0/submodules/qtbase-everywhere-src-6.12.0.tar.xz",
+    "sourceSha256": "A951BD163C7B80FC6B8C88D7668FB56ABF91C152373E13C10666763238131307",
+    "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+  }
+}

@@ -76,6 +76,23 @@ using(var requestLifetime=new CancellationTokenSource())
 }
 // Multiple explicit roots never inherit service-account file permissions.
 string owner=System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+var driveRoot=Path.GetPathRoot(root)!;
+var approvedBefore=vault.Snapshot().Settings.BrowseRoots;
+Check(approvedBefore is null || !approvedBefore.Any(r=>r.Path==driveRoot),"physical drives are not granted automatically");
+vault.AddBrowseRoot(driveRoot,owner);
+var driveGrant=vault.Snapshot().Settings.BrowseRoots!.Single(r=>r.Path==driveRoot);
+var fixtureRelative=Path.GetRelativePath(driveRoot,root).Replace('\\','/');
+Check(vault.Browse(client,key,fixtureRelative+"/shared/中文 子目录",rootId:driveGrant.Id).Entries.Single().Name=="hello.txt",
+    "explicit physical drive root reaches a normal nested directory through existing path validation");
+foreach(var path in new[]{"../outside.txt",fixtureRelative+"/../outside.txt",driveRoot+"Windows","Windows/./test"})
+    Denied(()=>vault.OpenSharedDownload(client,key,path,driveGrant.Id),"physical root rejects traversal or absolute path "+path);
+using(var process=System.Diagnostics.Process.Start(start)!) { await process.WaitForExitAsync(); Check(process.ExitCode==0,"recreated isolated junction for physical-root checks"); }
+Denied(()=>vault.AddBrowseRoot(junction,owner),"selecting a junction as an authorization root is rejected");
+Denied(()=>vault.Browse(client,key,fixtureRelative+"/shared/escape",rootId:driveGrant.Id),"physical-root browse rejects junction descent");
+Denied(()=>vault.OpenSharedDownload(client,key,fixtureRelative+"/shared/escape/outside.txt",driveGrant.Id),"physical-root download rejects junction descent");
+Directory.Delete(junction);
+vault.RemoveBrowseRoot(driveGrant.Id);
+Denied(()=>vault.Browse(client,key,fixtureRelative,rootId:driveGrant.Id),"removing a physical root immediately revokes its access");
 var second=Path.Combine(root,"second");Directory.CreateDirectory(second);File.WriteAllText(Path.Combine(second,"same.txt"),"second-root");
 vault.AddBrowseRoot(shared,owner);vault.AddBrowseRoot(second,owner);
 var roots=vault.Snapshot().Settings.BrowseRoots!;string secondId=roots.Single(r=>r.Path==second).Id;

@@ -24,6 +24,7 @@ public partial class MainWindow
         _transportConfig = settings;
         ProviderSavedText.Text = ""; ProviderSavedText.Visibility = Visibility.Collapsed;
         RemoteNetworkActions.IsEnabled = settings.Transport.UsesAccount;
+        RefreshNetworkLoginButton();
         if (_providerEditing) { UpdateProviderApply(); return; }
         _renderingProvider = true;
         try

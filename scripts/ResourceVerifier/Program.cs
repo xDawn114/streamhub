@@ -41,7 +41,8 @@ foreach(var handle in metadata.ManifestResources)
 }
 if(args[1]=="none") { if(payload is not null)throw new InvalidDataException("Uninstaller contains installation payload."); Console.WriteLine("PASS: bundled uninstaller has no installation payload; installer code not executed.");return; }
 if(payload is null)throw new InvalidDataException("Installation payload missing.");
-using var archive=new ZipArchive(new MemoryStream(payload,false));
+using var container=StreamHub.Packaging.PayloadContainer.Open(new MemoryStream(payload,false));
+var archive=container.Archive;
 var logical=StreamHub.Packaging.PayloadArchive.Open(archive);
 logical.VerifyFiles();
 if(nativeRecord is null)throw new InvalidDataException("Installer is missing its pinned native engine record.");

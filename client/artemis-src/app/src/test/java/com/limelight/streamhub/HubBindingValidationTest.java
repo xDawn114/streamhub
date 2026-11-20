@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=28, manifest=Config.NONE, application=android.app.Application.class)
@@ -75,6 +76,35 @@ public class HubBindingValidationTest {
         assertEquals("original-client", store.clientId());
         assertEquals("file-key", store.fileKey());
         assertNotEquals("old-revision", store.get("bindingRevision", ""));
+    }
+    @Test public void fileAndControlIdentitySurviveStoreRecreationAndTransportChanges() throws Exception {
+        HubStore first = new HubStore(activity, TEST_CODEC);
+        first.acceptBinding("trusted-control-credential", "192.168.9.20", new JSONObject().put("deviceId", "trusted-pc"));
+        String clientId = first.clientId(), fileKey = first.fileKey();
+        String sealedKey = first.get("fileDeviceKey", ""), revision = first.get("bindingRevision", "");
+        assertEquals(64, fileKey.length());
+        assertNotEquals(fileKey, sealedKey);
+        for (int reopen = 0; reopen < 3; reopen++) {
+            HubStore restored = new HubStore(activity.getApplicationContext(), TEST_CODEC);
+            assertEquals(clientId, restored.clientId());
+            assertEquals(fileKey, restored.fileKey());
+            assertEquals(sealedKey, restored.get("fileDeviceKey", ""));
+            assertEquals("trusted-control-credential", restored.invitation());
+            assertEquals(revision, restored.get("bindingRevision", ""));
+            restored.saveTransport(new HubTransports.Settings("lan", "", ""));
+        }
+    }
+    @Test public void failedClientIdentityPersistenceNeverReturnsAnUnstoredIdentity() {
+        Context context = mock(Context.class);
+        SharedPreferences broken = mock(SharedPreferences.class);
+        SharedPreferences.Editor editor = mock(SharedPreferences.Editor.class);
+        when(context.getApplicationContext()).thenReturn(context);
+        when(context.getSharedPreferences("streamhub-device", Context.MODE_PRIVATE)).thenReturn(broken);
+        when(broken.getString("clientId", "")).thenReturn("");
+        when(broken.edit()).thenReturn(editor);
+        when(editor.putString(eq("clientId"), anyString())).thenReturn(editor);
+        when(editor.commit()).thenReturn(false);
+        assertThrows(IllegalStateException.class, () -> new HubStore(context, TEST_CODEC).clientId());
     }
     @Test public void sameDeviceWithNewControlTrustDoesNotReuseOldMediaPins() throws Exception {
         preferences.edit().putString("invitation", "sealed:old-trust").putString("lastMode", "remote").commit();

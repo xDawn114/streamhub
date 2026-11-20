@@ -58,6 +58,14 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
     public LanDiscoveryStatus? DiscoveryStatus => _discovery?.Status;
     public bool IsRunning { get; private set; }
     public string? LastError { get; private set; }
+    public string GetAssistanceConnectionInfo()
+    {
+        if (!IsRunning || _certificate is null) throw new InvalidOperationException("连接接口尚未就绪。");
+        string[] addresses = advertisedAddresses is null ? LocalAddresses() : advertisedAddresses(LocalAddresses());
+        return "icontrol-help:" + Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new {
+            version = 1, addresses, port = Port, pin = Convert.ToHexString(SHA256.HashData(_certificate.RawData))
+        }, Json));
+    }
     public bool LegacyBindingAllowed => _devices.Snapshot().LegacyAllowed;
 
     private sealed record PrepareRequest(
@@ -72,7 +80,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
         [JsonIgnore] public ControlPrincipal? Principal { get; init; }
         [JsonIgnore] public string? Channel { get; init; }
     }
-    private sealed record ReceiverPoll(string ClientId, string Name, int Width, int Height, int RefreshRate, int[]? Orientations = null, string? DeviceType = null);
+    private sealed record ReceiverPoll(string ClientId, string Name, int Width, int Height, int RefreshRate,
+        int[]? Orientations = null, string? DeviceType = null, bool AutomaticOrientation = false);
     private sealed record RequestAnswer(string ClientId, string Action, string? Message = null);
     private sealed record SessionRequest(string LeaseId, string Mode = "tablet", string? ClientId = null, string? RequestId = null,
         bool StreamReady = false, bool FastPrivacyHeartbeat = false, bool BoundedPrivacyHeartbeat = false, bool LockOnExit = false, string? ExitReason = null,
@@ -95,13 +104,16 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
     private sealed record PairRequest(string Mode, string Pin, string? Name = null);
     private sealed record BindingRequest(string Code, string ClientId, string Name, string Nonce);
     private sealed record BindingPoll(string RequestId, string Nonce);
+    private sealed record AssistanceWireRequest(string? Code = null, string? Name = null, string? Proof = null,
+        string? Certificate = null, string? SessionId = null, string? ClientId = null, string? Credential = null,
+        string? ChallengeId = null, string? AuthProof = null, string? Mode = null);
     private sealed class ApiError(int status, string message) : Exception(message)
     {
         public int Status { get; } = status;
     }
 
     public string GetInvitation() => !LegacyBindingAllowed
-        ? throw new InvalidOperationException("旧版共享绑定已关闭，请使用附近电脑或地址＋短码绑定。")
+        ? throw new InvalidOperationException("请使用电脑 IPv4 和短码绑定。")
         : IsRunning && _invitation is not null ? _invitation :
         throw new InvalidOperationException(LastError ?? "设备绑定接口尚未启动。");
 
@@ -166,7 +178,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             if (angle is not (0 or 90 or 180 or 270)) throw new InvalidOperationException("请选择正确的副屏方向。");
             var link = request.Profile ?? "auto";
             if (link is not ("auto" or "lan" or "usb")) throw new InvalidOperationException("连接方式无效。");
-            _receivers.Create(request.ClientId!, angle, link);
+            _receivers.Create(request.ClientId!, angle, link, request.AutoOrientation == true);
         }
         else if (command == "tablet-request-cancel")
         {
@@ -279,6 +291,30 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
             bool authorized = principal is not null;
             if (!AllowRequest(context.Connection.RemoteIpAddress, fileRequest, fileRequest && IsFileDataRequest(context.Request), authorized))
                 throw new ApiError(429, "操作过于频繁，请稍后重试。");
+            if (context.Request.Path.StartsWithSegments("/v1/assistance"))
+            {
+                if (context.Request.Method != "POST" || context.Request.QueryString.HasValue)
+                    throw new ApiError(400, "协助操作需要 JSON 请求。");
+                string command = context.Request.Path.Value switch {
+                    "/v1/assistance/join" => "assistance-join",
+                    "/v1/assistance/trusted-challenge" => "assistance-trusted-challenge",
+                    "/v1/assistance/trusted-join" => "assistance-trusted-join",
+                    "/v1/assistance/poll" => "assistance-poll",
+                    "/v1/assistance/heartbeat" => "assistance-heartbeat",
+                    "/v1/assistance/end" => "assistance-peer-end",
+                    _ => throw new ApiError(404, "没有此协助接口。")
+                };
+                var wire = await ReadJsonAsync<AssistanceWireRequest>(context, lifetime.Token).ConfigureAwait(false);
+                var response = await runtime.SendAsync(new(command, RequestId: wire.SessionId,
+                    Name: wire.Name, ClientCertificate: wire.Certificate, AssistanceCode: wire.Code,
+                    AssistanceProof: wire.Proof, AssistanceSource: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    ClientId: wire.ClientId, AssistanceCredential: wire.Credential, AssistanceMode: wire.Mode,
+                    AssistanceChallengeId: wire.ChallengeId, AssistanceAuthProof: wire.AuthProof), lifetime.Token).ConfigureAwait(false);
+                if (!response.Success) throw new ApiError(response.ErrorStatus ?? 409, response.Message);
+                using var payload = JsonDocument.Parse(response.PayloadJson!);
+                await WriteAsync(context, 200, new { success = true, result = payload.RootElement.Clone() }, lifetime.Token).ConfigureAwait(false);
+                return;
+            }
             if (context.Request.Path.StartsWithSegments("/v1/binding"))
             {
                 var address = context.Connection.RemoteIpAddress;
@@ -341,7 +377,7 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                     addresses = advertisedAddresses is null ? LocalAddresses() : advertisedAddresses(LocalAddresses()),
                     ports = new { remote = 48989, tablet = 49089, control = Port },
                     capabilities = new { remote = true, tablet = true, pair = true, orientations = new[] { 0, 90, 180, 270 }, automaticOrientationDuringStream = true, integratedVpn = true,
-                        prepareJobs = true, receiverRequests = true, dynamicDisplay = true, sessionLease = true, liveSessionState = true, fastPrivacyHeartbeat = true, boundedPrivacyHeartbeat = true, selectiveEncoderProbe = true,
+                        prepareJobs = true, receiverRequests = true, pcRequestAutoOrientation = true, dynamicDisplay = true, sessionLease = true, liveSessionState = true, fastPrivacyHeartbeat = true, boundedPrivacyHeartbeat = true, selectiveEncoderProbe = true,
                         remoteBackendRelease = true,
                         fileTransfer = _fileApi is not null, fileBrowse = _fileApi is not null, fileRoots = _fileApi is not null, fileRecycle = _fileApi is not null, remoteDesktopLock = true,
                         remotePrivacy = true, streamResolution = true, desktopInputState = true, loginPasswordFill = true,
@@ -469,7 +505,8 @@ public sealed class ControlApiServer(RuntimeClient runtime, Func<int, bool, Canc
                 _devices.Seen(principal!, poll.DeviceType);
                 var angles = poll.Orientations ?? [0, 90, 180, 270];
                 if (angles.Length is < 1 or > 4 || angles.Any(x => x is not (0 or 90 or 180 or 270))) throw new ApiError(400, "接收设备方向无效。");
-                var request = _receivers.Poll(new(poll.ClientId, poll.Name, poll.Width, poll.Height, poll.RefreshRate, angles, DateTimeOffset.UtcNow));
+                var request = _receivers.Poll(new(poll.ClientId, poll.Name, poll.Width, poll.Height, poll.RefreshRate,
+                    angles, DateTimeOffset.UtcNow, poll.AutomaticOrientation));
                 await WriteAsync(context, 200, new { success = true, request }, lifetime.Token).ConfigureAwait(false);
                 return;
             }

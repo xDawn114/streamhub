@@ -3,5 +3,7 @@
   <ItemGroup>
     <Compile Include="../../native/EngineIntegrity.cs" Link="Packaging/EngineIntegrity.cs" />
     <Compile Include="../../common/Packaging/PayloadArchive.cs" Link="Packaging/PayloadArchive.cs" />
+    <Compile Include="../../common/Packaging/PayloadContainer.cs" Link="Packaging/PayloadContainer.cs" />
+    <PackageReference Include="SharpCompress" Version="0.50.10" />
   </ItemGroup>
 </Project>

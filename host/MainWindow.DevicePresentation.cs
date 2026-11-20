@@ -9,7 +9,6 @@ public partial class MainWindow
     {
         DeviceStateLabel.Text = _status is null ? "后台未连接" : "设备在线";
         DeviceStateDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, _status is null ? "Muted" : "SuccessText");
-        AddressText.ToolTip = AddressText.Text;
     }
     private static string SessionColorKey(EngineStatus? engine) => 
         engine?.DesktopCleanupPending == true ? "WarningText"

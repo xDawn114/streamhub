@@ -124,6 +124,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         Directory.CreateDirectory(_data);
         Directory.CreateDirectory(Path.Combine(_data, "logs"));
         _ownerSid = ReadOwnerSid();
+        InitializeAssistance();
         if (!_interactive && WindowsIdentity.GetCurrent().IsSystem)
             _hostLoginSecrets = new HostLoginSecretStore(_data, _ownerSid.Value);
         var identityPath = Path.Combine(_data, "device-id.txt");
@@ -190,6 +191,9 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             await _gate.WaitAsync(CancellationToken.None);
             try
             {
+                _assistance?.End("service-stopping");
+                await ReconcileAssistanceAsync(CancellationToken.None);
+                await StopEngineAsync(_assistanceEngine, CancellationToken.None);
                 await StopEngineAsync(_tablet, CancellationToken.None);
                 try { await DisableDisplayAsync(CancellationToken.None); }
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
@@ -241,7 +245,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                     if (engine.Desired && engine.Process?.Running != true && now >= engine.RetryAt)
                         await TryStartEngineAsync(engine, cancellationToken);
                 }
-                if (now >= _remoteHealthNextCheck)
+                await ReconcileAssistanceAsync(cancellationToken);
+                if (!AssistanceReserved && now >= _remoteHealthNextCheck)
                 {
                     _remoteHealthNextCheck = now.AddSeconds(5);
                     var running = _remote.Process?.Running == true;
@@ -470,6 +475,10 @@ internal sealed partial class HostRuntime : IAsyncDisposable
         {
             var command = request.Command?.ToLowerInvariant();
             var controllerPrincipal = ValidateController(request);
+            if (command?.StartsWith("assistance-", StringComparison.Ordinal) == true)
+                return await AssistanceCommandAsync(request, cancellationToken);
+            if (AssistanceReserved && command is "remote-prepare" or "tablet-prepare" or "start" or "restart" or "pair" or "tablet-request" or "remote-reconfigure" or "tablet-configure" or "configure" or "repair" or "network-provider")
+                throw new InvalidOperationException("临时协助期间不接受信任设备串流，请先结束协助。");
             if (_maintenance.Active && command is "remote-prepare" or "tablet-prepare" or "start" or "restart" or "pair" or "tablet-request" or "remote-reconfigure" or "tablet-configure" or "configure")
                 throw new InvalidOperationException("电脑正在安装更新，请稍后重试。");
             string message;
@@ -488,6 +497,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 catch { _connectionsPaused = previous; throw; }
                 if (pause)
                 {
+                    _assistance?.End("connections-paused");
+                    await ReconcileAssistanceAsync(cancellationToken);
                     _remote.Desired = false;
                     ResetRemoteSession();
                     if (_controlApi is not null)
@@ -511,6 +522,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             }
             else if (command == "session-disconnect")
             {
+                _assistance?.End("owner-disconnected");
+                await ReconcileAssistanceAsync(cancellationToken);
                 await DisconnectRemoteAsync(cancellationToken);
                 await EndTabletSessionAsync("本机已断开远控连接。", cancellationToken, allowWarm: false);
                 message = "已断开当前远控连接。";
@@ -520,6 +533,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
                 return new(true, "附近发现状态已读取。", PayloadJson: JsonSerializer.Serialize(_controlApi?.DiscoveryStatus, RuntimeProtocol.JsonOptions));
             else if (command == "maintenance-begin")
             {
+                if (AssistanceReserved) throw new InvalidOperationException("请先结束临时协助，再安装更新。");
                 _maintenance.Begin(request.RequestId ?? "", _remoteSession.HasLease(DateTimeOffset.UtcNow) ||
                     _tabletLeaseId is not null ||
                     _remoteSession.IsStreaming(DateTimeOffset.UtcNow) || _privacyScreen is not null ||
@@ -820,6 +834,8 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             }
             else if (command == "stop-all")
             {
+                _assistance?.End("services-stopped");
+                await ReconcileAssistanceAsync(cancellationToken);
                 _remote.Desired = false;
                 ResetRemoteSession();
                 await ReconcilePrivacyScreenAsync(cancellationToken);
@@ -1576,6 +1592,7 @@ internal sealed partial class HostRuntime : IAsyncDisposable
     private async Task TryStartEngineAsync(Engine engine, CancellationToken cancellationToken,
         IDictionary<string, long>? timings = null)
     {
+        if (AssistanceReserved) return;
         if (engine.Process?.Running == true) return;
         ObserveExitedEngine(engine);
         engine.Process?.Dispose();
@@ -1723,13 +1740,14 @@ internal sealed partial class HostRuntime : IAsyncDisposable
             privacyActive ? PrivacyScreenPolicy.Message(true, true, _remoteSession.IsStreaming(DateTimeOffset.UtcNow), remote.Running)
                 : _privacyScreenMessage, _preventSleepMode, _powerAwake.Active,
             PowerAwakePolicy.Describe(_preventSleepMode, _powerAwake.Active, _powerAwake.Failed), HostPolicy(),
-            remote.Streaming ? _remoteController : tablet.Streaming ? _tabletController : null, _connectionsPaused);
+            remote.Streaming ? _remoteController : tablet.Streaming ? _tabletController : null, _connectionsPaused,
+            AssistanceStatus());
     }
 
     private void ReconcilePowerAwake()
     {
         var now = DateTimeOffset.UtcNow;
-        bool streaming = _remote.Process?.Running == true && _remoteSession.IsStreaming(now) ||
+        bool streaming = AssistanceStatus().State == "active" || _remote.Process?.Running == true && _remoteSession.IsStreaming(now) ||
             _tablet.Process?.Running == true && _tabletStreamingSeen && _tabletLeaseId is not null && now < _tabletHeartbeatExpiresAt;
         _powerAwake.Update(_preventSleepMode, streaming);
     }

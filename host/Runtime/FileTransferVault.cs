@@ -105,15 +105,18 @@ public sealed partial class FileTransferVault
                 var effective = EffectiveDevice(old);
                 if (effective.UsesDevicePermissions && !old.UsesDevicePermissions)
                 {
-                    _devices[clientId] = old with { UsesDevicePermissions = true };
-                    Save("devices.json", _devices.Values.ToArray());
+                    var updated = old with { UsesDevicePermissions = true };
+                    Save("devices.json", _devices.Values.Select(x => x.ClientId == clientId ? updated : x).ToArray());
+                    _devices[clientId] = updated;
                 }
                 return effective;
             }
             if (_devices.Count >= 16) throw new TransferError(409, "文件设备列表已满，请在电脑端撤销不再使用的设备。");
             var result = EffectiveDevice(new TransferDevice(clientId, name, hash));
-            _devices[clientId] = result with { Allowed = false };
-            Save("devices.json", _devices.Values.ToArray()); return result;
+            var stored = result with { Allowed = false };
+            Save("devices.json", _devices.Values.Append(stored).ToArray());
+            _devices[clientId] = stored;
+            return result;
         }
     }
     private static string KeyHash(string key)
@@ -130,14 +133,15 @@ public sealed partial class FileTransferVault
     }
     public void Configure(bool enabled, string directory, bool? browseEnabled = null)
     {
-        if (enabled && (!Path.IsPathFullyQualified(directory) || !Directory.Exists(directory))) throw new TransferError(400, "请选择存在的电脑接收文件夹。");
+        bool hasDirectory = !string.IsNullOrEmpty(directory);
+        if ((enabled || hasDirectory) && (!Path.IsPathFullyQualified(directory) || !Directory.Exists(directory))) throw new TransferError(400, "请选择存在的电脑接收文件夹。");
         lock (_gate)
         {
             // A legacy browse root followed ReceiveDirectory implicitly. Preserve
             // that existing grant before changing only the upload destination.
             var roots = _settings.BrowseRoots;
             if (roots is null && !string.IsNullOrEmpty(_settings.ReceiveDirectory)) roots = RootsLocked();
-            var updated = new TransferSettings(enabled, enabled ? Path.GetFullPath(directory) : _settings.ReceiveDirectory,
+            var updated = new TransferSettings(enabled, hasDirectory ? Path.GetFullPath(directory) : _settings.ReceiveDirectory,
                 browseEnabled ?? _settings.BrowseEnabled, roots);
             Save("settings.json", updated); _settings = updated;
         }

@@ -4,6 +4,7 @@ StreamHub retains all upstream copyright and license notices. The main GPL-3.0-o
 
 | Component | Origin and pinned source | License and corresponding materials |
 | --- | --- | --- |
+| Windows temporary-assistance receiver | Moonlight Qt v6.2.0; binary and corresponding source digests in `deployment/assistance/receiver.json` | GPL-3.0-or-later; preserve the portable distribution's licenses. The preparation script bundles the exact source archive with the unchanged receiver. Do not sign it under this project's publisher identity. |
 | Android receiver | [Artemis](https://github.com/ClassicOldSong/moonlight-android), based on Moonlight | GPL-3.0, `client/artemis-src/LICENSE.txt`; individual files preserve upstream attribution |
 | Moonlight native streaming, ENet and submodules | `client/artemis-src/app/src/main/jni/moonlight-core/` | Preserve the included licenses for each subcomponent |
 | Modified Sunshine | [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine), commit `63d35f702ee9e362e43263742981836ec0710384` | GPL-3.0; exact patch, build record and instructions in `native/`; full corresponding source accompanies the internal Windows installers, not a claimed public binary in this source release |

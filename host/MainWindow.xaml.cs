@@ -81,6 +81,7 @@ public partial class MainWindow : Window
         {
             var result = await _runtime.GetStatusAsync(_closing.Token);
             _status = result.Success ? result.Status : null;
+            await InitializeAssistanceAsync();
             RefreshPowerSettings();
             RefreshHostPolicySettings(_status?.HostPolicy);
             if (Pages.SelectedItem == SettingsPage) _ = ReadNetworkAccessAsync();
@@ -100,8 +101,6 @@ public partial class MainWindow : Window
                 PrivacyModeCheck.IsChecked = _status?.PrivacyScreenEnabled == true;
                 PrivacyModeCheck.IsEnabled = _status is not null && !_busy;
                 PrivacyRecoverButton.IsEnabled = _status?.PrivacyScreenActive == true && !_busy;
-                PrivacyRecoverButton.ToolTip = _status is null ? "等待后台服务连接。" : _busy ? "当前操作完成后可恢复屏幕。" :
-                    _status.PrivacyScreenActive ? null : "本机屏幕未被隐私保护遮挡，无需恢复。";
             }
             finally { _renderingPrivacy = false; }
             if (_status is null)
@@ -113,6 +112,7 @@ public partial class MainWindow : Window
                 PeerEmptyText.Visibility = Visibility.Visible;
             }
             RefreshDevicePresentation();
+            RenderAssistance();
             _ = RefreshLocalBindingAsync();
             if (!_detailsRefreshing && DateTimeOffset.UtcNow - _lastDetailsRefresh >= TimeSpan.FromSeconds(10))
                 _ = RefreshDetailsAsync();
@@ -135,6 +135,7 @@ public partial class MainWindow : Window
         {
             if (_status is not null)
             {
+                await RefreshFilesAsync();
                 await ReadControlDevicesAsync();
                 var configResult = await _runtime.SendAsync(new("network-config"), _closing.Token);
                 if (configResult.Success && configResult.PayloadJson is not null)
@@ -145,14 +146,14 @@ public partial class MainWindow : Window
                     ? JsonSerializer.Deserialize<NetworkStatus>(networkResult.PayloadJson, RuntimeProtocol.JsonOptions) : null;
                 RenderNetwork(networkResult);
                 await RefreshReceiversAsync();
-                await RefreshFilesAsync();
             }
             var control = (System.Windows.Application.Current as App)?.ControlApi;
             if (control is not null) await control.RefreshAsync(_closing.Token);
-            ControlApiStateText.Text = control?.IsRunning == true ? "后台设备接口已就绪，退出界面后仍可连接。请只将绑定码交给你信任的手机或平板。" : control?.LastError ?? "设备绑定接口尚未启动。";
+            ControlApiStateText.Text = control?.IsRunning == true ? "" : control?.LastError ?? "设备绑定接口尚未启动。";
+            ControlApiStateText.Visibility = string.IsNullOrWhiteSpace(ControlApiStateText.Text) ? Visibility.Collapsed : Visibility.Visible;
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { ControlApiStateText.Text = "设备详情刷新失败：" + ex.Message; }
+        catch (Exception ex) { ControlApiStateText.Text = "设备详情刷新失败：" + ex.Message; ControlApiStateText.Visibility = Visibility.Visible; }
         finally { _detailsRefreshing = false; }
     }
 
@@ -177,6 +178,10 @@ public partial class MainWindow : Window
         RefreshServiceControls();
         ClearLoginUrl();
         if (!string.IsNullOrWhiteSpace(_network?.BrowseUrl)) SetLoginUrl(_network.BrowseUrl);
+        RefreshNetworkLoginButton();
+        if (!_networkLoginInProgress && _network?.LoggedIn == true && _network.State == "Running")
+            NetworkLoginProgressText.Visibility = Visibility.Collapsed;
+        RenderAssistanceNetwork();
     }
 
     private async Task RunAction(Func<Task> action)
@@ -264,25 +269,76 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowFeedback(ex.Message, error: true); }
     }
 
-    private async void NetworkStart_Click(object sender, RoutedEventArgs e)
+    private async Task EnableNetworkAsync()
     {
-        if (MessageBox.Show("启用内置连接？当前异地会话会中断。", "启用内置连接", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        await RunAction(() => CommandAsync(new("network-takeover")));
+        OpenAccount_Click(this, new RoutedEventArgs());
+        await RunAction(LoginNetworkAsync);
     }
     private async void NetworkRestore_Click(object sender, RoutedEventArgs e) => await RunAction(() => CommandAsync(new("network-restore")));
-    private async void NetworkLogin_Click(object sender, RoutedEventArgs e) => await RunAction(async () =>
+    private async void NetworkLogin_Click(object sender, RoutedEventArgs e) => await RunAction(LoginNetworkAsync);
+    private Task LoginNetworkAsync() => RunNetworkLoginAsync(NetworkHandover.IsLegacyRunning, () =>
+        MessageBox.Show(this, "登录需要切换到内置连接，当前 Tailscale 连接会中断。是否继续？", "切换连接",
+            MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes);
+
+    private bool _networkLoginInProgress;
+    private async Task RunNetworkLoginAsync(Func<bool> takeoverRequired, Func<bool> confirmTakeover)
     {
-        var response = await _runtime.SendAsync(new("network-login"), _closing.Token);
-        ShowFeedback(response.Message, error: !response.Success);
-        if (!response.Success || string.IsNullOrWhiteSpace(response.PayloadJson)) return;
-        var status = JsonSerializer.Deserialize<NetworkStatus>(response.PayloadJson, RuntimeProtocol.JsonOptions);
-        if (status?.LoggedIn == true) { ShowFeedback("当前账号已登录。"); return; }
-        var url = status?.BrowseUrl;
-        if (string.IsNullOrWhiteSpace(url)) { ShowFeedback("授权地址尚未就绪，请稍后再点登录账号。", error: true); return; }
-        if (!SetLoginUrl(url)) { ShowFeedback("授权地址与已保存的连接通道不一致。", error: true); return; }
-        OpenTarget(LoginUrlBox.Text);
-        ShowFeedback("已打开浏览器授权页。完成授权后，登录状态会自动更新。");
-    });
+        if (_networkLoginInProgress) return;
+        _networkLoginInProgress = true;
+        ClearLoginUrl();
+        try
+        {
+            SetNetworkLoginProgress("正在准备连接…");
+            var config = await _runtime.SendAsync(new("network-config"), _closing.Token);
+            if (!config.Success) { SetNetworkLoginProgress(config.Message, error: true); return; }
+            var settings = JsonSerializer.Deserialize<TransportSettings>(config.PayloadJson ?? "null", RuntimeProtocol.JsonOptions);
+            if (settings is null) { SetNetworkLoginProgress("未能读取连接方式，请重试。", error: true); return; }
+            RenderTransport(settings);
+            if (!settings.Transport.UsesAccount) { SetNetworkLoginProgress("当前连接方式无需登录账号。"); return; }
+            var current = await _runtime.GetStatusAsync(_closing.Token);
+            if (!current.Success || current.Status is null) { SetNetworkLoginProgress(current.Message, error: true); return; }
+            _status = current.Status;
+            if (!current.Status.Network.Running)
+            {
+                _network = null;
+                bool takeover = takeoverRequired();
+                if (takeover && !confirmTakeover()) { SetNetworkLoginProgress("已取消登录。"); return; }
+                SetNetworkLoginProgress("正在启动内置连接…");
+                var started = await _runtime.SendAsync(new(takeover ? "network-takeover" : "network-start"), _closing.Token);
+                if (!started.Success) { SetNetworkLoginProgress(started.Message, error: true); return; }
+            }
+            SetNetworkLoginProgress("正在获取登录链接…");
+            var response = await _runtime.SendAsync(new("network-login"), _closing.Token);
+            if (!response.Success) { SetNetworkLoginProgress(response.Message, error: true); return; }
+            var status = JsonSerializer.Deserialize<NetworkStatus>(response.PayloadJson ?? "null", RuntimeProtocol.JsonOptions);
+            if (status is null) { SetNetworkLoginProgress("未能取得登录链接，请重试。", error: true); return; }
+            _network = status;
+            if (status.LoggedIn && status.State == "Running") { SetNetworkLoginProgress("当前账号已登录。"); return; }
+            if (string.IsNullOrWhiteSpace(status.BrowseUrl)) { SetNetworkLoginProgress("暂时无法获取登录链接，请稍后重试。", error: true); return; }
+            if (!SetLoginUrl(status.BrowseUrl)) { SetNetworkLoginProgress("登录链接与当前连接方式不匹配，请重试。", error: true); return; }
+            OpenTarget(LoginUrlBox.Text);
+            SetNetworkLoginProgress("等待浏览器完成登录。");
+        }
+        catch (OperationCanceledException) when (_closing.IsCancellationRequested) { }
+        catch (Exception error) { SetNetworkLoginProgress("登录未完成：" + error.Message, error: true); }
+        finally { _networkLoginInProgress = false; RefreshNetworkLoginButton(); }
+    }
+    private void SetNetworkLoginProgress(string message, bool error = false)
+    {
+        if (error) _network = null;
+        NetworkLoginProgressText.Text = message;
+        NetworkLoginProgressText.SetResourceReference(TextBlock.ForegroundProperty, error ? "DangerText" : "Muted");
+        NetworkLoginProgressText.Visibility = Visibility.Visible;
+        if (error) ShowFeedback(message, error: true);
+        RefreshNetworkLoginButton();
+    }
+    private void RefreshNetworkLoginButton()
+    {
+        bool loggedIn = _transportConfig?.Transport.UsesAccount == true && _network?.LoggedIn == true &&
+            _network.State == "Running";
+        NetworkLoginButton.Content = _networkLoginInProgress ? "正在登录…" : loggedIn ? "已登录" : "登录账号";
+        NetworkLoginButton.IsEnabled = !_networkLoginInProgress && !loggedIn && _transportConfig?.Transport.UsesAccount == true;
+    }
     private bool SetLoginUrl(string url)
     {
         ClearLoginUrl();

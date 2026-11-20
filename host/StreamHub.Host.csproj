@@ -16,6 +16,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets/我控制.png" />
+    <None Update="Licenses/Lucide.txt" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../common/Updates/*.cs" Link="Updates/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../common/Updates/update-trust.json" LogicalName="StreamHub.UpdateTrust.json" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

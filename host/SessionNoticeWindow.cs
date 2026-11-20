@@ -67,7 +67,6 @@ internal sealed class SessionNoticeWindow : Window
             _initialized = true;
             Left = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Right - Width - 20);
             Top = SystemParameters.WorkArea.Top + 16;
-            _hideTimer.Start();
             _timer.Start(); await RefreshAsync();
         };
         // Keep the helper alive while hidden so the service does not recreate a
@@ -91,6 +90,14 @@ internal sealed class SessionNoticeWindow : Window
         {
             var response = await _runtime.GetStatusAsync();
             if (!response.Success) { _identity.Text = "连接状态暂不可读取；请从托盘检查并断开。"; return; }
+            if (response.Status?.Assistance is { State: "active" } assistance)
+            {
+                _hideTimer.Stop();
+                _identity.Text = assistance.Name + " · " + (assistance.Mode == "view" ? "仅观看" : "允许控制") +
+                    " · 核对号 " + assistance.Comparison;
+                if (!IsVisible) Show();
+                return;
+            }
             if (response.Status is not { } status || !status.Remote.Streaming && !status.Tablet.Streaming) { Close(); return; }
             _identity.Text = Describe(status.Controller);
             if (_controller != status.Controller)

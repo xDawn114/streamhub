@@ -111,10 +111,13 @@ internal static class Program
                 Check(ReferenceEquals(tabs.Items[tabs.Items.Count-1], N<TabItem>("MaintenanceSettingsCategory")), "maintenance tab is last");
                 N<ComboBox>("OrientationBox").SelectedIndex = 1;
                 Check(JsonDocument.Parse(File.ReadAllText(preferences)).RootElement.GetProperty("TabletOrientation").GetInt32() == 1, "computer orientation saves immediately");
+                N<ComboBox>("OrientationBox").SelectedIndex = 4;
+                Check(JsonDocument.Parse(File.ReadAllText(preferences)).RootElement.GetProperty("TabletOrientation").GetInt32() == 4 &&
+                    (string)((ComboBoxItem)N<ComboBox>("OrientationBox").SelectedItem).Tag == "auto", "automatic orientation persists separately from the four unchanged fixed indices");
                 string previous = File.ReadAllText(preferences);
                 Directory.CreateDirectory(preferences + ".tmp");
                 N<ComboBox>("OrientationBox").SelectedIndex = 2;
-                Check(N<ComboBox>("OrientationBox").SelectedIndex == 1 && File.ReadAllText(preferences) == previous, "failed preference write rolls back selection");
+                Check(N<ComboBox>("OrientationBox").SelectedIndex == 4 && File.ReadAllText(preferences) == previous, "failed preference write restores automatic orientation");
                 Directory.Delete(preferences + ".tmp");
                 Check(!requests.Any(x => x.Command is "tablet-request" or "network-provider"), "layout and direction changes do not start connections");
                 N<ComboBox>("ProviderBox").SelectedIndex = 0;
@@ -136,7 +139,8 @@ internal static class Program
                     var button = new Button { Content = "禁用按钮", Style = (Style)window.FindResource("Primary"), IsEnabled = false };
                     var surface = (Grid)window.Content; surface.Children.Add(button); window.UpdateLayout();
                     var text = ((SolidColorBrush)button.Foreground).Color;
-                    var background = ((SolidColorBrush)button.Background).Color;
+                    button.ApplyTemplate();
+                    var background = ((SolidColorBrush)((Border)button.Template.FindName("Frame",button)).Background).Color;
                     double a = Luminance(text), b = Luminance(background);
                     Check((Math.Max(a,b)+.05)/(Math.Min(a,b)+.05)>=3,"disabled primary button contrast meets 3:1");
                     surface.Children.Remove(button);

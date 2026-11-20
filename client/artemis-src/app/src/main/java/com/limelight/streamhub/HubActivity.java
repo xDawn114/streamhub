@@ -92,17 +92,14 @@ public final class HubActivity extends Activity {
             disconnectNetworkButton, logoutAccountButton;
     private TextView bindingSummary;
     private TextView bindingFeedback, accountFeedback;
-    private Button checkComputerButton, searchNearbyButton;
-    private boolean searchingNearby;
+    private Button checkComputerButton;
+    private EditText bindingAddressInput, bindingCodeInput;
     private boolean renderingProvider;
     private boolean providerChoicePending;
     private int accountParentPage;
     private boolean fullBindingOpen;
     private Object pageBack;
     private android.widget.PopupMenu homeMenu;
-    private LinearLayout nearbyList;
-    private TextView nearbyStatus;
-    private HubLanDiscovery lanDiscovery;
     private volatile HubLocalBinding localBinding;
     private final java.util.concurrent.atomic.AtomicBoolean cancelLocalBinding = new java.util.concurrent.atomic.AtomicBoolean();
     private Switch receiverSwitch;
@@ -200,7 +197,7 @@ public final class HubActivity extends Activity {
         build();
         showPage(currentPage);
     }
-    @Override protected void onPause() { foreground = false; searchingNearby = false; if (searchNearbyButton != null) { searchNearbyButton.setEnabled(!busy); searchNearbyButton.setText("查找附近电脑"); } if (lanDiscovery != null) lanDiscovery.stop(); cancelLocalBinding.set(true); if (localBinding != null) localBinding.cancel(); if (presenceCoordinator != null) presenceCoordinator.cancel(); HubReceiverService.listen(null); dismissPcRequest(); main.removeCallbacks(poll); super.onPause(); }
+    @Override protected void onPause() { foreground = false; cancelLocalBinding.set(true); if (localBinding != null) localBinding.cancel(); if (presenceCoordinator != null) presenceCoordinator.cancel(); HubReceiverService.listen(null); dismissPcRequest(); main.removeCallbacks(poll); super.onPause(); }
     @Override protected void onDestroy() {
         if (Build.VERSION.SDK_INT >= 33 && pageBack != null) Api33Back.unregister(this, pageBack);
         main.removeCallbacks(checkAppUpdates); HubUpdates.setPreparing(false);
@@ -475,9 +472,7 @@ public final class HubActivity extends Activity {
         v.setOnClickListener(action); actions.add(v); return v;
     }
     private Button compactButton(LinearLayout parent, String title, View.OnClickListener action) {
-        Button v = new Button(this); v.setStateListAnimator(null); v.setElevation(0); v.setText(title); v.setTextSize(14); v.setAllCaps(false); v.setTextColor(ACCENT_DARK); v.setMinHeight(dp(48));
-        GradientDrawable shape = new GradientDrawable(); shape.setCornerRadius(dp(8)); shape.setColor(FIELD); shape.setStroke(dp(1), BORDER);
-        v.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(RIPPLE), shape, null));
+        Button v = new Button(this); HubButtons.apply(v, false); v.setText(title); v.setTextSize(14);
         v.setPadding(dp(12), dp(8), dp(12), dp(8));
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, -2, 1); size.topMargin = dp(8); parent.addView(v, size);
         v.setOnClickListener(action); actions.add(v); return v;
@@ -493,7 +488,7 @@ public final class HubActivity extends Activity {
         TextView name = label(title, 14, MUTED); LinearLayout.LayoutParams ns = new LinearLayout.LayoutParams(-1, -2); ns.topMargin = dp(12); parent.addView(name, ns);
         EditText field = new EditText(this); field.setTextColor(TEXT); field.setHintTextColor(MUTED); field.setTextSize(15); field.setHint(hint); field.setPadding(dp(12), dp(12), dp(12), dp(12));
         field.setSingleLine(!multiLine); field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | (multiLine ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : InputType.TYPE_TEXT_VARIATION_URI));
-        GradientDrawable shape = new GradientDrawable(); shape.setColor(FIELD); shape.setCornerRadius(dp(8)); shape.setStroke(dp(1), BORDER); field.setBackground(shape);
+        GradientDrawable shape = new GradientDrawable(); shape.setColor(FIELD); shape.setCornerRadius(dp(8)); shape.setStroke(dp(1), HubTheme.controlBorder(this)); field.setBackground(shape);
         field.setMinHeight(dp(multiLine ? 96 : 52));
         LinearLayout.LayoutParams fs = new LinearLayout.LayoutParams(-1, -2); fs.topMargin = dp(6); parent.addView(field, fs); return field;
     }
@@ -610,8 +605,8 @@ public final class HubActivity extends Activity {
         content = connection;
         pageHeader(connection, "添加电脑", "返回全部设备");
         bindingFeedback = pageFeedback(connection);
-        buildNearbyComputers();
-        LinearLayout binding = card("当前绑定");
+        buildAddressBinding();
+        LinearLayout binding = card("其他绑定方式");
         bindingSummary = label("", 15, TEXT); binding.addView(bindingSummary);
         bindingForm = column(); binding.addView(bindingForm);
         textButton(binding, "使用完整绑定码", ACCENT_DARK, v -> { fullBindingOpen = !fullBindingOpen; bindingForm.setVisibility(fullBindingOpen ? View.VISIBLE : View.GONE); });
@@ -925,7 +920,7 @@ public final class HubActivity extends Activity {
     private void showManual() {
         ScrollView scroll = new ScrollView(this);
         LinearLayout sections = column(); sections.setPadding(dp(24), dp(8), dp(24), dp(16)); scroll.addView(sections);
-        manualSection(sections, "添加电脑", "电脑点“+ 绑定设备”，平板点“+ 添加电脑”，选择附近电脑并输入六位短码；核对两端校验码后在电脑确认。短码三分钟有效。");
+        manualSection(sections, "添加电脑", "电脑点“+ 绑定设备”，平板填写显示的 IPv4 和六位短码；核对两端校验码后，在电脑点“允许绑定”。");
         manualSection(sections, "连接", "同一网络直接连接。外出前，在“账号与连接”中选择两端相同的异地通道并登录。");
         manualSection(sections, "副屏", "平板点“用作副屏”；电脑发起时，先在平板开启接收请求，再在电脑“全部设备”的对应卡片点“连接副屏”。");
         manualSection(sections, "文件", "电脑在设备权限中允许访问并选择目录。平板文件页可浏览、下载或发送；删除权限单独开启。");
@@ -982,11 +977,33 @@ public final class HubActivity extends Activity {
             view.setBackground(moduleBackground(primary,value));
             ((TextView)((LinearLayout)view).getChildAt(0)).setTextColor(value?MUTED:primary?HubTheme.onAccent(this):ACCENT_DARK);
         } renderDeviceState(); updateProviderApply(); }
-    private void run(Work work) { run("正在处理…", work); }
-    private void run(String progress, Work work) {
-        if (busy) return; final long operation = ++operationGeneration; setBusy(true); showProgress(progress);
-        worker.execute(() -> { String message; boolean success = false; try { message = work.execute(); success = true; } catch (java.util.concurrent.CancellationException e) { message = e.getMessage(); } catch (Exception e) { message = "未完成：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()); }
-            final String result = message; final boolean succeeded = success; main.post(() -> { if (!isDestroyed() && operation == operationGeneration) { computerOnline = succeeded && store.bound(); presenceValidUntil = computerOnline ? android.os.SystemClock.elapsedRealtime() + 15000 : 0; presenceNetwork = HubNetworkStamp.current(); lastOperationFailed = !succeeded; nextPresenceAt = android.os.SystemClock.elapsedRealtime() + 12000; setBusy(false); showProgress(result); computerName.setText(store.get("deviceName", "我的电脑")); updateComputerAddress(); refreshBindingSummary(); refreshDiagnosticsCard(); if (!hosts.hasFocus()) hosts.setText(bindingAddresses()); } }); });
+    private void run(Work work) { run("正在处理…", work, null); }
+    private void run(Work work, Runnable onSuccess) { run("正在处理…", work, onSuccess); }
+    private void run(String progress, Work work) { run(progress, work, null); }
+    private void run(String progress, Work work, Runnable onSuccess) {
+        if (busy) return;
+        final long operation = ++operationGeneration;
+        setBusy(true); showProgress(progress);
+        worker.execute(() -> {
+            String message; boolean success = false;
+            try { message = work.execute(); success = true; }
+            catch (java.util.concurrent.CancellationException e) { message = e.getMessage(); }
+            catch (Exception e) { message = "未完成：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()); }
+            final String result = message; final boolean succeeded = success;
+            main.post(() -> {
+                if (isDestroyed() || operation != operationGeneration) return;
+                computerOnline = succeeded && store.bound();
+                presenceValidUntil = computerOnline ? android.os.SystemClock.elapsedRealtime() + 15000 : 0;
+                presenceNetwork = HubNetworkStamp.current(); lastOperationFailed = !succeeded;
+                nextPresenceAt = android.os.SystemClock.elapsedRealtime() + 12000;
+                setBusy(false);
+                computerName.setText(store.get("deviceName", "我的电脑")); updateComputerAddress();
+                refreshBindingSummary(); refreshDiagnosticsCard();
+                if (!hosts.hasFocus()) hosts.setText(bindingAddresses());
+                if (succeeded && onSuccess != null) onSuccess.run();
+                showProgress(result);
+            });
+        });
     }
     private void refreshComputerPresence() {
         if (Game.isHubConnectionStopping()) {
@@ -1233,59 +1250,32 @@ public final class HubActivity extends Activity {
             renderNetwork(state, null); refreshComputerPresence();
         });
     }
-    private void buildNearbyComputers() {
-        if (lanDiscovery != null) lanDiscovery.stop();
-        searchingNearby = false;
-        lanDiscovery = new HubLanDiscovery(this);
-        LinearLayout nearby = card("附近电脑");
-        nearby.addView(label("电脑点“+ 绑定设备”，再选择电脑并输入六位短码。", 14, MUTED));
-        nearbyStatus = label("", 14, MUTED); nearbyStatus.setVisibility(View.GONE);
-        nearbyStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); nearby.addView(nearbyStatus);
-        nearbyList = column(); nearby.addView(nearbyList);
-        searchNearbyButton = button(nearby, "查找附近电脑", false, v -> startNearbySearch(""));
-        settingLink(nearby,"使用电脑地址与短码","自动查找无结果时，填写电脑显示的局域网地址。",v->showNearbyAddress());
-        textButton(nearby,"查找详情",ACCENT_DARK,v->HubStreamUi.hubDialog(this).setTitle("附近电脑查找详情")
-                .setMessage(lanDiscovery.summary()).setPositiveButton("取消",null).show());
+    private void buildAddressBinding() {
+        LinearLayout binding = card("绑定电脑");
+        binding.addView(label("填写电脑“绑定设备”中显示的地址和短码。", 14, MUTED));
+        bindingAddressInput = field(binding, "电脑 IPv4", "例如 192.168.1.10", false);
+        bindingAddressInput.setInputType(InputType.TYPE_CLASS_PHONE);
+        bindingAddressInput.setSingleLine(true);
+        bindingAddressInput.setContentDescription("电脑 IPv4");
+        bindingCodeInput = shortCodeField(binding);
+        button(binding, "绑定", true, v -> submitAddressBinding());
     }
-    private void startNearbySearch(String address) {
-        if (busy || searchingNearby) return;
-        searchingNearby = true; searchNearbyButton.setEnabled(false); searchNearbyButton.setText("正在查找…");
-        nearbyStatus.setText("正在查找附近电脑…"); nearbyStatus.setVisibility(View.VISIBLE);
-        lanDiscovery.start(new HubLanDiscovery.Listener() {
-            @Override public void update(List<HubLanDiscovery.Device> devices, String message) {
-                if (isDestroyed() || !foreground) return;
-                nearbyStatus.setText(message); nearbyList.removeAllViews();
-                for (HubLanDiscovery.Device device : devices) {
-                    View row = settingLink(nearbyList, device.name,
-                            ("usb".equals(HubRoutes.type(device.address)) ? "USB 有线" : "局域网") + " · " + device.address + " · 输入短码绑定",
-                            ignored -> showShortCode(device));
-                    modeActions.remove(row); // Discovery replaces these rows; do not retain detached views.
-                }
-            }
-            @Override public void finished() {
-                searchingNearby=false;
-                if(searchNearbyButton!=null){searchNearbyButton.setEnabled(!busy);searchNearbyButton.setText("重新查找附近电脑");}
-            }
-        },address);
-    }
-    private void showNearbyAddress() {
-        if(busy)return;
-        LinearLayout input=column();input.setPadding(dp(24),dp(8),dp(24),dp(8));
-        input.addView(label("先在电脑端生成六位短码，再填写电脑显示的局域网 IPv4 地址。两端核对数字一致后，在电脑允许绑定。"
-                + (store.bound() ? "成功后才替换当前绑定。" : ""),14,MUTED));
-        EditText address=field(input,"电脑地址","例如 192.168.1.10",false);
-        address.setInputType(InputType.TYPE_CLASS_PHONE);address.setSingleLine(true);
-        EditText code=shortCodeField(input);
-        AlertDialog dialog=HubStreamUi.hubDialog(this).setTitle("使用电脑地址与短码").setView(bindingForm(input))
-                .setPositiveButton("继续",null).setNegativeButton("取消",null).create();
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-            String value=address.getText().toString().trim();
-            if(!HubLanDiscovery.localIpv4(value)){address.setError("请输入电脑显示的局域网 IPv4 地址");return;}
-            String digits=code.getText().toString().trim();
-            if(!digits.matches("[0-9]{6}")){code.setError("请输入六位数字，开头的 0 也要保留");return;}
-            dialog.dismiss();if(lanDiscovery!=null)lanDiscovery.stop();beginLocalBinding(value,null,digits);
-        }));
-        dialog.show();sizeBindingDialog(dialog);positionBindingDialog(dialog);
+    private void submitAddressBinding() {
+        if (busy) return;
+        String address = bindingAddressInput.getText().toString().trim();
+        String code = bindingCodeInput.getText().toString().trim();
+        if (!HubLanDiscovery.localIpv4(address)) {
+            bindingAddressInput.setError("请输入有效的局域网 IPv4 地址");
+            bindingAddressInput.requestFocus();
+            return;
+        }
+        if (!code.matches("[0-9]{6}")) {
+            bindingCodeInput.setError("请输入六位数字");
+            bindingCodeInput.requestFocus();
+            return;
+        }
+        finishBindingInput();
+        beginLocalBinding(address, code);
     }
     private EditText shortCodeField(LinearLayout input) {
         EditText code = field(input, "六位短码", "例如 012345", false);
@@ -1295,48 +1285,13 @@ public final class HubActivity extends Activity {
         code.setLetterSpacing(0f); code.setMinimumHeight(dp(64));
         return code;
     }
-    private void showShortCode(HubLanDiscovery.Device device) {
-        if (busy) return;
-        LinearLayout input = column(); input.setPadding(dp(24), dp(8), dp(24), dp(8));
-        input.addView(label("输入电脑“设备 → 手机和平板绑定”显示的六位短码。"
-                + (store.bound() ? "确认成功后会替换当前电脑绑定。" : ""), 14, MUTED));
-        EditText code = shortCodeField(input);
-        AlertDialog dialog = HubStreamUi.hubDialog(this).setTitle("绑定 " + device.name).setView(bindingForm(input))
-                .setPositiveButton("继续", null).setNegativeButton("取消", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String value = code.getText().toString().trim();
-            if (!value.matches("[0-9]{6}")) { code.setError("请输入六位数字，开头的 0 也要保留"); return; }
-            dialog.dismiss(); beginLocalBinding(device, value);
-        }));
-        dialog.show();
-        sizeBindingDialog(dialog);
-        positionBindingDialog(dialog);
-    }
-    private View bindingForm(LinearLayout input) {
-        if (HubWindowLayout.of(this).compact()) input.setPadding(dp(16), dp(8), dp(16), dp(8));
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(false);
-        scroll.addView(input, new ScrollView.LayoutParams(-1, -2));
-        return scroll;
-    }
-    private void positionBindingDialog(AlertDialog dialog) {
-        // Floating tablet keyboards do not resize the window; keep the code above them.
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-            android.view.WindowManager.LayoutParams layout = dialog.getWindow().getAttributes();
-            layout.y = dp(24);
-            dialog.getWindow().setAttributes(layout);
-        }
-    }
     private void sizeBindingDialog(AlertDialog dialog) {
         android.view.Window window = dialog.getWindow();
         if (window == null) return;
         window.setLayout(Math.max(1, Math.min(dp(560), windowBounds().width() - dp(40))), ViewGroup.LayoutParams.WRAP_CONTENT);
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
     }
-    private void beginLocalBinding(HubLanDiscovery.Device device, String code) {
-        beginLocalBinding(device.address,device,code);
-    }
-    private void beginLocalBinding(String address, HubLanDiscovery.Device discovered, String code) {
+    private void beginLocalBinding(String address, String code) {
         cancelLocalBinding.set(false);
         LinearLayout confirmation = column(); confirmation.setPadding(dp(24), dp(8), dp(24), dp(8));
         TextView comparisonView = label("正在获取核对码…", 28, TEXT);
@@ -1360,7 +1315,7 @@ public final class HubActivity extends Activity {
             HubLocalBinding client = null;
             try {
             if (cancelLocalBinding.get()) throw new java.util.concurrent.CancellationException("绑定已取消。");
-            final HubLanDiscovery.Device device = discovered == null ? HubLocalBinding.lookup(address) : discovered;
+            final HubLanDiscovery.Device device = HubLocalBinding.lookup(address);
             client = new HubLocalBinding(device); localBinding = client;
                 if (cancelLocalBinding.get()) throw new java.util.concurrent.CancellationException("绑定已取消。");
                 String name = Build.MODEL == null ? "Android 平板" : Build.MODEL;
@@ -1369,7 +1324,7 @@ public final class HubActivity extends Activity {
                 main.post(() -> { if (waiting.isShowing()) {
                     comparisonView.setText(comparison);
                     comparisonView.setContentDescription("设备核对码：" + comparison);
-                    confirmationHint.setText("请核对电脑上显示的六位数字，一致后在电脑点“允许绑定”。\n\n不一致请取消。保持此页面开启，请勿把短码交给陌生人。");
+                    confirmationHint.setText("核对两端校验码后，在电脑点“允许绑定”。");
                 }});
                 long deadline = android.os.SystemClock.elapsedRealtime() + 90000;
                 while (android.os.SystemClock.elapsedRealtime() < deadline && !cancelLocalBinding.get()) {
@@ -1382,7 +1337,7 @@ public final class HubActivity extends Activity {
                         if (!device.id.equalsIgnoreCase(info.optString("deviceId"))) throw new java.io.IOException("发现的设备与确认身份不一致，原绑定已保留。");
                         HubSessionCoordinator binder = new HubSessionCoordinator(this, this::showProgress); activeCoordinator = binder;
                         try { binder.bind(device.address, trust); } finally { activeCoordinator = null; }
-                        return "已绑定 " + device.name + "，现在可以远控、使用副屏或访问已授权文件。";
+                        return "已绑定 " + device.name + "。";
                     }
                     if (!"pending".equals(state)) throw new java.io.IOException("电脑已拒绝或确认已过期，请重新生成短码。");
                 }
@@ -1391,7 +1346,11 @@ public final class HubActivity extends Activity {
                 if(client!=null)client.cancel(); if (localBinding == client) localBinding = null;
                 main.post(() -> { if (waiting.isShowing()) waiting.dismiss(); });
             }
-        });
+        }, this::returnHomeAfterBinding);
+    }
+    private void returnHomeAfterBinding() {
+        invitation.setText(""); bindingCodeInput.setText(""); fullBindingOpen = false;
+        refreshBindingSummary(); showPage(0);
     }
     private void bindComputer() {
         String address = hosts.getText().toString().trim(), code = invitation.getText().toString().trim();
@@ -1403,8 +1362,8 @@ public final class HubActivity extends Activity {
         run(() -> {
             HubSessionCoordinator binder = new HubSessionCoordinator(this, this::showProgress); activeCoordinator = binder;
             try { binder.bind(bindingAddress, code); } finally { activeCoordinator = null; }
-            main.post(() -> { invitation.setText(""); fullBindingOpen = false; }); return "绑定已保存。现在可以远程控制或用作副屏。";
-        });
+            return "绑定已保存。";
+        }, this::returnHomeAfterBinding);
     }
     private void startSession(String mode, String link, boolean reconnect, int degrees) {
         startSession(mode, link, reconnect, degrees, "", "");
@@ -1426,7 +1385,7 @@ public final class HubActivity extends Activity {
         showPage(0);
         finishBindingInput();
         final String route = link == null ? "auto" : link;
-        final boolean automatic = requestId.isEmpty() && requestedAutomatic;
+        final boolean automatic = requestedAutomatic;
         run(() -> {
             final long operation = operationGeneration;
             HubSessionCoordinator coordinator = new HubSessionCoordinator(this,
@@ -1459,6 +1418,7 @@ public final class HubActivity extends Activity {
         String id = request.optString("id"); if (id.isEmpty() || id.equals(receiverDialogId)) return;
         dismissPcRequest(); receiverDialogId = id;
         int degrees = request.optInt("orientation", 0); String link = request.optString("link", "auto");
+        boolean automatic = request.optBoolean("autoOrientation", false);
         receiverDialog = HubStreamUi.hubDialog(this).setTitle("电脑请求使用此设备作为副屏")
                 .setMessage(store.get("deviceName", "我的电脑") + " · " + ("usb".equals(link) ? "USB 有线" : "auto".equals(link) ? "自动选择" : "无线连接") + "\n是否接受？")
                 .setPositiveButton("接受", (dialog, which) -> {
@@ -1469,7 +1429,8 @@ public final class HubActivity extends Activity {
                         HubReceiverService.respond(this, id, "connecting", connectingError -> {
                             setBusy(false);
                             if (connectingError != null) { showProgress(connectingError.getMessage()); return; }
-                            startSession("tablet", link, false, degrees, id);
+                            int initialOrientation = automatic ? HubDisplayCapabilities.currentOrientation(this) : degrees;
+                            startSession("tablet", link, false, initialOrientation, id, "", 0, 0, 0, automatic);
                         });
                     });
                 }).setNegativeButton("拒绝", (dialog, which) -> HubReceiverService.respond(this, id, "reject", error -> { if (error != null) showProgress(error.getMessage()); }))

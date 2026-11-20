@@ -21,6 +21,8 @@
     <EmbeddedResource Include="../native/Sunshine.build.json" LogicalName="StreamHub.Sunshine.build.json" />
     <Compile Include="../native/EngineIntegrity.cs" Link="Packaging/EngineIntegrity.cs" />
     <Compile Include="../common/Packaging/PayloadArchive.cs" Link="Packaging/PayloadArchive.cs" />
+    <Compile Include="../common/Packaging/PayloadContainer.cs" Link="Packaging/PayloadContainer.cs" />
+    <PackageReference Include="SharpCompress" Version="0.50.10" />
     <Compile Include="../common/Updates/InstallTrace.cs" Link="Updates/InstallTrace.cs" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
     <Compile Include="../host/Networking/NetworkHandover.cs" Link="Networking/NetworkHandover.cs" />

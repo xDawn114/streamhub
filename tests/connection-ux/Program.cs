@@ -69,7 +69,7 @@ internal static class Program
                 Invoke("PauseConnections_Click"); Pump();
                 var confirmation = cancel.GetAwaiter().GetResult();
                 Check(confirmation.DefaultButton == 7, "live pause defaults to No");
-                Check(confirmation.Text.Contains("主屏和副屏") && confirmation.Text.Contains("重启后仍保持暂停"), "confirmation describes both disconnection and persistence");
+                Check(confirmation.Text.Contains("主屏和副屏") && confirmation.Text.Contains("重启后仍保持暂停"), "confirmation describes both disconnection and persistence: " + confirmation.Text);
                 Check(!paused && remote && Pauses() == 1, "cancel preserves the active main session and sends no pause");
 
                 remote = false; tablet = true;
@@ -108,7 +108,8 @@ internal static class Program
                     var help = N<Grid>("HelpDialog");
                     Check(help.IsVisible && N<StackPanel>("HelpContent").Children.OfType<TextBlock>().All(t => t.FontFamily.Source == window.FontFamily.Source) && app.Windows.Count == 1, $"theme {theme}: manual shares main window and font");
                     Check(N<ScrollViewer>("HelpScroller").ScrollableWidth < 1 && N<ScrollViewer>("HelpScroller").ViewportHeight > 0, $"theme {theme}: manual fits minimum window and scrolls vertically");
-                    Check(N<StackPanel>("HelpContent").Children.OfType<TextBlock>().Any(t => t.Text.Contains("重启后仍保持暂停") && t.Text.Contains("当前主屏和副屏")), $"theme {theme}: manual states pause consequences");
+                    var helpText=string.Join("\n",N<StackPanel>("HelpContent").Children.OfType<TextBlock>().Select(t=>t.Text));
+                    Check(helpText.Contains("重启后仍保持")&&helpText.Contains("当前主屏和副屏")&&helpText.Contains("暂停后可在同一入口恢复"), $"theme {theme}: manual states disconnect, persistent pause and recovery consequences");
                     Save((FrameworkElement)window.Content, Path.Combine(root, $"manual-{theme}.png"));
                     var escape = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window)!, Environment.TickCount, Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
                     N<Button>("HelpCloseButton").RaiseEvent(escape); Pump();

@@ -10,6 +10,9 @@ param(
     [string]$SourceRoot = (Split-Path $PSScriptRoot -Parent)
 )
 $ErrorActionPreference = 'Stop'
+$companion = if (Test-Path -LiteralPath (Join-Path $PendingReleaseRoot 'source-distribution.json')) {
+    & (Join-Path $PSScriptRoot 'Test-SourceCompanion.ps1') -Directory $PendingReleaseRoot
+}
 if ((Test-Path -LiteralPath $OutputRoot) -or (Test-Path -LiteralPath $VerificationRoot)) { throw 'Preserve existing signing output.' }
 foreach ($id in @($OwnedSigningRequestId,$InstallerSigningRequestId)) {
     $parsed = [Guid]::Empty
@@ -40,6 +43,11 @@ New-Item -ItemType Directory -Path $OutputRoot | Out-Null
 Copy-Item -LiteralPath $installer -Destination $build.installer
 foreach ($name in @('组件清单.json','我控制-电脑端源码.zip')) {
     Copy-Item -LiteralPath (Join-Path $PendingReleaseRoot $name) -Destination (Join-Path $OutputRoot $name)
+}
+if ($companion) {
+    foreach ($name in @($companion.archive, 'source-distribution.json', 'download.html', '源码提供说明.txt')) {
+        Copy-Item -LiteralPath (Join-Path $PendingReleaseRoot $name) -Destination (Join-Path $OutputRoot $name)
+    }
 }
 $build | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputRoot '构建结果.json') -Encoding utf8NoBOM
 ConvertTo-Json -InputObject @($ownedRecords + $installerRecord) -Depth 5 |

@@ -6,6 +6,13 @@ namespace StreamHub.Host;
 
 public sealed class PageContentHost : TabControl
 {
+    public PageContentHost()
+    {
+        Focusable = false;
+        IsTabStop = false;
+        FocusVisualStyle = null;
+    }
+
     protected override AutomationPeer OnCreateAutomationPeer() => new PageContentHostAutomationPeer(this);
 
     protected override void OnSelectionChanged(SelectionChangedEventArgs e)

@@ -20,6 +20,7 @@ public partial class MainWindow
 
     private void ThemeWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        bool firstLaunch = !File.Exists(UiPreferencesPath);
         try
         {
             if (File.Exists(UiPreferencesPath))
@@ -28,9 +29,14 @@ public partial class MainWindow
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { }
         ThemeChoice.SelectedIndex = _uiPreferences.Theme switch { "light" => 1, "dark" => 2, _ => 0 };
         ReduceMotionCheck.IsChecked = _uiPreferences.ReduceMotion;
-        OrientationBox.SelectedIndex = Math.Clamp(_uiPreferences.TabletOrientation,0,3);
+        OrientationBox.SelectedIndex = Math.Clamp(_uiPreferences.TabletOrientation,0,4);
         RequestLinkBox.SelectedIndex = Math.Clamp(_uiPreferences.TabletLink,0,2);
         _loadingAppearance = false;
+        if (firstLaunch)
+        {
+            Pages.SelectedItem = HomePage;
+            Appearance_Changed(sender, e);
+        }
         ApplyDesktopTheme();
         if (!_themeEventsAttached)
         {
@@ -94,6 +100,7 @@ public partial class MainWindow
     {
         if (!ReferenceEquals(e.Source, Pages) || !IsLoaded) return;
         CloseTransientPopovers();
+        if (Pages.SelectedItem == FilesPage) _ = RunAction(RefreshFilesAsync);
         ResetPageTransition();
         if (_uiPreferences.ReduceMotion || !SystemParameters.ClientAreaAnimation || !SystemParameters.MenuAnimation) return;
         if (Pages.Template.FindName("PageViewport", Pages) is not FrameworkElement viewport) return;
@@ -129,7 +136,8 @@ public partial class MainWindow
             catch (UnauthorizedAccessException) { }
         }
 
-        string resourceName = light ? "Theme.Light.xaml" : "Theme.Dark.xaml";
+        string resourceName = SystemParameters.HighContrast ? "Theme.HighContrast.xaml" :
+            light ? "Theme.Light.xaml" : "Theme.Dark.xaml";
         var dictionaries = Resources.MergedDictionaries;
         int current = -1;
         for (int i = 0; i < dictionaries.Count; i++)
@@ -137,7 +145,8 @@ public partial class MainWindow
             string? source = dictionaries[i].Source?.OriginalString;
             if (source is null) continue;
             if (!source.EndsWith("Theme.Light.xaml", StringComparison.OrdinalIgnoreCase) &&
-                !source.EndsWith("Theme.Dark.xaml", StringComparison.OrdinalIgnoreCase)) continue;
+                !source.EndsWith("Theme.Dark.xaml", StringComparison.OrdinalIgnoreCase) &&
+                !source.EndsWith("Theme.HighContrast.xaml", StringComparison.OrdinalIgnoreCase)) continue;
             current = i;
             if (source.EndsWith(resourceName, StringComparison.OrdinalIgnoreCase)) return;
             break;
