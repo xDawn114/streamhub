@@ -24,7 +24,7 @@
     <Compile Include="../common/Packaging/PayloadContainer.cs" Link="Packaging/PayloadContainer.cs" />
     <PackageReference Include="SharpCompress" Version="0.50.10" />
     <Compile Include="../common/Updates/InstallTrace.cs" Link="Updates/InstallTrace.cs" />
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="11.0.0" />
     <Compile Include="../host/Networking/NetworkHandover.cs" Link="Networking/NetworkHandover.cs" />
     <Compile Include="../host/Networking/UsableIpv4.cs" Link="Networking/UsableIpv4.cs" />
     <Compile Include="../host/Networking/NetworkAccessPolicy.cs" Link="Networking/NetworkAccessPolicy.cs" />
