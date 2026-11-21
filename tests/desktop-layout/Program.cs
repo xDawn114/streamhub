@@ -104,6 +104,36 @@ internal static class Program
     Check(N<Border>("HomeLocalBadge").IsVisible,"local status is explicitly labeled as this computer");
     Check(w.FindName("TabletPopoverButton")==null&&w.FindName("TabletPopover")==null,"title bar has no duplicate secondary-display entry or hidden popup");
     Check(System.Windows.Automation.AutomationProperties.GetName(N<Button>("AccountButton"))=="网络连接","network entry keeps its accessible name");
+    var deviceList=N<ItemsControl>("BoundDevicesList");
+    Check(!deviceList.Focusable&&!deviceList.IsTabStop&&deviceList.FocusVisualStyle is null,"device list itself is not a Tab stop or dotted focus target");
+    var homeContent=N<StackPanel>("HomeContent");
+    var homeTitle=Descendants(homeContent).OfType<TextBlock>().Single(t=>t.Text=="全部设备");
+    var myDevicesTitle=Descendants(homeContent).OfType<TextBlock>().Single(t=>t.Text=="我的设备");
+    var deviceHeader=(Grid)myDevicesTitle.Parent;
+    var headerButtons=Descendants(deviceHeader).OfType<Button>().ToArray();
+    Check(homeTitle.Margin.Bottom==16&&N<Border>("HomeDeviceCard").Margin.Bottom==20&&deviceHeader.Margin.Bottom==10&&myDevicesTitle.Margin==new Thickness(0),
+        "homepage groups use 16/20/10 DIP spacing without an extra heading margin");
+    Check(headerButtons.Length==2&&headerButtons.All(b=>b.Height==32&&b.MinHeight==32&&b.VerticalAlignment==VerticalAlignment.Center)&&myDevicesTitle.VerticalAlignment==VerticalAlignment.Center,
+        "my devices title and 32-DIP actions align vertically");
+    var sendFileButton=Descendants(deviceList).OfType<Button>().First(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="发送文件");
+    string focusedDeviceId=(string)P(sendFileButton.DataContext,"Id");
+    w.Activate();System.Windows.Input.FocusManager.SetFocusedElement(w,sendFileButton);sendFileButton.Focus();Pump();
+    var unchangedItems=deviceList.ItemsSource;
+    typeof(MainWindow).GetMethod("RenderUnifiedDevices",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(w,null);Pump();
+    Check(ReferenceEquals(unchangedItems,deviceList.ItemsSource)&&sendFileButton.IsKeyboardFocused,"unchanged device refresh preserves the existing focused action and data source");
+    responding=true;Async("RefreshReceiversAsync");
+    var restoredSendFile=Descendants(deviceList).OfType<Button>().First(b=>
+        System.Windows.Automation.AutomationProperties.GetName(b)=="发送文件"&&(string)P(b.DataContext,"Id")==focusedDeviceId);
+    Check(restoredSendFile.IsKeyboardFocused,"changed device data restores focus to the same device action");
+    responding=false;Async("RefreshReceiversAsync");
+    w.WindowState=WindowState.Normal;w.Width=980;w.Height=700;
+    w.Left=SystemParameters.VirtualScreenLeft+40;w.Top=SystemParameters.VirtualScreenTop+50;Pump();
+    typeof(MainWindow).GetMethod("SaveWindowGeometry",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(w,null);
+    var restoredWindow=new MainWindow(runtime,preferences);
+    Check(Math.Abs(restoredWindow.Left-w.Left)<0.5&&Math.Abs(restoredWindow.Top-w.Top)<0.5&&
+        Math.Abs(restoredWindow.Width-w.Width)<0.5&&Math.Abs(restoredWindow.Height-w.Height)<0.5&&restoredWindow.WindowState==WindowState.Normal,
+        "window position and size restore from the existing preferences file");
+    restoredWindow.DisposeWindow();
     Invoke("OpenAcceptance_Click");Pump();var acceptance=N<Popup>("AcceptancePopover");
     Check(N<Button>("PauseConnectionsButton").Content.ToString()=="暂停接受连接"&&N<Button>("DisconnectActiveButton").Visibility==Visibility.Collapsed,"idle menu does not claim to disconnect an existing session");
     Check(((FrameworkElement)acceptance.Child).ActualHeight<=48&&N<Button>("PauseConnectionsButton").HorizontalContentAlignment==HorizontalAlignment.Left,"idle pause is a compact left-aligned menu row");

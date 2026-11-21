@@ -50,6 +50,7 @@ public final class HubStreamUi {
                         int width = Math.round(HubWindowLayout.of(source).widthDp * metrics.density);
                         dialog.getWindow().setLayout(Math.max(1, Math.min(Math.round(520 * metrics.density),
                                 width - Math.round(32 * metrics.density))), -2);
+                        HubMotion.popupIn(source, dialog.getWindow().getDecorView());
                     }
                     @Override public void onViewDetachedFromWindow(View view) { }
                 });

@@ -18,6 +18,8 @@ public class HubOverlayPlacementTest {
         var floating=HubOverlayPlacement.anchor(1400,1200,440,620,portrait);contained(floating,portrait);
         var noBars=HubOverlayPlacement.blackBars(440,620,safe,safe,280);contained(noBars,safe);
         assertEquals(safe.y+safe.height,noBars.y+noBars.height);
+        var remoteNoBars=HubOverlayPlacement.blackBars(440,620,safe,safe,280,true);contained(remoteNoBars,safe);
+        assertEquals(safe.y,remoteNoBars.y);
     }
     private void contained(HubOverlayPlacement.Box child,HubOverlayPlacement.Box safe) {
         assertTrue(child.x>=safe.x && child.y>=safe.y);

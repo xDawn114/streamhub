@@ -1,8 +1,10 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using StreamHub.Host.Runtime;
 using Button = System.Windows.Controls.Button;
@@ -122,12 +124,56 @@ public partial class MainWindow
         if (_tabletRequest is {} request && TabletRequestRegistry.Active(request.State) &&
             !rows.Any(row => !row.Revoked && row.ClientId == request.ClientId))
             rows.Add(MakeDeviceCard("", request.ClientId, "当前副屏设备", "设备", "\uE772", null, false, "接收状态待确认"));
-        BoundDevicesList.ItemsSource = rows.Where(d => !d.Revoked).ToArray();
-        HistoricalDevicesList.ItemsSource = rows.Where(d => d.Revoked).ToArray();
+        SetDeviceItems(BoundDevicesList, rows.Where(d => !d.Revoked).ToArray());
+        SetDeviceItems(HistoricalDevicesList, rows.Where(d => d.Revoked).ToArray());
         BoundDevicesEmptyText.Text = _controlDeviceList is null ? "设备列表暂不可用，请稍后刷新" : "还没有设备，点右侧“+ 绑定设备”添加";
         BoundDevicesEmptyText.Visibility = rows.Any(d => !d.Revoked) ? Visibility.Collapsed : Visibility.Visible;
         DeviceHistoryExpander.Header = $"历史设备（{rows.Count(d => d.Revoked)}）";
         DeviceHistoryExpander.Visibility = rows.Any(d => d.Revoked) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static void SetDeviceItems(ItemsControl list, DeviceCard[] rows)
+    {
+        if (list.ItemsSource is DeviceCard[] current && current.SequenceEqual(rows)) return;
+
+        var focusedButton = Keyboard.FocusedElement as Button;
+        var focusedCard = focusedButton is not null && IsDescendantOf(focusedButton, list)
+            ? focusedButton.DataContext as DeviceCard : null;
+        string action = focusedCard is null ? "" : AutomationProperties.GetName(focusedButton!);
+        if (string.IsNullOrWhiteSpace(action) && focusedCard is not null)
+            action = focusedButton!.Content?.ToString() ?? "";
+
+        list.ItemsSource = rows;
+        if (focusedCard is null || string.IsNullOrWhiteSpace(action)) return;
+
+        list.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (!list.IsLoaded) return;
+            list.UpdateLayout();
+            var buttons = VisualDescendants(list).OfType<Button>()
+                .Where(button => button.DataContext is DeviceCard card &&
+                    card.Id == focusedCard.Id && card.ClientId == focusedCard.ClientId).ToArray();
+            var target = buttons.FirstOrDefault(button => AutomationProperties.GetName(button) == action && button.IsEnabled)
+                ?? buttons.FirstOrDefault(button => button.IsEnabled);
+            target?.Focus();
+        }));
+    }
+
+    private static bool IsDescendantOf(DependencyObject element, DependencyObject ancestor)
+    {
+        for (DependencyObject? current = element; current is not null; current = VisualTreeHelper.GetParent(current))
+            if (ReferenceEquals(current, ancestor)) return true;
+        return false;
+    }
+
+    private static IEnumerable<DependencyObject> VisualDescendants(DependencyObject root)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var nested in VisualDescendants(child)) yield return nested;
+        }
     }
 
     private DeviceCard MakeDeviceCard(string id, string clientId, string name, string type, string icon,

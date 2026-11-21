@@ -54,6 +54,11 @@ public final class HubOverlayPlacement {
     }
 
     public static Box blackBars(int width,int height,Box safe,Box video,int minimumHeight) {
+        return blackBars(width,height,safe,video,minimumHeight,false);
+    }
+
+    /** Prefer the upper edge for remote desktop fallback so Windows taskbar input stays clear. */
+    public static Box blackBars(int width,int height,Box safe,Box video,int minimumHeight,boolean preferTopFallback) {
         // A real letterbox is useful only when it also leaves room for the scrolling body.
         minimumHeight=Math.min(safe.height,Math.max(minimumHeight,Math.round(safe.height*.45f)));
         height=Math.min(safe.height,Math.max(height,minimumHeight));
@@ -67,6 +72,8 @@ public final class HubOverlayPlacement {
                 return anchor(bar.x,bar.y,bar.width,Math.min(height,bar.height),bar);
             }
         }
+        if (preferTopFallback) return anchor(safe.x+(safe.width-(safe.width<safe.height?safe.width:width))/2,
+                safe.y,safe.width<safe.height?safe.width:width,height,safe);
         return bottomSheet(safe.width<safe.height?safe.width:width,height,safe,null,minimumHeight);
     }
 }

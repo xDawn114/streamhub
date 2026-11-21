@@ -4,7 +4,7 @@
 
 Windows remote desktop and extended display for Android phones and tablets, with file transfer and manual clipboard sync.
 
-> **2026-11-20：当前产品源码为 0.8.43 / 185 / internal。** 电脑实装为 dropdown171 修订，581项文件匹配；平板实装为 theme168 修订，APK回读匹配。公开源码标签 `v0.8.43-source.185` 对应这两份冻结源码；main 上后续修改另行说明。当前完成限定的主题、下拉框、焦点和文件入口真机走查，尚未完成全部交付专项。来源、哈希及测试边界见[公开源码基线](docs/公开源码基线.md)。
+> **2026-11-21：本机候选为 0.8.44 / 186 / internal。** `candidate-0.8.44-186-final` 同时包含 Windows 安装器和 Android APK；安装器完成页不再打开远程协助，Android 源码包含完整 Gradle/NDK/网络构建输入。该候选尚未签名或公开发布，Windows 在线更新继续保持关闭。完整身份和边界见 [186 final](../../reports/stage186-final.md)。
 
 ## 可以做什么
 
@@ -33,7 +33,7 @@ Windows remote desktop and extended display for Android phones and tablets, with
 
 ## 获取与构建
 
-最新源码标签为 `v0.8.43-source.185`，默认分支为 `main`。[Releases](https://github.com/xDawn114/streamhub/releases) 中182 fix145仍是历史内测包，本次185源码同步不替换历史安装器，也不移动在线更新清单。Windows尚无可信代码签名，应用内下载安装继续拒绝；Android同构建码的不同本机修订不会触发自动升级。[公开源码基线](docs/公开源码基线.md)列明身份与测试边界。
+最新源码标签为 `v0.8.44-source.186`，默认分支为 `main`。[Releases](https://github.com/xDawn114/streamhub/releases) 中182 fix145仍是历史内测包，本次186源码同步不替换历史安装器，也不移动在线更新清单。Windows尚无可信代码签名，应用内下载安装继续拒绝；Android同构建码的不同本机修订不会触发自动升级。[公开源码基线](docs/公开源码基线.md)列明身份与测试边界。
 
 ### Windows
 
@@ -76,3 +76,8 @@ iControl 的工程名、协议产品标识和部分路径仍使用 StreamHub。�
 自有代码及修改由 Dawn（[@xDawn114](https://github.com/xDawn114)）以 **GPL-3.0-or-later** 授权，全文见 [LICENSE](LICENSE)。第三方保留原许可和版权，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)及各源码目录。签名范围和批准流程见 [CODE_SIGNING.md](CODE_SIGNING.md)。
 
 公开仓库来自独立产品源码快照，不包含开发父仓库历史、设备报告或截图、绑定资料和发布私钥。未验证可复现构建；源码公开也不能证明某个外部分发包来自本仓库。
+
+
+## 0.8.44 / 186
+
+186 是本机内测源码快照，对应 Windows 和 Android 候选包。Windows 尚未获得可信 Authenticode 签名，应用内 Windows 更新保持阻断；真实签名日顺序见 docs/签名日操作清单-186.md。

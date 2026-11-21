@@ -45,6 +45,33 @@ foreach (string json in new[] { "{}", "[]", "null", "{\"schemaVersion\":99,\"all
 Check(Throws(() => NetworkAccessConfiguration.Decode(new byte[4097])), "oversized config is rejected before JSON parsing");
 
 var legacy = new ProductFirewallRule("我控制 · 设备绑定与副屏请求", "legacy", Path.Combine(Root, @"service\串流中心后台.exe"), 6, "49199", "LocalSubnet,100.64.0.0/10", 7);
+var oldInstallerNames = new (string Title, string Program)[]
+{
+    ("远程主屏控制", @"components\streaming\remote\sunshine.exe"),
+    ("远程主屏音视频", @"components\streaming\remote\sunshine.exe"),
+    ("平板副屏控制", @"components\streaming\tablet\sunshine.exe"),
+    ("平板副屏音视频", @"components\streaming\tablet\sunshine.exe"),
+    ("可信设备连接", @"service\串流中心后台.exe"),
+    ("设备绑定与副屏请求", @"service\串流中心后台.exe"),
+    ("异地直连", @"components\network\tailscaled.exe")
+};
+var oldInstallerRules = oldInstallerNames.Select(item => legacy with
+{
+    Name = "串流中心 · " + item.Title, ApplicationName = Path.Combine(Root, item.Program)
+}).ToArray();
+Check(oldInstallerRules.All(rule => NetworkAccessPolicy.IsOwnedName(rule.Name) && NetworkAccessPolicy.IsOwned(Root, rule)),
+    "installed legacy Chinese product names are recognized for all seven observed endpoints");
+Check(oldInstallerRules.All(rule => !NetworkAccessPolicy.IsOwned(Root, rule with { ApplicationName = @"C:\Program Files\Other\server.exe" })),
+    "legacy Chinese names never authorize removing another executable rule");
+var oldComPolicy = new MockPolicy();
+using (var oldCom = new WindowsProductFirewallAdapter(oldComPolicy, () => new MockRule()))
+{
+    foreach (var rule in oldInstallerRules) oldCom.Add(rule);
+    oldComPolicy.Rules.Items.Add(new MockRule { Name = "Tailscale", ApplicationName = @"C:\Program Files\Tailscale\tailscaled.exe" });
+    ProductFirewallTransaction.Apply(oldCom, Root, [], []);
+    Check(oldComPolicy.Rules.Items.Count == 1 && oldComPolicy.Rules.Items[0].Name == "Tailscale",
+        "uninstall reads and removes all old Chinese names through COM while preserving independent Tailscale");
+}
 var upstream = legacy with { Name = "Sunshine", ApplicationName = @"C:\Program Files\Sunshine\sunshine.exe" };
 var foreignCollision = legacy with { Name = "StreamHub-Remote-TCP", ApplicationName = @"C:\Program Files\Other\server.exe" };
 Check(NetworkAccessPolicy.HasLegacyPublicLan(Root, [legacy]) && !NetworkAccessPolicy.HasLegacyPublicLan(Root, [foreignCollision]) &&

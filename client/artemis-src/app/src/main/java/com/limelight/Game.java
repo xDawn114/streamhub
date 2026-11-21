@@ -1029,6 +1029,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     catch(IllegalStateException|IllegalArgumentException error){LimeLog.warning("PiP: "+error);Toast.makeText(Game.this,"当前窗口无法进入小窗",Toast.LENGTH_SHORT).show();}
                 }
                 @Override public boolean fullscreen(){return hubFullscreen;}
+                @Override public boolean remoteDesktop(){return "remote".equals(streamHubMode);}
                 @Override public void toggleFullscreen(){
                     hubFullscreen=!hubFullscreen;
                     if(hubFullscreen)getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);

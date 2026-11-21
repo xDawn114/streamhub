@@ -112,6 +112,7 @@ public final class HubActivity extends Activity {
     private boolean revealNetworkDetails, showOfflinePeers;
     private EmbeddedNetwork.Status lastNetworkState;
     private int currentPage, selectedOrientationIndex;
+    private boolean pageShown;
     private static final class FallbackWait {
         final CountDownLatch done = new CountDownLatch(1);
         volatile List<String> hosts = Collections.emptyList();
@@ -521,10 +522,19 @@ public final class HubActivity extends Activity {
     }
     private void showPage(int pageIndex) {
         if (pageSlot == null || pageIndex < 0 || pageIndex > 6 || pageIndex == 3) return;
+        boolean animate = pageShown;
         currentPage = pageIndex;
         int slot = pageIndex == 6 ? 5 : pageIndex == 4 ? 3 : pageIndex == 5 ? 4 : pageIndex;
         for (int i = 0; i < pageSlot.getChildCount(); i++) pageSlot.getChildAt(i).setVisibility(i == slot ? View.VISIBLE : View.GONE);
         View selected = pageSlot.getChildAt(slot);
+        if (animate) {
+            boolean subpage = pageIndex == 1 || pageIndex >= 4;
+            HubMotion.pageIn(this, selected, subpage, pageIndex == 6);
+        } else {
+            selected.setAlpha(1f); selected.setTranslationX(0f); selected.setTranslationY(0f);
+            selected.setScaleX(1f); selected.setScaleY(1f);
+        }
+        pageShown = true;
         selected.requestFocus();
         if (navigation != null) navigation.select(pageIndex == 6 ? 0 : pageIndex == 4 ? accountParentPage : pageIndex == 5 ? 2 : pageIndex);
         if (Build.VERSION.SDK_INT >= 33) {
@@ -533,6 +543,7 @@ public final class HubActivity extends Activity {
         if(pageIndex==2)refreshShortcutsState();
     }
     private void build() {
+        pageShown = false;
         actions.clear();
         modeActions.clear();
         FrameLayout page = new FrameLayout(this); pageRoot = page;

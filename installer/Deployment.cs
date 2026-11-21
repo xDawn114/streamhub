@@ -147,9 +147,7 @@ internal sealed partial class Deployment
             Directory.CreateDirectory(cleanupRoot);
             var cleanup = Path.Combine(cleanupRoot, "卸载清理.exe");
             File.Copy(executable, cleanup);
-            var start = new ProcessStartInfo(cleanup) { UseShellExecute = false, CreateNoWindow = true };
-            foreach (var arg in new[] { "--quiet", "--cleanup-parent", Environment.ProcessId.ToString(), "--install-dir", _root }) start.ArgumentList.Add(arg);
-            Process.Start(start);
+            Process.Start(CreateCleanupStartInfo(cleanup, Environment.ProcessId, _root));
         }
         else DeleteOwnedTree(_root);
         Log("程序已卸载；共享显示驱动、设备绑定和设置保留在原位置。");
@@ -510,5 +508,19 @@ internal sealed partial class Deployment
             return 0;
         }
         catch { return 1; }
+    }
+
+    internal static ProcessStartInfo CreateCleanupStartInfo(string cleanup, int parentId, string installRoot)
+    {
+        // The helper must not keep the installation directory open as its current directory.
+        var start = new ProcessStartInfo(cleanup)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(cleanup))!
+        };
+        foreach (var arg in new[] { "--quiet", "--cleanup-parent", parentId.ToString(), "--install-dir", installRoot })
+            start.ArgumentList.Add(arg);
+        return start;
     }
 }

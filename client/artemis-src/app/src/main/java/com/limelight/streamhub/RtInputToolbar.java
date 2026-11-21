@@ -57,6 +57,7 @@ public final class RtInputToolbar {
         default void enterPip() { }
         default boolean fullscreen(){return true;}
         default void toggleFullscreen(){}
+        default boolean remoteDesktop(){return false;}
         default Rect videoBounds() { return null; }
         default void showMouseMode() { }
         default boolean trackpadMode(){return false;}
@@ -626,16 +627,17 @@ public final class RtInputToolbar {
         setViewportState(callbacks.zoomEnabled(), callbacks.zoomScale());
         if (adjustingViewport) return;
         refreshLayout();
-        panel.setVisibility(View.VISIBLE);refreshQuickState();refreshImportedShortcuts();
+        HubMotion.showPanel(activity, panel); refreshQuickState(); refreshImportedShortcuts();
         entry.setVisibility(View.GONE);
         quickDisconnect.setVisibility(View.VISIBLE);
         refreshLayout();
     }
     private void collapse() {
-        panel.setVisibility(View.GONE);
-        entry.setVisibility(pictureInPicture || disposed || adjustingViewport ? View.GONE : View.VISIBLE);
-        quickDisconnect.setVisibility(View.GONE);
-        clearModifiers();wakeEntry();
+        HubMotion.hidePanel(activity, panel, () -> {
+            entry.setVisibility(pictureInPicture || disposed || adjustingViewport ? View.GONE : View.VISIBLE);
+            quickDisconnect.setVisibility(View.GONE);
+            clearModifiers(); wakeEntry();
+        });
     }
     /** True means the Back action closed local controls and should not leave the stream. */
     public boolean collapseOrConsumeBack() {
@@ -680,7 +682,7 @@ public final class RtInputToolbar {
         viewportReset.setEnabled(viewportScale > 1.005f);
         resetView.setEnabled(viewportScale > 1.005f);
         viewportControls.setVisibility(adjusting && !pictureInPicture && !disposed ? View.VISIBLE : View.GONE);
-        if (adjusting) { panel.setVisibility(View.GONE); quickDisconnect.setVisibility(View.GONE); }
+        if (adjusting) { HubMotion.hideImmediately(panel); quickDisconnect.setVisibility(View.GONE); }
         entry.setVisibility(!adjusting && !pictureInPicture && !disposed && panel.getVisibility() != View.VISIBLE ? View.VISIBLE : View.GONE);
         if (modeChanged) refreshLayout();
     }
@@ -726,7 +728,7 @@ public final class RtInputToolbar {
             HubPanelLayout.FLOAT.equals(expansion)
             ?HubOverlayPlacement.anchor(Math.round(Float.isNaN(floatingX)?safe.x+(safe.width-Math.min(dp(440),safe.width))/2f:floatingX),
                 Math.round(Float.isNaN(floatingY)?safe.y+(safe.height-Math.min(menuHeight,safe.height))/2f:floatingY),dp(440),menuHeight,safe)
-            :HubOverlayPlacement.blackBars(dp(440),menuHeight,safe,picture,dp(280));
+            :HubOverlayPlacement.blackBars(dp(440),menuHeight,safe,picture,dp(280),callbacks.remoteDesktop());
         // A landscape IME can leave less room than the two fixed action rows.
         // Keep complete touch targets and the exit reachable; hide the keyboard
         // to restore tabs and scrolling controls instead of clipping them.

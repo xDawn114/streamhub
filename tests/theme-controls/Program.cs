@@ -23,6 +23,7 @@ internal static class Program
         {
             var pages = (PageContentHost)window.FindName("Pages");
             Check(!pages.Focusable && !pages.IsTabStop && pages.FocusVisualStyle is null, "page container cannot acquire focus rectangle");
+            CheckPageKeyboardTraversal(pages.Template);
             var settingRow = new SettingRow { Header = "Setting", Style = (Style)window.FindResource(typeof(SettingRow)) };
             Check(!settingRow.Focusable && !settingRow.IsTabStop && settingRow.FocusVisualStyle is null, "setting rows cannot receive a dotted focus rectangle");
             Check(((UIElement)window.FindName("AssistanceNavigation")).Visibility == Visibility.Collapsed, "frozen navigation hidden");
@@ -196,6 +197,40 @@ internal static class Program
             if (type.GetField(name + "PropertyKey", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static) is { } field)
             { target.SetValue((DependencyPropertyKey)field.GetValue(null)!, value); return; }
         throw new Exception("Missing state key: " + name);
+    }
+    private static void CheckPageKeyboardTraversal(ControlTemplate template)
+    {
+        var before = new Button { Content = "Before page" };
+        var first = new Button { Content = "Directory" };
+        var second = new Button { Content = "Device permissions" };
+        var after = new Button { Content = "After page" };
+        var pageBody = new StackPanel();
+        pageBody.Children.Add(first);
+        pageBody.Children.Add(second);
+        var host = new PageContentHost { Template = template };
+        host.Items.Add(new TabItem { Content = pageBody });
+        host.SelectedIndex = 0;
+        var root = new StackPanel();
+        root.Children.Add(before);
+        root.Children.Add(host);
+        root.Children.Add(after);
+        var fixture = new Window { Content = root, Width = 400, Height = 240,
+            Left = -10000, Top = -10000, ShowInTaskbar = false };
+        try
+        {
+            fixture.Show();
+            fixture.UpdateLayout();
+            Check(before.Focus(), "keyboard fixture acquires initial focus");
+            before.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+            Check(ReferenceEquals(Keyboard.FocusedElement, first), "Tab enters the selected page content");
+            first.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+            Check(ReferenceEquals(Keyboard.FocusedElement, second), "Tab reaches the next page action");
+            second.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+            Check(ReferenceEquals(Keyboard.FocusedElement, after), "Tab exits the page without a trap");
+            after.MoveFocus(new TraversalRequest(FocusNavigationDirection.Previous));
+            Check(ReferenceEquals(Keyboard.FocusedElement, second), "Shift+Tab returns to the page action");
+        }
+        finally { fixture.Close(); }
     }
     private static bool Same(Brush a, Brush b) => ((SolidColorBrush)a).Color == ((SolidColorBrush)b).Color;
     private static double Contrast(Brush a, Brush b)

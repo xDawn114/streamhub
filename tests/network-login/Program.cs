@@ -23,6 +23,7 @@ internal static class Program
         var checks = new List<string>();
         var calls = new List<string>();
         bool running = false, startFails = false, statusFails = false;
+        string? loginFailureMessage = null;
         int confirmations = 0;
         var settings = new TransportSettings();
         var network = new NetworkStatus { Available = true, LoggedIn = true, State = "Running" };
@@ -32,6 +33,8 @@ internal static class Program
         {
             calls.Add(request.Command);
             if (request.Command == "status" && statusFails) return Task.FromResult(new RuntimeResponse(false, "后台暂不可用"));
+            if (request.Command == "network-login" && loginFailureMessage is not null)
+                return Task.FromResult(new RuntimeResponse(false, loginFailureMessage));
             if (request.Command is "network-start" or "network-takeover")
             {
                 if (pendingStart is not null) return pendingStart.Task;
@@ -115,6 +118,16 @@ internal static class Program
                 network = new() { Available = true, State = "NeedsLogin" };
                 Finish(Login());
                 Check(N<TextBlock>("NetworkLoginProgressText").Text.Contains("暂时无法获取"), "missing authorization URL leaves a retryable error");
+
+                loginFailureMessage = "RemoteCertificateChainErrors, NotTimeValid";
+                Finish(Login());
+                Check(N<TextBlock>("NetworkLoginProgressText").Text == "登录失败，请检查电脑的日期和时间是否正确，然后重试。" &&
+                    N<Button>("NetworkLoginButton").IsEnabled, "certificate NotTimeValid shows the Chinese clock hint and allows retry");
+                loginFailureMessage = "The remote certificate has expired (NotAfter)";
+                Finish(Login());
+                Check(N<TextBlock>("NetworkLoginProgressText").Text == "登录失败，请检查电脑的日期和时间是否正确，然后重试。",
+                    "expired certificate shows the same Chinese clock hint");
+                loginFailureMessage = null;
 
                 foreach (Exception failure in new Exception[] { new TimeoutException("local-tailscaled.sock:80"), new TaskCanceledException("local-tailscaled.sock:80"), new HttpRequestException("local-tailscaled.sock:80") })
                 {

@@ -40,10 +40,19 @@
         </ControlTemplate.Triggers>
        </ControlTemplate></ToggleButton.Template>
       </ToggleButton>
-      <ContentPresenter x:Name="Body" ContentSource="Content" Visibility="Collapsed" Margin="0,12,0,0"/>
+      <ContentPresenter x:Name="Body" ContentSource="Content" Visibility="Visible" Margin="0" MaxHeight="0" Opacity="0" ClipToBounds="True" IsHitTestVisible="False"/>
      </StackPanel>
-     <ControlTemplate.Triggers><Trigger Property="IsExpanded" Value="True"><Setter TargetName="Body" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsExpanded" Value="True">
+       <Setter TargetName="Body" Property="MaxHeight" Value="4096"/>
+       <Setter TargetName="Body" Property="Opacity" Value="1"/>
+       <Setter TargetName="Body" Property="IsHitTestVisible" Value="True"/>
+       <Setter TargetName="Body" Property="Margin" Value="0,12,0,0"/>
+      </Trigger>
+     </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
+    <EventSetter Event="Expanded" Handler="Expander_Expanded"/>
+    <EventSetter Event="Collapsed" Handler="Expander_Collapsed"/>
    </Style>
    <Style x:Key="Caption" TargetType="TextBlock">
     <Setter Property="Foreground" Value="{DynamicResource Muted}" />
@@ -370,8 +379,8 @@
        <TextBlock Text="{Binding RequestMessage}" Visibility="{Binding RequestVisibility}" TextWrapping="Wrap" Margin="0,6,0,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Caption}"><Style.Triggers><DataTrigger Binding="{Binding RequestFailed}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerText}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
       </StackPanel>
       <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-       <Button Content="{Binding ConnectLabel}" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="ConnectListedReceiver_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanConnect}" Margin="0,0,4,0"/>
-       <Button Content="发送文件" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="OpenListedFiles_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanOpenFiles}" Margin="0,0,4,0"/>
+       <Button Content="{Binding ConnectLabel}" AutomationProperties.Name="{Binding ConnectLabel}" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="ConnectListedReceiver_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanConnect}" Margin="0,0,4,0"/>
+       <Button Content="发送文件" AutomationProperties.Name="发送文件" Style="{StaticResource DeviceQuickAction}" Tag="{Binding}" Click="OpenListedFiles_Click" Visibility="{Binding ActionVisibility}" IsEnabled="{Binding CanOpenFiles}" Margin="0,0,4,0"/>
        <Button Content="重新绑定" Style="{StaticResource HeaderAction}" Click="OpenDevices_Click" Visibility="{Binding BindingVisibility}"/><Button Content="⋯" Style="{StaticResource HeaderAction}" Tag="{Binding Id}" Click="OpenDeviceMenu_Click" AutomationProperties.Name="设备操作" Visibility="{Binding ManagementVisibility}">
         <Button.ContextMenu><ContextMenu Style="{StaticResource DesktopMenu}" DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
          <MenuItem Header="设备详情" Style="{StaticResource DesktopMenuItem}" Tag="{Binding Id}" Click="OpenBoundDeviceDetails_Click"/>
@@ -447,7 +456,7 @@
    <TabItem x:Name="HomePage" Header="全部设备">
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,12">
      <StackPanel x:Name="HomeContent" MaxWidth="960" HorizontalAlignment="Stretch" VerticalAlignment="Top">
-      <TextBlock Text="全部设备" Style="{StaticResource PageTitle}"/>
+      <TextBlock Text="全部设备" Style="{StaticResource PageTitle}" Margin="0,0,0,16"/>
       <Border x:Name="HomeDeviceCard" Style="{StaticResource DeviceCardFrame}" Margin="0,0,0,20"><Grid>
        <Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
        <TextBlock Text="&#xE7F4;" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
@@ -462,10 +471,10 @@
       </Grid></Border>
       <Button x:Name="ReadinessReasonButton" Content="查看原因" Click="OpenReadinessReason_Click" Style="{StaticResource HeaderAction}" Visibility="Collapsed"/>
       <TextBlock x:Name="HomePrivacyText" Text="" Margin="0,0,0,18" Foreground="{DynamicResource WarningText}" Visibility="Collapsed"/>
-      <Grid Margin="0,0,0,10"><TextBlock Text="我的设备" Style="{StaticResource Heading}" VerticalAlignment="Center"/><StackPanel HorizontalAlignment="Right" Orientation="Horizontal"><Button x:Name="RefreshDeviceCardsButton" Content="刷新" Click="RefreshDeviceCards_Click" AutomationProperties.Name="刷新设备" Margin="0,0,8,0"/><Button Content="+ 绑定设备" Style="{StaticResource Primary}" Click="OpenDevices_Click" AutomationProperties.Name="绑定设备"/></StackPanel></Grid>
+      <Grid Margin="0,0,0,10"><TextBlock Text="我的设备" Style="{StaticResource Heading}" Margin="0" VerticalAlignment="Center"/><StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="RefreshDeviceCardsButton" Content="刷新" Click="RefreshDeviceCards_Click" AutomationProperties.Name="刷新设备" Height="32" MinHeight="32" Padding="12,4" VerticalAlignment="Center" Margin="0,0,8,0"/><Button Content="+ 绑定设备" Style="{StaticResource Primary}" Click="OpenDevices_Click" AutomationProperties.Name="绑定设备" Height="32" MinHeight="32" Padding="12,4" VerticalAlignment="Center"/></StackPanel></Grid>
       <TextBlock x:Name="BoundDevicesEmptyText" Text="还没有绑定设备，点右侧“+ 绑定设备”添加" Style="{StaticResource Caption}" Margin="0,8,0,16"/>
-      <ItemsControl x:Name="BoundDevicesList" ItemTemplate="{StaticResource UnifiedDeviceTemplate}"/>
-      <Expander x:Name="DeviceHistoryExpander" Header="历史设备" Margin="0,12,0,0" Visibility="Collapsed"><ItemsControl x:Name="HistoricalDevicesList" ItemTemplate="{StaticResource UnifiedDeviceTemplate}"/></Expander>
+      <ItemsControl x:Name="BoundDevicesList" ItemTemplate="{StaticResource UnifiedDeviceTemplate}" Focusable="False" IsTabStop="False" FocusVisualStyle="{x:Null}"/>
+      <Expander x:Name="DeviceHistoryExpander" Header="历史设备" Margin="0,12,0,0" Visibility="Collapsed"><ItemsControl x:Name="HistoricalDevicesList" ItemTemplate="{StaticResource UnifiedDeviceTemplate}" Focusable="False" IsTabStop="False" FocusVisualStyle="{x:Null}"/></Expander>
 
      </StackPanel>
     </ScrollViewer>
@@ -644,7 +653,7 @@
       <RowDefinition Height="*" />
      </Grid.RowDefinitions>
      <TextBlock Text="设置" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,20" />
-     <TabControl x:Name="SettingsCategories" Grid.Row="1" KeyboardNavigation.TabNavigation="Continue" KeyboardNavigation.DirectionalNavigation="Contained" Style="{StaticResource SettingsCategoryControl}" AutomationProperties.Name="电脑设置分类">
+     <TabControl x:Name="SettingsCategories" Grid.Row="1" KeyboardNavigation.TabNavigation="Continue" KeyboardNavigation.DirectionalNavigation="Contained" Style="{StaticResource SettingsCategoryControl}" SelectionChanged="SettingsCategories_SelectionChanged" AutomationProperties.Name="电脑设置分类">
       <TabItem Header="常规" Style="{StaticResource SettingsCategoryItem}">
        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,24,12">
         <StackPanel>

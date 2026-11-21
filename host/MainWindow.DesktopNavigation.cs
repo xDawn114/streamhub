@@ -54,6 +54,7 @@ public partial class MainWindow
     {
         if (sender is Popup { Child: UIElement content })
         {
+            if (content is FrameworkElement element) AppMotion.AnimatePopup(element, _uiPreferences.ReduceMotion);
             FocusInput.SetKeyboardMode(content, FocusInput.GetKeyboardMode(this));
             if (!content.MoveFocus(new TraversalRequest(FocusNavigationDirection.First))) content.Focus();
         }

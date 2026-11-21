@@ -183,17 +183,7 @@ internal sealed class InstallWindow : Form
     {
         if (_completed)
         {
-            if (_options.Rollback || _options.Uninstall) { Close(); return; }
-            try
-            {
-                DesktopLaunch.OpenAssistance(_options.InstallRoot);
-                Close();
-            }
-            catch (Exception ex)
-            {
-                _log.AppendText(Environment.NewLine + "未能打开我控制：" + ex.Message +
-                    Environment.NewLine + "也可以从桌面或开始菜单打开。" + Environment.NewLine);
-            }
+            Close();
             return;
         }
         _existing = InstallationLocation.Read();
@@ -211,9 +201,9 @@ internal sealed class InstallWindow : Form
                 var deployment = new Deployment(_options, message => BeginInvoke(() => _log.AppendText(message + Environment.NewLine)));
                 if (_options.Rollback) deployment.Rollback(); else if (_options.Uninstall) deployment.Uninstall(); else deployment.Install();
             });
-            _log.AppendText((_options.Rollback ? "上个版本已恢复。请重新打开我控制。" : _options.Uninstall ? "卸载完成。配置与共享驱动已保留。" : "安装完成，可以打开远程协助。") + Environment.NewLine);
+            _log.AppendText((_options.Rollback ? "上个版本已恢复。请重新打开我控制。" : _options.Uninstall ? "卸载完成。配置与共享驱动已保留。" : "安装完成，请从桌面或开始菜单打开我控制。") + Environment.NewLine);
             _completed = true;
-            _execute.Text = _options.Rollback || _options.Uninstall ? "完成" : "打开远程协助";
+            _execute.Text = "完成";
             new Deployment(_options, _ => { }).Stage("complete", 0);
         }
         catch (Exception ex)

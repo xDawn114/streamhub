@@ -16,6 +16,14 @@ internal static class Program
         Directory.CreateDirectory(evidence);
         File.WriteAllText(Path.Combine(root, ".streamhub-install.json"), "{\"productId\":\"StreamHub.PC.0b1e5f94\"}");
         var assembly = Assembly.Load("串流中心安装");
+        var deploymentType = assembly.GetType("StreamHub.Installer.Deployment", true)!;
+        var cleanupExecutable = Path.Combine(fixture, "cleanup", "helper.exe");
+        var cleanupStart = (System.Diagnostics.ProcessStartInfo)deploymentType.GetMethod("CreateCleanupStartInfo",
+            BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [cleanupExecutable, 123, root])!;
+        Check(cleanupStart.WorkingDirectory == Path.GetDirectoryName(cleanupExecutable), "cleanup helper runs outside the installation directory");
+        Check(!cleanupStart.UseShellExecute && cleanupStart.CreateNoWindow, "cleanup helper remains silent without a shell");
+        Check(cleanupStart.ArgumentList.SequenceEqual(new[] { "--quiet", "--cleanup-parent", "123", "--install-dir", root }),
+            "cleanup helper retains the exact parent and installation target");
         var optionsType = assembly.GetType("StreamHub.Installer.InstallOptions", true)!;
         var windowType = assembly.GetType("StreamHub.Installer.InstallWindow", true)!;
         var locationType = assembly.GetType("StreamHub.Installer.InstallationLocation", true)!;

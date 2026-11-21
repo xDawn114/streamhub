@@ -46,6 +46,12 @@ public partial class MainWindow : Window
         _runtime = runtime;
         _uiPreferencesPath = uiPreferencesPath ?? DefaultUiPreferencesPath;
         InitializeComponent();
+        LoadUiPreferences();
+        RestoreWindowGeometry();
+        _windowGeometrySaveTimer.Tick += SaveWindowGeometryAfterDelay;
+        LocationChanged += WindowGeometry_Changed;
+        SizeChanged += WindowGeometry_Changed;
+        StateChanged += WindowGeometry_Changed;
         InitializeDesktopFeedback();
         Title = "我控制";
         InitializeUpdates();
@@ -69,6 +75,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        _windowGeometrySaveTimer.Stop();
+        SaveWindowGeometry();
         if (System.Windows.Application.Current is App app && !app.IsExiting) { e.Cancel = true; Hide(); }
         base.OnClosing(e);
     }
@@ -325,12 +333,25 @@ public partial class MainWindow : Window
     }
     private void SetNetworkLoginProgress(string message, bool error = false)
     {
+        if (error && IsCertificateTimeError(message))
+            message = "登录失败，请检查电脑的日期和时间是否正确，然后重试。";
         if (error) _network = null;
         NetworkLoginProgressText.Text = message;
         NetworkLoginProgressText.SetResourceReference(TextBlock.ForegroundProperty, error ? "DangerText" : "Muted");
         NetworkLoginProgressText.Visibility = Visibility.Visible;
         if (error) ShowFeedback(message, error: true);
         RefreshNetworkLoginButton();
+    }
+
+    private static bool IsCertificateTimeError(string message)
+    {
+        string value = message.ToLowerInvariant();
+        if (value.Contains("nottimevalid") || value.Contains("not time valid") ||
+            value.Contains("not yet valid") || value.Contains("notbefore") || value.Contains("not before") ||
+            value.Contains("notafter") || value.Contains("not after") || value.Contains("0x800b0101") ||
+            value.Contains("证书时间") || value.Contains("证书已过期") || value.Contains("证书尚未生效")) return true;
+        return (value.Contains("certificate") || value.Contains("cert") || value.Contains("x509")) &&
+            (value.Contains("expired") || value.Contains("validity period") || value.Contains("not valid yet"));
     }
     private void RefreshNetworkLoginButton()
     {

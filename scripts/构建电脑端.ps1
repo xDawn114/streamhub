@@ -17,6 +17,10 @@ param(
     [string]$WindowsSigningScript = '',
     [string]$SignedOwnedArtifactsRoot = '',
     [switch]$DeferInstallerSigning,
+    [string]$AssistanceArchive = '',
+    [string]$AssistanceSourceArchive = '',
+    [string]$AssistanceTlsArchive = '',
+    [string]$AssistanceTlsSourceArchive = '',
     [switch]$KeepBuildWorkspace,
     [ValidateRange(1,1024)][int]$MinimumFreeSpaceGB = 8
 )
@@ -132,7 +136,8 @@ $streaming = Join-Path $stage 'components\streaming'
 $remoteEngine = Join-Path $streaming 'remote'
 $tabletEngine = Join-Path $streaming 'tablet'
 $network = Join-Path $stage 'components\network'
-$assistanceReceiver = & (Join-Path $PSScriptRoot 'Prepare-AssistanceReceiver.ps1') -OutputRoot (Join-Path $packageWork 'assistance-inputs')
+$assistanceReceiver = & (Join-Path $PSScriptRoot 'Prepare-AssistanceReceiver.ps1') -OutputRoot (Join-Path $packageWork 'assistance-inputs') `
+    -Archive $AssistanceArchive -SourceArchive $AssistanceSourceArchive -TlsArchive $AssistanceTlsArchive -TlsSourceArchive $AssistanceTlsSourceArchive
 Copy-Required $assistanceReceiver (Join-Path $stage 'components/assistance-receiver')
 $display = Join-Path $stage 'components\display\VDD'
 $licenses = Join-Path $stage '来源与许可'

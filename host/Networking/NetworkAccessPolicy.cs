@@ -171,7 +171,7 @@ public static class NetworkAccessPolicy
 
     private static bool IsEndpointName(string name, string id, string title)
     {
-        if (name == "StreamHub-" + id || name == "我控制 · " + title || name == Prefix + "LAN-" + id ||
+        if (name == "StreamHub-" + id || name == "我控制 · " + title || name == "串流中心 · " + title || name == Prefix + "LAN-" + id ||
             id == "Network-UDP" && name == Prefix + "Outer-" + id) return true;
         string prefix = Prefix + "VPN-" + id + "-";
         return name.StartsWith(prefix, StringComparison.Ordinal) && name.Length == prefix.Length + 16 &&
